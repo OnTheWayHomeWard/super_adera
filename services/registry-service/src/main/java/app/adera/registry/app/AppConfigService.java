@@ -113,7 +113,14 @@ public class AppConfigService {
 		}
 		AppConfigRepository.LimitRow row = new AppConfigRepository.LimitRow(channel, perUser, perDay, distinct, total);
 		config.upsertLimit(appId, row, clock.instant());
-		audit.record(actor, "limit.set", "mini_app", appId.toString(), Map.of("channel", channel, "limits", String.valueOf(row)));
+		// Real fields, not row.toString(): null means unlimited and must stay null (Map.of would refuse it, hence a LinkedHashMap).
+		Map<String, Object> meta = new LinkedHashMap<>();
+		meta.put("channel", channel);
+		meta.put("maxPerUserPerDay", perUser);
+		meta.put("maxPerDay", perDay);
+		meta.put("maxDistinctUsersPerDay", distinct);
+		meta.put("maxTotal", total);
+		audit.record(actor, "limit.set", "mini_app", appId.toString(), meta);
 		return row;
 	}
 
@@ -179,7 +186,12 @@ public class AppConfigService {
 		}
 		AppConfigRepository.PaymentRow row = new AppConfigRepository.PaymentRow(currencies, allowHold, min, max);
 		config.upsertPayment(appId, row, clock.instant());
-		audit.record(actor, "payment.set", "mini_app", appId.toString(), Map.of("currencies", currencies, "allowHold", allowHold));
+		Map<String, Object> meta = new LinkedHashMap<>();
+		meta.put("currencies", currencies);
+		meta.put("allowHold", allowHold);
+		meta.put("minAmountMinor", min);
+		meta.put("maxAmountMinor", max);
+		audit.record(actor, "payment.set", "mini_app", appId.toString(), meta);
 		return row;
 	}
 

@@ -371,7 +371,7 @@ head -1 partner-public.pem                                                      
 <thead><tr><th>Action</th><th>Target type</th><th>Details recorded</th><th>Written by</th></tr></thead>
 <tbody>
 <tr><td><code>app.create</code>, <code>app.update</code>, <code>app.status</code>, <code>app.logo</code>, <code>app.logo.remove</code></td><td>mini_app</td><td>slug; field names changed; from and to status; new image id</td><td>registry-service</td></tr>
-<tr><td><code>capability.set</code>, <code>limit.set</code>, <code>environment.set</code>, <code>payment.set</code></td><td>mini_app</td><td>capability and state; channel and limits; environment and stored addresses; currencies</td><td>registry-service</td></tr>
+<tr><td><code>capability.set</code>, <code>limit.set</code>, <code>environment.set</code>, <code>payment.set</code></td><td>mini_app</td><td>capability and state; channel and the four limits (null = unlimited); environment and stored addresses; currencies, hold, min and max amount</td><td>registry-service</td></tr>
 <tr><td><code>key.register</code>, <code>key.revoke</code></td><td>partner_key (target = key id)</td><td>app id, environment, fingerprint</td><td>registry-service</td></tr>
 <tr><td><code>review.moderate</code>, <code>report.handle</code></td><td>app_review, app_report</td><td>new status, app id</td><td>registry-service</td></tr>
 <tr><td><code>staff.create</code>, <code>staff.update</code></td><td>staff</td><td>email and role; role and status</td><td>registry-service</td></tr>

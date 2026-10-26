@@ -3,6 +3,7 @@ import { Alert, Button, DatePicker, Form, Input, Select, Space, Table } from "an
 import type { Dayjs } from "dayjs";
 import { useMemo, useState } from "react";
 import { Link } from "react-router";
+import { summariseAudit } from "../lib/auditSummary";
 import { shortId } from "../lib/format";
 import type { AuditEvent } from "../lib/types";
 import { ErrorAlert, Json, Mono, Time, useCan } from "./common";
@@ -112,17 +113,10 @@ export function AuditTable({ pinnedTarget, pinnedApp, staff }: { pinnedTarget?: 
           { title: "Role", dataIndex: "actorRole", render: (v) => v ?? "-" },
           { title: "Action", dataIndex: "action", render: (v) => <Mono>{v}</Mono> },
           { title: "Target", render: (_, e) => (e.targetId ? (targetLink(e) ? <Link to={targetLink(e)!}>{e.targetType}: {shortId(e.targetId)}</Link> : `${e.targetType ?? ""}: ${e.targetId.length > 24 ? shortId(e.targetId) : e.targetId}`) : "-") },
-          { title: "Details", render: (_, e) => <span style={{ opacity: 0.8 }}>{summarise(e.meta)}</span> },
+          { title: "Details", render: (_, e) => <span style={{ opacity: 0.8 }}>{summariseAudit(e.action, e.meta)}</span> },
           { title: "IP", dataIndex: "ip", render: (v) => v ?? "-" },
         ]}
       />
     </div>
   );
-}
-
-function summarise(meta: Record<string, unknown>): string {
-  const text = Object.entries(meta)
-    .map(([k, v]) => `${k}=${typeof v === "object" ? JSON.stringify(v) : String(v)}`)
-    .join(" ");
-  return text.length > 90 ? `${text.slice(0, 90)}...` : text;
 }
