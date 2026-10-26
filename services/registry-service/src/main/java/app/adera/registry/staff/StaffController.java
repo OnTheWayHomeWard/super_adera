@@ -58,11 +58,33 @@ public class StaffController {
 	public StaffView create(@RequestHeader("X-Staff-Id") UUID id, @RequestHeader("X-Staff-Role") Role role,
 			@RequestBody Map<String, Object> body, HttpServletRequest request) {
 		role.require(Role.SUPER_ADMIN);
-		Role newRole = Role.parseOrNull(String.valueOf(body.get("role")));
-		if (newRole == null) {
-			throw new app.adera.registry.common.Errors.ValidationFailed("role", "must be one of VIEWER, ADMIN, SUPER_ADMIN");
+		// every problem at once, and unknown keys are refused (a typo like "rol" must not silently do nothing); PATCH does the same
+		Map<String, String> errors = new java.util.LinkedHashMap<>();
+		for (String key : body.keySet()) {
+			if (!key.equals("email") && !key.equals("role")) {
+				errors.put(key, "unknown field");
+			}
 		}
-		return StaffView.of(service.ensure(String.valueOf(body.get("email")), newRole, new Actor(id, role, ClientIp.of(request))), bootstrapEmail);
+		String email = null;
+		if (!(body.get("email") instanceof String raw)) {
+			errors.put("email", "required: the person's email address");
+		}
+		else {
+			try {
+				email = StaffService.normalise(raw);
+			}
+			catch (app.adera.registry.common.Errors.ValidationFailed e) {
+				errors.putAll(e.fields());
+			}
+		}
+		Role newRole = body.get("role") instanceof String r ? Role.parseOrNull(r) : null;
+		if (newRole == null) {
+			errors.put("role", "must be one of VIEWER, ADMIN, SUPER_ADMIN");
+		}
+		if (!errors.isEmpty()) {
+			throw new app.adera.registry.common.Errors.ValidationFailed(errors);
+		}
+		return StaffView.of(service.ensure(email, newRole, new Actor(id, role, ClientIp.of(request))), bootstrapEmail);
 	}
 
 	@PatchMapping("/staff/{identityId}")

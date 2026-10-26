@@ -493,6 +493,19 @@ class RegistryApiTests {
 	// ---------- staff ----------
 
 	@Test
+	void creatingStaffRefusesUnknownFieldsAndReportsEveryProblemAtOnce() throws Exception {
+		org.mockito.Mockito.clearInvocations(kratos);
+		mvc.perform(as(post("/admin/api/v1/staff"), Role.SUPER_ADMIN).contentType(MediaType.APPLICATION_JSON)
+			.content("{\"email\":\"typo@example.com\",\"role\":\"ADMIN\",\"rol\":\"VIEWER\"}"))
+			.andExpect(status().isBadRequest()).andExpect(jsonPath("$.error").value("validation_failed")).andExpect(jsonPath("$.fields.rol").value("unknown field"));
+		mvc.perform(as(post("/admin/api/v1/staff"), Role.SUPER_ADMIN).contentType(MediaType.APPLICATION_JSON).content("{\"email\":\"not-an-email\",\"role\":\"OWNER\",\"x\":1}"))
+			.andExpect(status().isBadRequest()).andExpect(jsonPath("$.fields.email").exists()).andExpect(jsonPath("$.fields.role").exists()).andExpect(jsonPath("$.fields.x").value("unknown field"));
+		mvc.perform(as(post("/admin/api/v1/staff"), Role.SUPER_ADMIN).contentType(MediaType.APPLICATION_JSON).content("{\"role\":\"ADMIN\"}"))
+			.andExpect(status().isBadRequest()).andExpect(jsonPath("$.fields.email").exists());
+		verify(kratos, never()).createStaffIdentity(any(), any());
+	}
+
+	@Test
 	void superAdminAddsStaffThroughKratosAndDisablingRevokesAccess() throws Exception {
 		UUID identity = UUID.randomUUID();
 		String email = "new-" + identity + "@example.com";
