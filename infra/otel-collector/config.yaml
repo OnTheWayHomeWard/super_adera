@@ -1,5 +1,6 @@
 # The one endpoint our services send telemetry to (OTLP: grpc :4317, http :4318).
-# Traces -> Tempo. Metrics -> exposed on :8889 for Prometheus to scrape.
+# Traces -> Tempo. The metrics pipeline (exposed on :8889) is ready for services that push OTLP metrics, but none does yet: our
+# services expose /actuator/prometheus and Prometheus scrapes them directly, so Prometheus does not scrape :8889.
 receivers:
   otlp:
     protocols:

@@ -466,11 +466,11 @@ python3 -I tests/e2e/s3tool.py delete &lt;key&gt;      # delete (only for cleani
 <h3 id="prometheus">Prometheus</h3>
 <ul>
 <li><strong>Why:</strong> the standard pull-based metrics store; every tool we run already exposes Prometheus metrics.</li>
-<li><strong>Config:</strong> <code>infra/prometheus/prometheus.yml</code>, 15 s scrape interval, 15-day retention (<code>--storage.tsdb.retention.time=15d</code> in compose), volume <code>prometheus_data</code>. Jobs: <code>prometheus</code>, <code>apisix</code> (<code>apisix:9091/apisix/prometheus/metrics</code>), <code>kratos</code> (<code>kratos:4434/admin/metrics/prometheus</code>), <code>rabbitmq</code> (<code>:15692</code>), <code>otel-collector</code> (<code>:8888</code> and <code>:8889</code>), <code>loki</code>, <code>tempo</code>, <code>alloy</code>, and our three services at <code>/actuator/prometheus</code>.</li>
+<li><strong>Config:</strong> <code>infra/prometheus/prometheus.yml</code>, 15 s scrape interval, 15-day retention (<code>--storage.tsdb.retention.time=15d</code> in compose), volume <code>prometheus_data</code>. Jobs: <code>prometheus</code>, <code>apisix</code> (<code>apisix:9091/apisix/prometheus/metrics</code>), <code>kratos</code> (<code>kratos:4434/admin/metrics/prometheus</code>), <code>rabbitmq</code> (<code>:15692</code>), <code>otel-collector</code> (<code>:8888</code> only; the empty <code>:8889</code> OTLP-metrics exporter was removed from the job on 2026-10-26), <code>loki</code>, <code>tempo</code>, <code>alloy</code>, and our three services at <code>/actuator/prometheus</code>.</li>
 <li><strong>Operate:</strong> UI http://localhost:9090. Verified on 2026-10-25: every job reports <code>up</code> (12 targets, since <code>otel-collector</code> has two).
 <pre><code>curl -s http://127.0.0.1:9090/api/v1/targets | python3 -c 'import json,sys;[print(t["labels"]["job"],t["health"]) for t in json.load(sys.stdin)["data"]["activeTargets"]]'
 curl -s "http://127.0.0.1:9090/api/v1/query?query=sum(rate(apisix_http_status%5B1m%5D))"</code></pre></li>
-<li><strong>Use:</strong> gateway rate/status/latency, JVM and HTTP metrics of the Java services, RabbitMQ queue depth. Note: the services export <em>metrics</em> by being scraped, not via OTLP; the collector's metrics pipeline (exposed on <code>:8889</code>) currently carries nothing because only traces are sent to it (<code>OTEL_TRACES_ENDPOINT</code>).</li>
+<li><strong>Use:</strong> gateway rate/status/latency, JVM and HTTP metrics of the Java services, RabbitMQ queue depth. Note: the services export <em>metrics</em> by being scraped, not via OTLP; the collector's metrics pipeline (exposed on <code>:8889</code>) carries nothing because only traces are sent to it (<code>OTEL_TRACES_ENDPOINT</code>).</li>
 <li><strong>Not done:</strong> Postgres/Redis exporters, alert rules.</li>
 </ul>
 
@@ -524,7 +524,7 @@ curl -s "http://127.0.0.1:9090/api/v1/query?query=sum(rate(apisix_http_status%5B
 <h3 id="otel-collector">OpenTelemetry Collector</h3>
 <ul>
 <li><strong>Why:</strong> one stable endpoint for every sender, so services never need to know about Tempo; backends can change without touching services.</li>
-<li><strong>Config:</strong> <code>infra/otel-collector/config.yaml</code>: OTLP receiver (grpc 4317, http 4318, published on localhost for services run from an IDE), <code>batch</code> processor, traces pipeline to <code>tempo:4317</code> (insecure, internal), metrics pipeline exposed for Prometheus on <code>:8889</code>, collector's own metrics on <code>:8888</code>.</li>
+<li><strong>Config:</strong> <code>infra/otel-collector/config.yaml</code>: OTLP receiver (grpc 4317, http 4318, published on localhost for services run from an IDE), <code>batch</code> processor, traces pipeline to <code>tempo:4317</code> (insecure, internal), metrics pipeline exposed on <code>:8889</code> (ready but unused: no service pushes OTLP metrics, so Prometheus does not scrape it), collector's own metrics on <code>:8888</code> (scraped).</li>
 <li><strong>Senders:</strong> APISIX (exporter address in <code>plugin_metadata</code> of <code>apisix.yaml</code>, <em>not</em> <code>config.yaml</code>), Kratos (<code>tracing.providers.otlp</code> in <code>kratos.yml</code>), Java services via <code>OTEL_TRACES_ENDPOINT=http://otel-collector:4318/v1/traces</code> (<code>management.opentelemetry.tracing.export.otlp.endpoint</code>).</li>
 <li><strong>Operate:</strong> <code>docker compose logs otel-collector</code>; health of its own pipeline is in Prometheus job <code>otel-collector</code>.</li>
 </ul>
