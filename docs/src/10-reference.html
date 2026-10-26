@@ -407,7 +407,7 @@
 <tr><td><code>synthetic_user_not_allowed</code></td><td>422</td><td>A <code>u_p_test_*</code> user on a PROD deployment (synthetic users exist in DEV only).</td></tr>
 <tr><td><code>user_unreachable</code></td><td>422</td><td>Alias unknown, user deleted or suspended, or no usable channel (all look the same on purpose).</td></tr>
 <tr><td><code>template_inactive</code>, <code>template_not_yet_valid</code>, <code>template_expired</code></td><td>422</td><td>Template switched off, before <code>validFrom</code>, or past <code>expiresAt</code>.</td></tr>
-<tr><td><code>param_invalid</code> (with <code>fields</code>)</td><td>422</td><td>Value not declared, missing required, too long, control characters, link-like text where links are not allowed, or wrong type.</td></tr>
+<tr><td><code>param_invalid</code> (with <code>fields</code>)</td><td>422</td><td>Value not declared, missing required, too long, control characters, link-like text where links are not allowed (scheme, www., host with a path/query/port, bare host with a strong ending, 3+ part host; <code>Hana.co</code> passes), or wrong type.</td></tr>
 <tr><td><code>quota_exceeded</code> (with <code>limit</code>, <code>channel</code>)</td><td>429</td><td><code>max_per_user_per_day</code>, <code>max_per_day</code>, <code>max_distinct_users_per_day</code> or <code>max_total</code>.</td></tr>
 <tr><td><code>service_unavailable</code></td><td>503</td><td>Registry or user-service unreachable; retry.</td></tr>
 </tbody></table></div>

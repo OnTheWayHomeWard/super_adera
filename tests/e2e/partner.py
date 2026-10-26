@@ -196,6 +196,8 @@ try:
     ok("callback URL with credentials -> 400 at once (not dropped later)", code == 400 and "callbackUrl" in r.get("fields", {}), f"{code} {r}")
     code, r, *_ = partner_call(key_id, "POST", "/v1/notifications", {**msg, "externalId": "job-data", "data": {"appId": "x"}})
     ok("push data key 'appId' (added by the server) -> 400 fields.data", code == 400 and "data" in r.get("fields", {}), f"{code} {r}")
+    code, r, *_ = partner_call(key_id, "POST", "/v1/notifications", {k: v for k, v in {**msg, "externalId": "job-link", "params": {"name": "evil.co/pay"}}.items() if k != "callbackUrl"})
+    ok("a link in a value -> 422 param_invalid", code == 422 and r.get("error") == "param_invalid", f"{code} {r}")
 
     print("synthetic test users (DEV only)")
     code, r, *_ = partner_call(key_id, "POST", "/v1/notifications", {"externalId": "synth-1", "userId": "u_p_test_ok", "templateId": template_id, "params": {"name": "Test"}})
@@ -247,6 +249,9 @@ try:
     ok("second SMS to the same user today -> 202 (limit is 2)", code == 202, f"{code} {r}")
     code, r, *_ = partner_call(key_id, "POST", "/v1/notifications", {k: v for k, v in {**msg, "externalId": "job-3"}.items() if k != "callbackUrl"})
     ok("third SMS to the same user today -> 429 quota_exceeded", code == 429 and r.get("error") == "quota_exceeded", f"{code} {r}")
+    # the value check runs before the quota check, so after the quota is used up "not param_invalid" proves the name passed it
+    code, r, *_ = partner_call(key_id, "POST", "/v1/notifications", {k: v for k, v in {**msg, "externalId": "job-hana", "params": {"name": "Hana.co"}}.items() if k != "callbackUrl"})
+    ok("the name Hana.co is not treated as a link (no param_invalid)", r.get("error") != "param_invalid" and code in (200, 202, 429), f"{code} {r}")
 
     print("in-app notification and inbox")
     st, tpl2 = staff.call("POST", G + "/admin/api/v1/notification/templates", {

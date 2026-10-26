@@ -27,7 +27,25 @@ public final class TemplateRules {
 	static final Pattern CODE = Pattern.compile("^[a-z0-9][a-z0-9_.-]{0,58}[a-z0-9]$");
 	static final Pattern PARAM_NAME = Pattern.compile("^[a-zA-Z][a-zA-Z0-9_]{0,29}$");
 	static final Pattern PLACEHOLDER = Pattern.compile("\\{([a-zA-Z][a-zA-Z0-9_]*)}");
-	static final Pattern LINK_LIKE = Pattern.compile("(?i)(https?:|www\\.|://|[a-z0-9-]+\\.(com|net|org|et|app|io|co|me|ly|xyz|info|biz|link|click)(/|\\b))");
+	/** Top-level domains that make a dotted word look like a host. */
+	private static final String TLDS = "com|net|org|et|app|io|co|me|ly|xyz|info|biz|link|click";
+	/** Of those, the ones no ordinary name or word ends with: a bare {@code evil.com} is a link, {@code Hana.co} is a name. */
+	private static final String STRONG_TLDS = "com|net|org|et|app|info|biz|xyz|link|click";
+	/**
+	 * What counts as a link inside a partner-supplied value (case-insensitive). Blocked:
+	 * <ol>
+	 * <li>a scheme: {@code http:}, {@code https:} or any {@code xyz://};</li>
+	 * <li>{@code www.};</li>
+	 * <li>a host with a known TLD followed by a path, query, fragment or port: {@code name.tld/path}, {@code name.co?x=1},
+	 * {@code name.com:8080};</li>
+	 * <li>a bare host with a strong TLD (com, net, org, et, app, info, biz, xyz, link, click): {@code evil.com};</li>
+	 * <li>a host of three or more labels ending in any known TLD: {@code login.evil.co}.</li>
+	 * </ol>
+	 * Allowed: ordinary text, and a single word with an ambiguous TLD ({@code co, me, io, ly}) and nothing after it, such as
+	 * {@code Hana.co} or {@code Sam.me}, which are names far more often than hosts.
+	 */
+	static final Pattern LINK_LIKE = Pattern.compile("(?i)(?:\\bhttps?:|://|\\bwww\\.|\\b[a-z0-9-]+\\.(?:" + TLDS + ")(?:[/?#]|:\\d)"
+			+ "|\\b[a-z0-9-]+\\.(?:" + STRONG_TLDS + ")\\b|\\b(?:[a-z0-9-]+\\.){2,}(?:" + TLDS + ")\\b)");
 	static final Map<String, Integer> MAX_LEN = Map.of("title", 100, "body", 1000, "sms", 320, "emailSubject", 150, "emailHtml", 20_000);
 
 	private TemplateRules() {
