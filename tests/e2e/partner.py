@@ -101,6 +101,9 @@ received = []
 class Hook(BaseHTTPRequestHandler):
     def do_POST(self):
         body = self.rfile.read(int(self.headers.get("Content-Length", 0)))
+        if self.path == "/fail":  # a partner server that is down and asks for a pause
+            self.send_response(503); self.send_header("Retry-After", "120"); self.end_headers()
+            return
         received.append((dict(self.headers), body))
         self.send_response(200); self.end_headers()
 
@@ -264,6 +267,19 @@ try:
     ok("shows in the user's inbox", st == 200 and isinstance(inbox, list) and any(i.get("title") == "Hello Abebe" for i in inbox), f"{st} {inbox}")
     st, c = staff.call("GET", G + "/api/v1/me/notifications/unread-count", None, {"Authorization": "Bearer " + session})
     ok("unread count is 1", st == 200 and c.get("count") == 1, c)
+
+    print("a failing callback is retried on the schedule and honours Retry-After")
+    code, r, *_ = partner_call(key_id, "POST", "/v1/notifications", {"externalId": "inapp-cb", "userId": alias, "templateId": tpl2.get("id"), "params": {"name": "Abebe"},
+                                                                    "callbackUrl": hook_url.replace("/hook", "/fail")})
+    ok("IN_APP with a callbackUrl accepted", code == 202, f"{code} {r}")
+    state = ""
+    for _ in range(15):
+        time.sleep(1)
+        state = psql("notification", f"SELECT c.status || ':' || c.attempts || ':' || round(extract(epoch from (c.next_attempt_at - now()))) FROM callback c JOIN notification n ON n.id = c.notification_id WHERE n.app_id = '{app_id}' AND n.external_id = 'inapp-cb'")
+        if state.startswith("PENDING:1:"):
+            break
+    waited = int(state.split(":")[2]) if state.startswith("PENDING:1:") else -1
+    ok("first failure: callback PENDING, 1 attempt, next try after the partner's Retry-After of 120 s (not the 1 minute schedule)", 100 <= waited <= 121, state)
 
     print("staff visibility")
     st, rows = staff.call("GET", f"{G}/admin/api/v1/notification/notifications?appId={app_id}", None, A)

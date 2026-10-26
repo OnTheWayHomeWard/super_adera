@@ -81,7 +81,7 @@ Limits are set per app and channel by staff (`null` = unlimited, `0` = none). A 
 ## 4. Callbacks
 
 If you send `callbackUrl`, we POST `{"event":"notification.status","notificationId":..,"externalId":..,"status":..,"channel":..,"reason":..,"at":..}`
-when the notification reaches a final status. Answer 2xx; otherwise we retry (1m doubling, up to 6h, 8 attempts). The URL must
+when the notification reaches a final status. Answer 2xx; otherwise we retry for 24 hours (1m, 2m, 4m, 8m, 16m, 32m, 1h, 2h, then every 4h, at most 15 attempts; a `Retry-After` header can lengthen a wait, never shorten it) and then give up. The URL must
 be public https on port 443/8443; private, loopback, link-local and cloud-metadata addresses are refused and redirects are not followed.
 Verify the signature with the key from `/.well-known/jwks.json` and de-duplicate on `Idempotency-Key`.
 

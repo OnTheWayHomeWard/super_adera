@@ -395,7 +395,7 @@ X-Adera-Signature: p9rAZAHZICwUSJuLTnMD6diz... (base64 RS256)
   "notificationId": "6bfb3f59-a8c6-4033-bcc0-b5a6562776e4"
 }</code></pre>
 <ul>
-<li>Answer <code>200</code> quickly; otherwise Adera retries (1 min doubling to 6 h, 8 attempts).</li>
+<li>Answer <code>200</code> quickly; otherwise Adera retries for 24 hours (1 m, 2 m, 4 m ... 2 h, then every 4 h).</li>
 <li>Verify the signature with the key at <code>/.well-known/jwks.json</code> (script in <a href="06-security.html#signing-response">Security</a>) and de-duplicate on <code>Idempotency-Key</code>.</li>
 <li>Production callbacks must be <code>https</code> on port 443 or 8443 at a public address.</li>
 <li>Safe retries: resend the identical request with the same <code>externalId</code>; you get <code>200</code> with <code>"replayed": true</code>.</li>

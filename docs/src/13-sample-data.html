@@ -137,9 +137,9 @@ python3 -I tests/e2e/seed_scenarios.py --no-outage  # skip the Mailpit stop (see
 <div class="table-wrap"><table>
 <thead><tr><th>Scenario</th><th>Why</th></tr></thead>
 <tbody>
-<tr><td>Notification status FAILED</td><td>Permanent failures exist only for Twilio and Resend HTTP 4xx errors (not used in DEV). Temporary errors retry eight times over hours, so FAILED would take a day of Mailpit downtime.</td></tr>
+<tr><td>Notification status FAILED</td><td>Permanent failures exist only for Twilio and Resend HTTP 4xx errors (not used in DEV). Temporary errors retry up to eight times over about an hour (30 s doubling), so FAILED would take an hour of Mailpit downtime.</td></tr>
 <tr><td>A RETRYING row that stays</td><td>The status lasts 30 to 120 seconds. The script shows it live, and the row ends SENT once Mailpit is back.</td></tr>
-<tr><td>Callback FAILED by exhausted retries</td><td>Eight attempts over about a day. One callback is FAILED at once (<code>invalid_url</code>); two are PENDING and will become FAILED by themselves.</td></tr>
+<tr><td>Callback FAILED by exhausted retries</td><td>Retries run for 24 hours (up to 15 attempts). One callback is FAILED at once (<code>invalid_url</code>); two are PENDING and will become FAILED by themselves.</td></tr>
 <tr><td><code>app_draft</code>, <code>app_paused</code></td><td>In DEV every app except KILLED may call. Only PROD refuses those states.</td></tr>
 <tr><td>Reports against reviews</td><td>The API takes reports against apps only.</td></tr>
 <tr><td>Notes on a report</td><td>The API takes a status only (OPEN, REVIEWED, DISMISSED); there is no note field.</td></tr>

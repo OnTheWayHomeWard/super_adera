@@ -70,6 +70,11 @@ public class DeliveryService {
 			store.markTerminal(id, Notification.EXPIRED, n.getReason() == null ? "expired" : n.getReason());
 			return;
 		}
+		if (n.getAttempts() > RetryPolicy.MAX_DELIVERY_ATTEMPTS) {
+			// claimed over and over without ever finishing (workers died on it): stop instead of looping every minute
+			store.markTerminal(id, Notification.FAILED, "max_attempts:worker_crash");
+			return;
+		}
 		// DEV only: the synthetic users (u_p_test_*) are not real people, so nothing is sent for them. Everyone else is delivered
 		// through the dev providers (console SMS, Mailpit), which are the sandbox.
 		if ("DEV".equals(n.getEnvironment()) && n.getUserAlias().startsWith(NotificationAcceptor.SYNTHETIC_PREFIX)) {
@@ -171,6 +176,15 @@ public class DeliveryService {
 			}
 		}
 		store.markSent(n.getId());
+	}
+
+	/** The worker caught an unexpected exception for this notification: it counts as a failed attempt and is backed off. */
+	public void recordUnexpectedFailure(UUID id) {
+		Notification n = repository.findById(id).orElse(null);
+		if (n != null && !n.isTerminal()) {
+			store.recordAttempt(id, n.getChannel(), "internal", "TRANSIENT", "internal_error");
+			retryOrGiveUp(n, "internal_error", true);
+		}
 	}
 
 	private boolean blockedByAllowlist(boolean real, String recipient) {

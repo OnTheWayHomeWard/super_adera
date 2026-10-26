@@ -13,7 +13,8 @@ import org.springframework.stereotype.Component;
 /**
  * Background delivery: every second, claim due notifications and deliver them. Claiming is atomic ("SKIP LOCKED") so any
  * number of service instances can run workers without sending a message twice, and a worker that dies mid-delivery has its
- * claim expire after 60 seconds and the notification picked up again.
+ * claim expire after 60 seconds and the notification picked up again (each claim counts as an attempt, so a message that keeps
+ * killing workers is failed after {@link RetryPolicy#MAX_DELIVERY_ATTEMPTS} claims instead of looping).
  */
 @Component
 public class DeliveryWorker {
@@ -58,8 +59,15 @@ public class DeliveryWorker {
 				delivery.deliver(id);
 			}
 			catch (RuntimeException e) {
-				// unexpected (a bug or a dependency): leave it PROCESSING; the claim expires and it is retried
+				// unexpected (a bug or a dependency): count it as a failed attempt and back off like any other failure, so a message
+				// that keeps blowing up is neither re-claimed every minute nor retried forever
 				log.error("delivering {} failed unexpectedly: {}", id, e.toString());
+				try {
+					delivery.recordUnexpectedFailure(id);
+				}
+				catch (RuntimeException again) {
+					log.error("could not reschedule {} either: {}", id, again.toString());
+				}
 			}
 		}
 		return ids.size();

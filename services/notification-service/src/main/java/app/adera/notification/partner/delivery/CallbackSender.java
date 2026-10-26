@@ -21,8 +21,37 @@ import org.springframework.stereotype.Component;
 @Component
 public class CallbackSender {
 
-	/** @param httpStatus 0 when no response was received; {@code blocked} when the address was refused before connecting */
-	public record Outcome(boolean delivered, boolean blocked, int httpStatus, String error) {
+	/**
+	 * @param httpStatus 0 when no response was received; {@code blocked} when the address was refused before connecting
+	 * @param retryAfter the partner's Retry-After header (seconds or an HTTP date) on a failed answer, else null
+	 */
+	public record Outcome(boolean delivered, boolean blocked, int httpStatus, String error, java.time.Duration retryAfter) {
+
+		public Outcome(boolean delivered, boolean blocked, int httpStatus, String error) {
+			this(delivered, blocked, httpStatus, error, null);
+		}
+
+	}
+
+	/** Seconds ("120") or an HTTP date; anything else, or a date in the past, means no instruction. */
+	static java.time.Duration parseRetryAfter(String header, Instant now) {
+		if (header == null || header.isBlank()) {
+			return null;
+		}
+		String value = header.trim();
+		try {
+			long seconds = Long.parseLong(value);
+			return seconds < 0 ? null : Duration.ofSeconds(Math.min(seconds, 7 * 86_400L));
+		}
+		catch (NumberFormatException notSeconds) {
+			try {
+				Instant at = java.time.ZonedDateTime.parse(value, java.time.format.DateTimeFormatter.RFC_1123_DATE_TIME).toInstant();
+				return at.isAfter(now) ? Duration.between(now, at) : null;
+			}
+			catch (java.time.format.DateTimeParseException e) {
+				return null;
+			}
+		}
 	}
 
 	private final SigningKeyHolder keys;
@@ -64,7 +93,9 @@ public class CallbackSender {
 				.POST(HttpRequest.BodyPublishers.ofByteArray(body))
 				.build(), HttpResponse.BodyHandlers.discarding());
 			int status = response.statusCode();
-			return new Outcome(status >= 200 && status < 300, false, status, status >= 200 && status < 300 ? null : "http_" + status);
+			boolean ok = status >= 200 && status < 300;
+			return new Outcome(ok, false, status, ok ? null : "http_" + status,
+					ok ? null : parseRetryAfter(response.headers().firstValue("Retry-After").orElse(null), Instant.now()));
 		}
 		catch (InterruptedException e) {
 			Thread.currentThread().interrupt();
