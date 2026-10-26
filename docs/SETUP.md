@@ -270,6 +270,7 @@ Phone numbers must be valid E.164 (`+1 555…` is rejected). Spec: `docs/kratos-
 
 ## 9. Gateway (APISIX)
 
+- CORS (global rule in `infra/apisix/apisix.yaml`): allowed origin `http://localhost:3000` (dev; replace before production), exposed response headers `X-Request-Id` and `X-Total-Count` (so a browser app on another origin can read list totals).
 - Plugins enabled (list in `config.yaml` **replaces** the defaults; add a plugin there before using it): `request-id`, `cors`, `prometheus`, `opentelemetry`, `limit-count`, `forward-auth`, `proxy-rewrite`, `mocking`.
 - Routes (`apisix.yaml`): `/kratos/admin/*` → 403; `POST /kratos/self-service/*` → limited to 10/min per IP (OTP send/verify); other `/kratos/*` → 120/min; `/api/v1/me/avatar` → session required, 20/min; other `/api/v1/me/**` → session required, 300/min (the old temporary `/api/ping` is gone).
 - `forward-auth` on the `/api/v1/me` routes calls `user-service` (`/internal/auth/verify`); on a Kratos outage it returns 503 (not 401). APISIX sends `X-Gateway-Secret` (from `USER_GATEWAY_SECRET`) both to the verify call and to the upstream.
