@@ -57,10 +57,7 @@ public class ReviewAdminController {
 	@GetMapping("/reports")
 	public org.springframework.http.ResponseEntity<List<Map<String, Object>>> reports(@RequestParam(required = false) String status, @RequestParam(required = false) UUID appId,
 			@RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "50") int size) {
-		String s = status == null || status.isBlank() ? null : status.toUpperCase(java.util.Locale.ROOT);
-		if (s != null && !java.util.Set.of("OPEN", "REVIEWED", "DISMISSED").contains(s)) {
-			throw new app.adera.registry.common.Errors.ValidationFailed("status", "must be OPEN, REVIEWED or DISMISSED");
-		}
+		String s = status == null || status.isBlank() ? null : ReviewService.reportStatus(status);
 		return org.springframework.http.ResponseEntity.ok().header("X-Total-Count", String.valueOf(query.countReports(appId, s)))
 			.body(query.reports(appId, s, Math.max(0, page), Math.max(1, Math.min(size, 100))));
 	}

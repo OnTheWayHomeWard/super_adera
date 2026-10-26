@@ -260,12 +260,33 @@ class ReviewReportTests {
 	@Test
 	void anUnknownStatusFilterIsRefusedOnTheReportListLikeOnReviewsAndApps() throws Exception {
 		mvc.perform(as(get("/admin/api/v1/reports").param("status", "bogus"), Role.VIEWER)).andExpect(status().isBadRequest())
-			.andExpect(jsonPath("$.error").value("validation_failed")).andExpect(jsonPath("$.fields.status").value("must be OPEN, REVIEWED or DISMISSED"));
+			.andExpect(jsonPath("$.error").value("validation_failed")).andExpect(jsonPath("$.fields.status").value("must be OPEN, REVIEWED (or RESOLVED, the same) or DISMISSED"));
 		mvc.perform(as(get("/admin/api/v1/reviews").param("status", "bogus"), Role.VIEWER)).andExpect(status().isBadRequest()).andExpect(jsonPath("$.fields.status").exists());
 		mvc.perform(as(get("/admin/api/v1/apps").param("status", "bogus"), Role.VIEWER)).andExpect(status().isBadRequest()).andExpect(jsonPath("$.fields.status").exists());
 		for (String ok : new String[] { "open", "REVIEWED", "dismissed", "" }) {
 			mvc.perform(as(get("/admin/api/v1/reports").param("status", ok), Role.VIEWER)).andExpect(status().isOk());
 		}
+	}
+
+	@Test
+	void resolvedIsAnotherWordForReviewedOnInputAndReviewedIsWhatIsStoredAndReturned() throws Exception {
+		UUID app = liveApp();
+		String reportId = JsonPath.read(report(app, UUID.randomUUID(), "{\"reason\":\"SPAM\"}"), "$.reportId");
+		for (String word : new String[] { "RESOLVED", "resolved", "Resolved" }) {
+			handle(reportId, "{\"status\":\"OPEN\"}", Role.ADMIN);
+			String res = handle(reportId, "{\"status\":\"" + word + "\"}", Role.ADMIN);
+			assertThat(JsonPath.<String>read(res, "$.status")).as(word).isEqualTo("REVIEWED");
+		}
+		mvc.perform(as(get("/admin/api/v1/audit").param("target", reportId).param("limit", "1"), Role.ADMIN)).andExpect(jsonPath("$[0].meta.status").value("REVIEWED"));
+		// the list filter takes the alias too, and still answers REVIEWED
+		mvc.perform(as(get("/admin/api/v1/reports").param("appId", app.toString()).param("status", "resolved"), Role.VIEWER))
+			.andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(1)).andExpect(jsonPath("$[0].status").value("REVIEWED"));
+		mvc.perform(as(get("/admin/api/v1/reports").param("appId", app.toString()).param("status", "reviewed"), Role.VIEWER)).andExpect(jsonPath("$.length()").value(1));
+		// anything else is still refused, with a message that names the alias
+		mvc.perform(as(patch("/admin/api/v1/reports/{id}", reportId), Role.ADMIN).contentType(MediaType.APPLICATION_JSON).content("{\"status\":\"DONE\"}"))
+			.andExpect(status().isBadRequest()).andExpect(jsonPath("$.fields.status").value("must be OPEN, REVIEWED (or RESOLVED, the same) or DISMISSED"));
+		mvc.perform(as(patch("/admin/api/v1/reports/{id}", reportId), Role.ADMIN).contentType(MediaType.APPLICATION_JSON).content("{}"))
+			.andExpect(status().isBadRequest()).andExpect(jsonPath("$.fields.status").exists());
 	}
 
 }

@@ -157,10 +157,7 @@ public class ReviewService {
 	@Transactional
 	public AppReport handleReport(UUID reportId, String status, Object rawReason, Actor actor) {
 		AppReport report = reports.findById(reportId).orElseThrow(() -> new Errors.NotFound("report"));
-		String s = String.valueOf(status).toUpperCase(Locale.ROOT);
-		if (!Set.of("OPEN", "REVIEWED", "DISMISSED").contains(s)) {
-			throw new Errors.ValidationFailed("status", "must be OPEN, REVIEWED or DISMISSED");
-		}
+		String s = reportStatus(status);
 		String reason = reason(rawReason);
 		report.handle(s, actor == null ? null : actor.id(), reason, clock.instant());
 		Map<String, Object> meta = new java.util.LinkedHashMap<>();
@@ -171,6 +168,21 @@ public class ReviewService {
 		}
 		audit.record(actor, "report.handle", "app_report", reportId.toString(), meta);
 		return report;
+	}
+
+	/**
+	 * A report status as staff may write it: OPEN, REVIEWED or DISMISSED in any letter case, plus RESOLVED as another word
+	 * for REVIEWED (the value that is stored and returned is always REVIEWED).
+	 */
+	public static String reportStatus(Object raw) {
+		String s = String.valueOf(raw).toUpperCase(Locale.ROOT);
+		if (s.equals("RESOLVED")) {
+			s = "REVIEWED";
+		}
+		if (!Set.of("OPEN", "REVIEWED", "DISMISSED").contains(s)) {
+			throw new Errors.ValidationFailed("status", "must be OPEN, REVIEWED (or RESOLVED, the same) or DISMISSED");
+		}
+		return s;
 	}
 
 	/** The optional staff note: a string of at most 500 characters; blank means none. */
