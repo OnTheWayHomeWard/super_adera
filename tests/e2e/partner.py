@@ -194,6 +194,8 @@ try:
     ok("link inside a value -> refused", code in (400, 422), f"{code} {r}")
     code, r, *_ = partner_call(key_id, "POST", "/v1/notifications", {**msg, "externalId": "job-cb", "callbackUrl": "https://user:pw@example.com/hook"})
     ok("callback URL with credentials -> 400 at once (not dropped later)", code == 400 and "callbackUrl" in r.get("fields", {}), f"{code} {r}")
+    code, r, *_ = partner_call(key_id, "POST", "/v1/notifications", {**msg, "externalId": "job-data", "data": {"appId": "x"}})
+    ok("push data key 'appId' (added by the server) -> 400 fields.data", code == 400 and "data" in r.get("fields", {}), f"{code} {r}")
 
     print("synthetic test users (DEV only)")
     code, r, *_ = partner_call(key_id, "POST", "/v1/notifications", {"externalId": "synth-1", "userId": "u_p_test_ok", "templateId": template_id, "params": {"name": "Test"}})

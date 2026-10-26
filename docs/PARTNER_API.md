@@ -46,7 +46,9 @@ Requests must come from a server address staff registered for this deployment's 
   ```
   `userId` is the user's pseudonymous id for YOUR app. You never choose a channel: a `DIRECT` template goes by SMS (if the
   user has a phone and your app has `notify.sms`), otherwise email (`notify.email`); an `IN_APP` template goes to the
-  user's inbox plus a push.
+  user's inbox plus a push. In the push `data` every value is a string (nested objects/arrays as JSON strings; `null` left
+  out) and Adera adds `notificationId` and `appId`: those two names, and the Firebase-reserved `from`, `message_type`,
+  `google*`, `gcm*`, are refused in your `data` (`400 validation_failed`, `fields.data`).
 * `GET /v1/notifications/{externalId}`: current status.
 
 `externalId` makes the call idempotent: the same request again returns `200` with `"replayed": true`; the same id with a

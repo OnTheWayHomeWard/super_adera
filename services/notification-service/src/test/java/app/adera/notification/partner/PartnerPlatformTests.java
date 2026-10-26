@@ -338,6 +338,25 @@ class PartnerPlatformTests {
 	}
 
 	@Test
+	void pushDataKeepsNestedValuesAsJsonAndRefusesTheServerKeys() throws Exception {
+		String template = createTemplate("IN_APP", "{\"en\":{\"title\":\"Hello {name}\",\"body\":\"Your ride is here\"}}", "");
+		String base = "\"userId\":\"" + alias + "\",\"templateId\":\"" + template + "\",\"params\":{\"name\":\"Abebe\"}";
+		for (String key : new String[] { "notificationId", "appId", "from", "google.x" }) {
+			mvc.perform(signed(post("/v1/notifications"), "POST", "/v1/notifications", "{\"externalId\":\"pd-" + key + "\"," + base + ",\"data\":{\"" + key + "\":\"x\"}}"))
+				.andExpect(status().isBadRequest()).andExpect(jsonPath("$.error").value("validation_failed")).andExpect(jsonPath("$.fields.data").isNotEmpty());
+		}
+		String ext = "pd-ok-" + UUID.randomUUID();
+		assertThat(sendRaw("{\"externalId\":\"" + ext + "\"," + base + ",\"data\":{\"screen\":\"ride\",\"driver\":{\"name\":\"Abebe\",\"plate\":\"A1\"},\"stops\":[1,2]}}")).isEqualTo(202);
+		deliveries.runOnce();
+		assertThat(statusOf(ext)).isEqualTo("SENT");
+		Map<String, String> sent = push.sent.get(push.sent.size() - 1).data();
+		assertThat(sent).containsEntry("screen", "ride").containsEntry("stops", "[1,2]");
+		assertThat(json.readTree(sent.get("driver")).get("plate").asString()).isEqualTo("A1");
+		assertThat(sent.get("driver")).doesNotContain("=");
+		assertThat(sent).containsKeys("notificationId", "appId");
+	}
+
+	@Test
 	void aMessageThatWouldNotFitTheInboxColumnsIsRefusedAtAcceptance() throws Exception {
 		String body = "{\"appId\":\"" + appId + "\",\"code\":\"big-" + UUID.randomUUID().toString().substring(0, 8)
 				+ "\",\"kind\":\"IN_APP\",\"category\":\"TRANSACTIONAL\",\"params\":[{\"name\":\"name\",\"maxLength\":500}],"

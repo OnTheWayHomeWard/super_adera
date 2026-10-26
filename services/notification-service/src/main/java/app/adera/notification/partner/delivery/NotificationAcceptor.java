@@ -97,6 +97,13 @@ public class NotificationAcceptor {
 		if (body.get("data") != null) {
 			if (body.get("data") instanceof Map<?, ?> m && mapper.writeValueAsBytes(m).length <= 2048) {
 				data = (Map<String, Object>) m;
+				for (Object key : m.keySet()) {
+					String problem = PushPayload.reservedKeyProblem(String.valueOf(key));
+					if (problem != null) {
+						errors.put("data", problem);
+						break;
+					}
+				}
 			}
 			else {
 				errors.put("data", "must be a JSON object of at most 2048 bytes");

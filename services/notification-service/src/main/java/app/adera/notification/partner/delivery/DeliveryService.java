@@ -2,7 +2,6 @@ package app.adera.notification.partner.delivery;
 
 import java.time.Clock;
 import java.time.Instant;
-import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -21,6 +20,7 @@ import app.adera.notification.sms.SmsProvider;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import tools.jackson.databind.json.JsonMapper;
 
 /**
  * Delivers one queued notification: re-checks the user (their phone, email and mute may have changed since the request),
@@ -44,9 +44,11 @@ public class DeliveryService {
 	private final FcmProvider fcm;
 	private final Set<String> allowlist;
 	private final Clock clock;
+	private final JsonMapper mapper;
 
 	public DeliveryService(NotificationRepository repository, TemplateService templates, UserDirectoryClient directory,
-			NotificationStore store, SmsProvider sms, EmailProvider email, FcmProvider fcm, NotificationProperties props, Clock clock) {
+			NotificationStore store, SmsProvider sms, EmailProvider email, FcmProvider fcm, NotificationProperties props, Clock clock, JsonMapper mapper) {
+		this.mapper = mapper;
 		this.repository = repository;
 		this.templates = templates;
 		this.directory = directory;
@@ -154,10 +156,7 @@ public class DeliveryService {
 		if (user.pushTokens().isEmpty()) {
 			store.recordAttempt(n.getId(), "IN_APP", fcm.name(), "SKIPPED", "no_devices");
 		}
-		Map<String, String> payload = new LinkedHashMap<>();
-		n.getData().forEach((k, v) -> payload.put(k, String.valueOf(v)));
-		payload.put("notificationId", n.getId().toString());
-		payload.put("appId", n.getAppId().toString());
+		Map<String, String> payload = PushPayload.build(n.getData(), n.getId(), n.getAppId(), mapper);
 		for (String token : user.pushTokens()) {
 			FcmProvider.PushResult result = fcm.send(token, text.title(), text.body(), payload);
 			switch (result) {
