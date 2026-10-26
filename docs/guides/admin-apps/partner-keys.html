@@ -209,7 +209,7 @@ HTTP 404  {"error": "not_found"}
 DELETE /admin/api/v1/apps/$APP_ID/keys/$KEY_ID
 HTTP 403  {"error": "insufficient_role"}</code></pre>
 <h4>What the partner sees</h4>
-<p>Calls signed with a revoked or expired key are refused. The notification service remembers a key for about 15 seconds, so the refusal may start up to 15 seconds after the revoke (the backoffice says "immediately"; in practice it is within a quarter of a minute):</p>
+<p>Calls signed with a revoked or expired key are refused. The notification service remembers a key for about 15 seconds (an accepted trade-off, not a bug), so the refusal may start up to 15 seconds after the revoke (the backoffice says "immediately"; in practice it is within a quarter of a minute):</p>
 <pre class="out nocopy"><code>revoked key, 16 s after the revoke:
 HTTP 401  {"error": "key_revoked_or_expired"}
 
