@@ -71,7 +71,7 @@
 <div class="table-wrap"><table>
 <thead><tr><th>Area</th><th>Content</th></tr></thead>
 <tbody>
-<tr><td>Users (15)</td><td>Phones <code>+251900000001</code> to <code>015</code>, emails <code>demo.*@example.com</code>, first names starting with "Demo ". Phone-only (7), email-only (4), both (4). Amharic and English names, gender/language/market/time-zone variety, location with city only, with coordinates only, with both, cleared again, or none; <code>extra</code> JSON as nested objects, arrays, numbers, booleans, Amharic keys, a 2 KB text; 3 avatars; 11 devices (Android and iOS, one deactivated); 33 pseudonymous ids over 6 apps (two users have none); 9 mute preferences. States: 13 ACTIVE, 1 SUSPENDED (u11), 1 DELETED (u12).</td></tr>
+<tr><td>Users (15)</td><td>Real Kratos <strong>password accounts</strong>, addresses already verified (list with passwords in section 2a). Phones <code>+251900000001</code> to <code>015</code>, emails <code>demo.*@example.com</code>, first names starting with "Demo ". Phone-only (7), email-only (4), both (4). Amharic and English names, gender/language/market/time-zone variety, location with city only, with coordinates only, with both, cleared again, or none; <code>extra</code> JSON as nested objects, arrays, numbers, booleans, Amharic keys, a 2 KB text; 3 avatars; 11 devices (Android and iOS, one deactivated); 33 pseudonymous ids over 6 apps (two users have none); 9 mute preferences. States: 13 ACTIVE, 1 SUSPENDED (u11), 1 DELETED (u12).</td></tr>
 <tr><td>Apps</td><td>The 5 from <code>seed_demo.py</code> (kept) plus <code>demo-quota</code> (LIVE, at every notification limit), <code>demo-killed</code> (LIVE then KILLED) and <code>demo-paused</code> (LIVE, PAUSED, LIVE, PAUSED, with edits and a capability change in between).</td></tr>
 <tr><td>Reviews</td><td>food 11 (10 visible, avg 3.30; all ratings 1 to 5, with and without text, English and Amharic, one edited, one hidden spam), ride 3 (avg 3.00), paused 2 (1 hidden), market none; one review deleted by its author; one hidden and restored.</td></tr>
 <tr><td>Reports</td><td>11 reports with all five reasons: food has 5 OPEN (one of them reopened), 1 REVIEWED, 1 DISMISSED; ride 1 OPEN, 1 REVIEWED; market 1 OPEN, 1 DISMISSED.</td></tr>
@@ -84,14 +84,39 @@
 <pre><code>python3 -I tests/e2e/seed_scenarios.py              # create or complete (safe to repeat, about 9 minutes the first time, 3 later)
 python3 -I tests/e2e/seed_scenarios.py --check      # read-only verification (masking, roles, counts)
 python3 -I tests/e2e/seed_scenarios.py --remove     # delete everything it created, nothing else
+python3 -I tests/e2e/seed_scenarios.py --wipe-users # delete only the end users and what hangs on them (devices, aliases, inbox, notifications to them, usage rows, reviews, reports, avatars); apps, keys, templates and staff stay. A normal run then re-creates the users
 python3 -I tests/e2e/seed_scenarios.py --no-outage  # skip the Mailpit stop (see below)</code></pre>
 <ul>
 <li>Run it from the repository root, after <code>tests/e2e/seed_demo.py</code>. It keeps ids in <code>tests/e2e/.seed-scenarios-state.json</code> (gitignored) but decides from the servers' own data, so a lost state file does not duplicate users, apps, templates or staff.</li>
-<li>It is slow because the gateway allows 10 sign-up/login submits a minute per address. It paces itself and waits out 429 answers.</li>
+<li>It is slow because the gateway allows 5 sign-ups and 10 sign-ins a minute per IP (and 10 sign-in tries per phone/email per 15 minutes). Every user is registered with a password, verified with the code read from the dev endpoint, and logged in with the password. It paces itself and waits out 429 answers.</li>
 <li>Mailpit is stopped for about 40 seconds, and started again even if the script fails, to make email delivery fail for real: that produces RETRYING and EXPIRED.</li>
 <li><code>--remove</code> uses the Kratos admin API for identities and SQL for the rest, because the platform has no delete for users, apps, templates, notifications, reviews, reports or audit rows. It also deletes avatar and logo files, the fake addresses' one-time-code log rows, recomputes the ratings of the older apps with the service's own formula, and resets their allowed addresses. The five older apps stay.</li>
 <li>After a removal and a new run the counts were identical (same checks, 306 passed).</li>
 </ul></section>
+
+<section><h2 id="users">2a. Seeded users and their DEV-ONLY passwords</h2>
+<p>Sign in with the phone (or email) and the password below, through <code>POST /kratos/self-service/login</code> (method <code>password</code>). The passwords are the surname in lower case, with digits added where it would be shorter than 6 characters. They exist only in the dev stack: never copy them anywhere else. A user with both a phone and an email can sign in with either; both are verified.</p>
+<div class="table-wrap"><table>
+<thead><tr><th>Key</th><th>Name</th><th>Phone</th><th>Email</th><th>Password</th><th>State</th></tr></thead>
+<tbody>
+<tr><td>u01</td><td>Demo Abebe Kebede</td><td>+251900000001</td><td>demo.abebe@example.com</td><td><code>kebede</code></td><td>ACTIVE</td></tr>
+<tr><td>u02</td><td>Demo ሰላም ተስፋዬ</td><td>+251900000002</td><td>-</td><td><code>tesfaye2</code></td><td>ACTIVE</td></tr>
+<tr><td>u03</td><td>Demo Hana Tesfaye</td><td>-</td><td>demo.hana@example.com</td><td><code>tesfaye</code></td><td>ACTIVE</td></tr>
+<tr><td>u04</td><td>Demo Dawit</td><td>+251900000004</td><td>-</td><td><code>dawit123</code></td><td>ACTIVE</td></tr>
+<tr><td>u05</td><td>Demo Mulu Alemu</td><td>+251900000005</td><td>demo.mulu@example.com</td><td><code>alemu123</code></td><td>ACTIVE</td></tr>
+<tr><td>u06</td><td>Demo Selam Girma</td><td>+251900000006</td><td>-</td><td><code>girma123</code></td><td>ACTIVE</td></tr>
+<tr><td>u07</td><td>Demo Yonas Bekele</td><td>-</td><td>demo.yonas@example.com</td><td><code>bekele</code></td><td>ACTIVE</td></tr>
+<tr><td>u08</td><td>Demo ሄኖክ ገብሩ</td><td>-</td><td>demo.henok@example.com</td><td><code>gebru123</code></td><td>ACTIVE</td></tr>
+<tr><td>u09</td><td>Demo Tigist Haile</td><td>-</td><td>demo.tigist@example.com</td><td><code>haile123</code></td><td>ACTIVE</td></tr>
+<tr><td>u10</td><td>Demo Kidist Worku</td><td>+251900000010</td><td>-</td><td><code>worku123</code></td><td>ACTIVE</td></tr>
+<tr><td>u11</td><td>Demo Suspended Sam</td><td>+251900000011</td><td>demo.suspended@example.com</td><td><code>sam12345</code></td><td>SUSPENDED (signs in at Kratos, refused by the gateway: 403 account_suspended)</td></tr>
+<tr><td>u12</td><td>Demo Deleted Dina</td><td>+251900000012</td><td>-</td><td><code>dina1234</code></td><td>DELETED (sessions revoked, refused by the gateway)</td></tr>
+<tr><td>u13</td><td>Demo NoApps</td><td>+251900000013</td><td>-</td><td><code>noapps</code></td><td>ACTIVE, no apps</td></tr>
+<tr><td>u14</td><td>Demo Blank</td><td>+251900000014</td><td>-</td><td><code>blank1</code></td><td>ACTIVE, empty profile</td></tr>
+<tr><td>u15</td><td>Demo Fully Filled</td><td>+251900000015</td><td>demo.full@example.com</td><td><code>filled</code></td><td>ACTIVE, everything filled</td></tr>
+</tbody></table></div>
+<p>The users were wiped and re-created on 2026-10-26 when end-user sign-in changed from one-time codes to passwords; their ids are therefore new (the pseudonymous app ids, reviews, reports, inbox rows and counters were re-created for them). Verification codes for these addresses are readable at <code>GET :8085/dev/messages?to=&lt;address&gt;</code> in dev. Dashboard staff are unchanged (<code>demo-*@adera.local</code>, emailed code + authenticator).</p>
+</section>
 
 <section><h2 id="matrix">3. Scenario matrix</h2>
 <p>"u01" and so on are the seeded users. API paths are under the gateway (<code>/api/v1</code> for users, <code>/admin/api/v1</code> for staff, <code>/v1</code> for partners).</p>
@@ -170,7 +195,7 @@ python3 -I tests/e2e/seed_scenarios.py --no-outage  # skip the Mailpit stop (see
 <tr><td>15</td><td>The partner status check <code>GET /v1/notifications/{id}</code> shows <code>PROCESSING</code> while a provider call hangs; with Mailpit stopped, the first attempt took over 15 seconds to fail (the cause was not investigated). A slow provider can hold worker slots.</td><td>Stop Mailpit, send an EMAIL notification, watch the status.</td></tr>
 <tr><td>16</td><td>When a limit is exhausted, <code>max_total</code> is reported even if per-user or per-day limits are also hit (checks run in a fixed order); partners cannot tell which others apply.</td><td>demo-quota SMS after the 5th message: any user gets max_total.</td></tr>
 <tr><td>17</td><td>The browser console shows one 400 and one 403 during staff sign-in (every role). They come from the sign-in steps, not from the data screens.</td><td>Open the dashboard with developer tools, sign in.</td></tr>
-<tr><td>18</td><td>Operational: sign-up and login are limited to 10 submits a minute per address, so seeding 15 users takes minutes; one-time-code limits are per recipient (SMS 5/hour). Re-running <code>--remove</code> clears the fake addresses' log rows so a recreation is not blocked.</td><td>Run the script.</td></tr>
+<tr><td>18</td><td>Operational: sign-up is limited to 5 submits a minute per IP and sign-in to 10, so seeding 15 users takes minutes; verification-code limits are per recipient (SMS 5/hour). Re-running <code>--remove</code> clears the fake addresses' log rows so a recreation is not blocked.</td><td>Run the script.</td></tr>
 </tbody></table></div>
 </section>
 
