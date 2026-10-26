@@ -239,14 +239,11 @@
 
 {
   "error": "not_found"
-}</code></pre><p><code>404 not_found</code> for an unknown id. A value that is not a UUID is rejected by the framework before the controller with a <em>different</em> body shape (see Known issues):</p>
+}</code></pre><p><code>404 not_found</code> for an unknown id. A value that is not a UUID is <code>400 invalid_request</code> (same shape as every other error):</p>
 <pre class="out"><code>HTTP/1.1 400 Bad Request
 
 {
-  "timestamp": "2026-10-26T10:56:44.942Z",
-  "status": 400,
-  "error": "Bad Request",
-  "path": "/admin/api/v1/users/notauuid"
+  "error": "invalid_request"
 }</code></pre><h4>Use in a client</h4><p>Render <code>masked: true</code> as a banner. Treat <code>extra</code> as arbitrary JSON written by the user and the apps (do not trust or execute it).</p>
 </div></details>
 </section>

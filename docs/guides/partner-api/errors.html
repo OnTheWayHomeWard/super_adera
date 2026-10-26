@@ -82,15 +82,15 @@
 <tr><td><code>ttlSeconds</code> 59, 604801, <code>"3600"</code> or <code>3600.5</code></td><td><code>{"ttlSeconds":"must be 60 to 604800 (how long we keep trying)"}</code></td></tr>
 </tbody></table></div>
 
-<h2 id="framework">Answers that are not in the <code>{"error": code}</code> shape</h2>
-<p>These come from the web framework, not from Adera's API code. They have the framework's body and, verified, <strong>no signature headers</strong> (<code>404</code>, <code>405</code> and <code>415</code> were checked). Do not treat a missing signature on these as an attack; do treat a missing signature on an <code>{"error": code}</code> answer as suspicious:</p>
+<h2 id="framework">Protocol mistakes (404, 405, 415) and unexpected failures</h2>
+<p>These come from the web framework, not from Adera's API code. <strong>Since 2026-10-26</strong> they use the same <code>{"error": code}</code> shape and are <strong>signed</strong> like every other answer under <code>/v1/</code> (before, they had the framework's default body and no signature). The table lists what you will see; an unexpected <code>500</code> may still come without a signature if it is raised outside the signed path:</p>
 <div class="table-wrap"><table><thead><tr><th>Status</th><th>Body</th><th>Cause</th><th>Fix</th></tr></thead><tbody>
-<tr><td>404</td><td><code>{"timestamp":"...","status":404,"error":"Not Found","path":"/v1/nothing"}</code></td><td>The path does not exist (also a trailing slash: <code>/v1/notifications/doc-first/</code>).</td><td>Use the documented paths.</td></tr>
-<tr><td>405</td><td><code>{"timestamp":"...","status":405,"error":"Method Not Allowed","path":"/v1/notifications"}</code></td><td>Wrong method: <code>DELETE</code> or <code>POST</code> on <code>/v1/notifications/{externalId}</code>, <code>GET</code> on <code>/v1/notifications</code> (there is no list endpoint), <code>PUT</code> on templates.</td><td>Use <code>GET</code> for templates and status, <code>POST</code> to send.</td></tr>
-<tr><td>415</td><td><code>{"timestamp":"...","status":415,"error":"Unsupported Media Type","path":"/v1/notifications"}</code></td><td>A <code>POST</code> without <code>Content-Type: application/json</code>.</td><td>Send the header.</td></tr>
+<tr><td>404</td><td><code>{"error":"not_found"}</code></td><td>The path does not exist (also a trailing slash: <code>/v1/notifications/doc-first/</code>).</td><td>Use the documented paths.</td></tr>
+<tr><td>405</td><td><code>{"error":"method_not_allowed"}</code> (with an <code>Allow</code> header)</td><td>Wrong method: <code>DELETE</code> or <code>POST</code> on <code>/v1/notifications/{externalId}</code>, <code>GET</code> on <code>/v1/notifications</code> (there is no list endpoint), <code>PUT</code> on templates.</td><td>Use <code>GET</code> for templates and status, <code>POST</code> to send.</td></tr>
+<tr><td>415</td><td><code>{"error":"unsupported_media_type"}</code></td><td>A <code>POST</code> without <code>Content-Type: application/json</code>.</td><td>Send the header.</td></tr>
 <tr><td>429</td><td>the gateway's own body (not signed)</td><td>More than 600 requests per 60 s from your IP (120 on the JWKS route).</td><td>Slow down; see the <code>X-RateLimit-*</code> headers.</td></tr>
 <tr><td>502, 503, 504</td><td>gateway body (not signed)</td><td>The gateway cannot reach the service.</td><td>Retry later with backoff, same <code>externalId</code>.</td></tr>
-<tr><td>500</td><td>framework body (probably not signed)</td><td>An unexpected failure inside Adera. <em>Not reproduced.</em></td><td>Retry later with the same <code>externalId</code>; if it persists, give Adera the <code>X-Request-Id</code> header and your <code>externalId</code>.</td></tr>
+<tr><td>500</td><td><code>{"error":"internal_error"}</code> (probably not signed)</td><td>An unexpected failure inside Adera. <em>Not reproduced.</em></td><td>Retry later with the same <code>externalId</code>; if it persists, give Adera the <code>X-Request-Id</code> header and your <code>externalId</code>.</td></tr>
 </tbody></table></div>
 
 <h2 id="retry-guide">Retry guide</h2>

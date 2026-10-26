@@ -355,6 +355,19 @@ class PartnerPlatformTests {
 	}
 
 	@Test
+	void frameworkErrorsUnderV1AreSignedAndInTheErrorShape() throws Exception {
+		for (String[] c : new String[][] { { "GET", "/v1/nothing", "404", "not_found" }, { "DELETE", "/v1/notifications/x", "405", "method_not_allowed" } }) {
+			MvcResult r = mvc.perform(signed(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.request(org.springframework.http.HttpMethod.valueOf(c[0]), c[1]), c[0], c[1], ""))
+				.andExpect(status().is(Integer.parseInt(c[2]))).andExpect(jsonPath("$.error").value(c[3])).andReturn();
+			assertThat(r.getResponse().getHeader("X-Adera-Signature")).as(c[1] + " is signed").isNotBlank();
+		}
+		// wrong content type on a POST
+		MvcResult wrongType = mvc.perform(signed(post("/v1/notifications"), "POST", "/v1/notifications", "x").contentType(MediaType.TEXT_PLAIN))
+			.andExpect(status().isUnsupportedMediaType()).andExpect(jsonPath("$.error").value("unsupported_media_type")).andReturn();
+		assertThat(wrongType.getResponse().getHeader("X-Adera-Signature")).isNotBlank();
+	}
+
+	@Test
 	void aKeyOfTheOtherEnvironmentIsRefusedWithWrongEnvironment() throws Exception {
 		String template = directTemplate();
 		appIn("DEV", "PROD", List.of("notify.sms"), List.of());

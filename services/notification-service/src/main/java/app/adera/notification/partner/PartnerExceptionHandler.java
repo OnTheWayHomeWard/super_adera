@@ -5,6 +5,14 @@ import java.util.Map;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.http.MediaType;
+import org.springframework.web.HttpMediaTypeNotAcceptableException;
+import org.springframework.web.HttpMediaTypeNotSupportedException;
+import org.springframework.web.HttpRequestMethodNotSupportedException;
+import org.springframework.web.bind.MissingServletRequestParameterException;
+import org.springframework.web.multipart.support.MissingServletRequestPartException;
+import org.springframework.web.servlet.NoHandlerFoundException;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -39,6 +47,14 @@ public class PartnerExceptionHandler {
 		return ResponseEntity.badRequest().body(Map.of("error", "invalid_request"));
 	}
 
+	/** A body that fails bean validation (the Kratos courier endpoints): same shape as the other services. */
+	@ExceptionHandler(org.springframework.web.bind.MethodArgumentNotValidException.class)
+	ResponseEntity<Map<String, Object>> beanValidation(org.springframework.web.bind.MethodArgumentNotValidException e) {
+		Map<String, String> fields = new LinkedHashMap<>();
+		e.getBindingResult().getFieldErrors().forEach(f -> fields.putIfAbsent(f.getField(), f.getDefaultMessage()));
+		return ResponseEntity.badRequest().contentType(MediaType.APPLICATION_JSON).body(Map.of("error", "validation_failed", "fields", fields));
+	}
+
 	@ExceptionHandler(MissingRequestHeaderException.class)
 	ResponseEntity<Map<String, Object>> missingHeader(MissingRequestHeaderException e) {
 		return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "unauthorized"));
@@ -47,6 +63,44 @@ public class PartnerExceptionHandler {
 	@ExceptionHandler(ServletRequestBindingException.class)
 	ResponseEntity<Map<String, Object>> binding(ServletRequestBindingException e) {
 		return ResponseEntity.badRequest().body(Map.of("error", "invalid_request"));
+	}
+
+	// ---- framework errors that never reach a controller: same {"error": code} shape as everything else ----
+
+	@ExceptionHandler(HttpRequestMethodNotSupportedException.class)
+	ResponseEntity<Map<String, Object>> methodNotAllowed(HttpRequestMethodNotSupportedException e) {
+		ResponseEntity.BodyBuilder b = ResponseEntity.status(HttpStatus.METHOD_NOT_ALLOWED).contentType(MediaType.APPLICATION_JSON);
+		if (e.getSupportedHttpMethods() != null && !e.getSupportedHttpMethods().isEmpty()) {
+			b.allow(e.getSupportedHttpMethods().toArray(new org.springframework.http.HttpMethod[0]));
+		}
+		return b.body(Map.of("error", "method_not_allowed"));
+	}
+
+	@ExceptionHandler(HttpMediaTypeNotSupportedException.class)
+	ResponseEntity<Map<String, Object>> unsupportedMediaType(HttpMediaTypeNotSupportedException e) {
+		return ResponseEntity.status(HttpStatus.UNSUPPORTED_MEDIA_TYPE).contentType(MediaType.APPLICATION_JSON).body(Map.of("error", "unsupported_media_type"));
+	}
+
+	@ExceptionHandler(HttpMediaTypeNotAcceptableException.class)
+	ResponseEntity<Map<String, Object>> notAcceptable(HttpMediaTypeNotAcceptableException e) {
+		return ResponseEntity.status(HttpStatus.NOT_ACCEPTABLE).contentType(MediaType.APPLICATION_JSON).body(Map.of("error", "not_acceptable"));
+	}
+
+	@ExceptionHandler({ NoResourceFoundException.class, NoHandlerFoundException.class })
+	ResponseEntity<Map<String, Object>> unknownRoute(Exception e) {
+		return ResponseEntity.status(HttpStatus.NOT_FOUND).contentType(MediaType.APPLICATION_JSON).body(Map.of("error", "not_found"));
+	}
+
+	@ExceptionHandler(MissingServletRequestParameterException.class)
+	ResponseEntity<Map<String, Object>> missingParameter(MissingServletRequestParameterException e) {
+		return ResponseEntity.badRequest().contentType(MediaType.APPLICATION_JSON)
+			.body(Map.of("error", "validation_failed", "fields", Map.of(e.getParameterName(), "is required")));
+	}
+
+	@ExceptionHandler(MissingServletRequestPartException.class)
+	ResponseEntity<Map<String, Object>> missingPart(MissingServletRequestPartException e) {
+		return ResponseEntity.badRequest().contentType(MediaType.APPLICATION_JSON)
+			.body(Map.of("error", "validation_failed", "fields", Map.of(e.getRequestPartName(), "is required")));
 	}
 
 }

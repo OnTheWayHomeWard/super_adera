@@ -142,7 +142,7 @@ Content-Type: application/json
 <h4>An endpoint that is not exposed</h4>
 <pre><code>curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8085/actuator/env</code></pre>
 <pre class="out"><code>404</code></pre>
-<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th>Error code</th><th>When it happens</th></tr></thead><tbody><tr><td><strong>404</strong></td><td><code>(Spring default JSON)</code></td><td>Any actuator endpoint that is not exposed.</td></tr></tbody></table></div>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th>Error code</th><th>When it happens</th></tr></thead><tbody><tr><td><strong>404</strong></td><td><code>not_found</code></td><td>Any actuator endpoint that is not exposed.</td></tr></tbody></table></div>
 </div></details>
 <details class="endpoint" id="ep-ops-get-actuator-info">
 <summary><span class="method m-get">GET</span><span class="path">/actuator/info</span><span class="sum">Build info (empty today)</span></summary>
@@ -189,7 +189,7 @@ application_ready_time_seconds{main_application_class="app.adera.notification.No
 <pre><code>sum by (uri, status) (rate(http_server_requests_seconds_count{job="notification-service"}[5m]))
 hikaricp_connections_active{job="user-service"}
 jvm_memory_used_bytes{area="heap", job="registry-service"}</code></pre>
-<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th>Error code</th><th>When it happens</th></tr></thead><tbody><tr><td><strong>406</strong></td><td><code>(Spring default JSON)</code></td><td><code>Accept</code> does not allow <code>text/plain</code>.</td></tr></tbody></table></div>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th>Error code</th><th>When it happens</th></tr></thead><tbody><tr><td><strong>406</strong></td><td><code>not_acceptable</code></td><td><code>Accept</code> does not allow <code>text/plain</code>.</td></tr></tbody></table></div>
 <h4>How to use it</h4><ul><li>There are <strong>no custom Adera delivery metrics</strong> (no counters for SMS sent, notifications failed, queue depth of our workers). The comment in <code>prometheus.yml</code> says "JVM, HTTP and delivery metrics"; only JVM/HTTP exist. Delivery visibility today comes from the notification log and the staff API (<a href="08b-staff-api.html">8b</a>).</li></ul>
 </div></details>
 <details class="endpoint" id="ep-ops-get-dev-messages">
@@ -247,7 +247,7 @@ Content-Type: text/plain; charset=utf-8
 {
   "error_msg": "404 Route Not Found"
 }</code></pre>
-<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th>Error code</th><th>When it happens</th></tr></thead><tbody><tr><td><strong>404</strong></td><td><code>(Spring default JSON)</code></td><td>Dev endpoints are off (<code>NOTIFY_DEV_ENDPOINTS=false</code>): the controller does not exist.</td></tr></tbody></table></div>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th>Error code</th><th>When it happens</th></tr></thead><tbody><tr><td><strong>404</strong></td><td><code>not_found</code></td><td>Dev endpoints are off (<code>NOTIFY_DEV_ENDPOINTS=false</code>): the controller does not exist.</td></tr></tbody></table></div>
 <h4>How to use it</h4><ul><li>Wait for the code with a short loop (the courier is asynchronous: Kratos queues the message and notification-service gets it a moment later); the e2e scripts poll once per second for up to 15-20 seconds.</li><li>Delivery to Mailpit is separate: the same email is also in the Mailpit inbox (see below).</li></ul>
 </div></details>
 <details class="endpoint" id="ep-ops-delete-dev-messages">
@@ -265,7 +265,7 @@ Content-Type: text/plain; charset=utf-8
 <h4>Example request</h4>
 <pre><code>curl -s -X DELETE "http://127.0.0.1:8085/dev/messages"</code></pre>
 <pre class="out"><code>HTTP/1.1 200 OK</code></pre>
-<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th>Error code</th><th>When it happens</th></tr></thead><tbody><tr><td><strong>404</strong></td><td><code>(Spring default JSON)</code></td><td>Dev endpoints are off.</td></tr></tbody></table></div>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th>Error code</th><th>When it happens</th></tr></thead><tbody><tr><td><strong>404</strong></td><td><code>not_found</code></td><td>Dev endpoints are off.</td></tr></tbody></table></div>
 </div></details>
 <details class="endpoint" id="ep-ops-get-jwks">
 <summary><span class="method m-get">GET</span><span class="path">/.well-known/jwks.json</span><span class="sum">Adera's public signing key (JWKS)</span></summary>

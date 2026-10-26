@@ -88,7 +88,7 @@ Content-Type: application/json
 <tr><td>400</td><td><code>fields.file</code> = "could not read the image, it may be corrupt"</td><td>truncated or damaged image</td><td>ask for another picture</td></tr>
 <tr><td>400</td><td><code>fields.file</code> = "image dimensions are too large"</td><td>more than 12000 px a side or 40 megapixels</td><td>downscale on the device first</td></tr>
 <tr><td>413</td><td><code>{"error":"file_too_large"}</code></td><td>over 5 MiB (or over the 6 MB transport limit)</td><td>compress or downscale on the device first (a 1024 px JPEG is far below the limit)</td></tr>
-<tr><td>415</td><td>framework default JSON <code>{"timestamp":...,"status":415,"error":"Unsupported Media Type","path":"/api/v1/me/avatar"}</code></td><td>the request was not <code>multipart/form-data</code> (for example JSON)</td><td>fix the client; note the body does not have the <code>error</code> code shape</td></tr>
+<tr><td>415</td><td><code>{"error":"unsupported_media_type"}</code></td><td>the request was not <code>multipart/form-data</code> (for example JSON)</td><td>fix the client</td></tr>
 <tr><td>401 / 403 / 429 / 503</td><td>see the Error table</td><td>limit is 20 uploads per minute per IP</td><td></td></tr>
 </tbody></table></div>
 <h4>Using it in the app</h4>

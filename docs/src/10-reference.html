@@ -335,8 +335,12 @@
 <tr><td><code>unauthorized</code></td><td>401</td><td>all three</td><td>A trust filter rejected the call: missing/wrong <code>X-Gateway-Secret</code> or <code>X-Internal-Secret</code>, or missing/invalid <code>X-User-Id</code> / <code>X-Staff-Id</code> / <code>X-Staff-Role</code>. Also a missing required header in registry and notification handlers. In normal use this means someone bypassed the gateway.</td></tr>
 <tr><td><code>validation_failed</code></td><td>400</td><td>user, registry, notification (partner/admin)</td><td>Well-formed JSON with unacceptable content; <code>fields</code> maps each field name to a message (all problems reported at once).</td></tr>
 <tr><td><code>invalid_json</code></td><td>400</td><td>user-service</td><td>The body is not parseable JSON.</td></tr>
-<tr><td><code>invalid_request</code></td><td>400</td><td>registry, notification (partner/admin)</td><td>Unreadable body, wrong type for a path/query parameter (for example a non-UUID id), or a binding problem.</td></tr>
-<tr><td><code>not_found</code></td><td>404</td><td>all three</td><td>Unknown id, or not yours (registry: app, key, review, report, staff; user: profile/identity/alias/user; notification: notification, template, inbox item).</td></tr>
+<tr><td><code>invalid_request</code></td><td>400</td><td>all three</td><td>Unreadable or missing body (registry, notification; user-service says <code>invalid_json</code>), wrong type for a path/query parameter (for example a non-UUID id), or a binding problem. Since 2026-10-26 user-service also answers it for a bad path or query value.</td></tr>
+<tr><td><code>method_not_allowed</code></td><td>405</td><td>all three</td><td>Wrong HTTP method for an existing path. The <code>Allow</code> header lists the allowed methods.</td></tr>
+<tr><td><code>unsupported_media_type</code></td><td>415</td><td>all three</td><td>Wrong or missing <code>Content-Type</code> (for example not <code>application/json</code>, or not multipart for an upload).</td></tr>
+<tr><td><code>not_acceptable</code></td><td>406</td><td>all three</td><td>The <code>Accept</code> header allows no format the endpoint can produce.</td></tr>
+<tr><td><code>internal_error</code></td><td>500</td><td>all three</td><td>An unexpected failure that no handler maps (the body carries no details; see the service log).</td></tr>
+<tr><td><code>not_found</code></td><td>404</td><td>all three</td><td>Unknown id or route, or not yours (registry: app, key, review, report, staff; user: profile/identity/alias/user; notification: notification, template, inbox item).</td></tr>
 <tr><td><code>file_too_large</code></td><td>413</td><td>user, registry</td><td>Avatar over 5 MiB (user-service) or logo over 2 MiB (registry-service), or the multipart limits.</td></tr>
 <tr><td><code>conflict</code></td><td>409</td><td>user, registry</td><td>A database uniqueness violation not covered by a specific code (for example another account already owns this email or phone).</td></tr>
 <tr><td><code>identity_service_unavailable</code></td><td>503</td><td>user, registry</td><td>Kratos could not be reached or answered 5xx. Deliberately 503, not 401: the session may be fine.</td></tr>
@@ -374,7 +378,7 @@
 <thead><tr><th>Code</th><th>HTTP</th><th>When</th></tr></thead>
 <tbody>
 <tr><td><code>delivery_failed</code> (with <code>code</code>)</td><td>502</td><td>The provider failed: <code>twilio_http_&lt;status&gt;</code>, <code>twilio_unreachable</code>, <code>resend_http_&lt;status&gt;</code>, <code>resend_unreachable</code>, <code>mailpit_unreachable</code>. 502 on purpose, so Kratos keeps the message and retries.</td></tr>
-<tr><td>Spring default body <code>{"timestamp","status":400,"error":"Bad Request","path"}</code></td><td>400</td><td>A courier request body that fails validation (<code>to</code>/<code>body</code> or <code>recipient</code>/<code>subject</code> blank). Verified 2026-10-25 against the running service. This is the one place that does not use the <code>{"error": code}</code> shape (no handler for bean-validation failures on this path).</td></tr>
+<tr><td><code>validation_failed</code> (courier)</td><td>400</td><td>A courier request body that fails validation (<code>to</code>/<code>body</code> or <code>recipient</code>/<code>subject</code> blank). Until 2026-10-26 this answered with Spring's default body; it now uses the standard shape with <code>fields</code>.</td></tr>
 <tr><td><code>invalid_request</code></td><td>400</td><td>The courier body is not valid JSON.</td></tr>
 <tr><td>200 with <code>status</code> <code>suppressed</code> / <code>skipped</code></td><td>200</td><td>Not an error: per-recipient limit reached, or recipient not on the live allowlist. Kratos must not retry.</td></tr>
 </tbody></table></div>
