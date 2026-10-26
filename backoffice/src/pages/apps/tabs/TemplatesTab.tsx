@@ -5,7 +5,7 @@ import { applyApiError, ConfirmButton, ErrorAlert, Mono, RoleGate, StatusTag, Ti
 import { api } from "../../../lib/client";
 import { useApiQuery } from "../../../lib/hooks";
 import { LANGS, type Lang, type Template } from "../../../lib/types";
-import { buildTemplatePayload, emptyTemplateForm, toTemplateForm, undeclaredPlaceholders, type TemplateFormValues } from "../templateForm";
+import { buildTemplatePayload, emptyTemplateForm, TEMPLATE_EDIT_NOTICE, toTemplateForm, undeclaredPlaceholders, type TemplateFormValues } from "../templateForm";
 
 export function TemplatesTab({ appId }: { appId: string }) {
   const list = useApiQuery<Template[]>(["templates", appId], "notification/templates", { appId });
@@ -145,6 +145,7 @@ function TemplateDrawer({ appId, template, onClose, onSaved }: { appId: string; 
       }
     >
       <ErrorAlert error={error} title="Could not save" />
+      {template && <Alert type="warning" showIcon message="Changes also apply to messages already queued for delivery" description={TEMPLATE_EDIT_NOTICE} style={{ marginBottom: 12 }} />}
       {info && <Alert type="info" showIcon message={info} style={{ marginBottom: 12 }} />}
       {missing.length > 0 && <Alert type="warning" showIcon style={{ marginBottom: 12 }} message={`Used in the texts but not declared as a param: ${missing.map((m) => `{${m}}`).join(", ")}`} />}
       <Form form={form} layout="vertical" initialValues={template ? toTemplateForm(template) : emptyTemplateForm} onFinish={submit} scrollToFirstError>

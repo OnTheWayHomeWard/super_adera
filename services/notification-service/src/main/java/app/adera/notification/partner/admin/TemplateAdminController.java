@@ -50,7 +50,11 @@ public class TemplateAdminController {
 		return TemplateView.of(templates.get(id), clock);
 	}
 
-	/** Change the words, declared values, category, validity window, or switch it on/off ({"active": false}). */
+	/**
+	 * Change the words, declared values, category, validity window, or switch it on/off ({"active": false}). Templates are
+	 * rendered when a message is DELIVERED, so an edit also changes messages that were accepted earlier and are still queued
+	 * or retrying (the text of the current version is used). The backoffice says so above the edit form.
+	 */
 	@PatchMapping("/{id}")
 	public TemplateView update(@RequestHeader("X-Staff-Id") UUID staffId, @RequestHeader("X-Staff-Role") StaffRole role,
 			@RequestHeader(value = "X-Client-IP", required = false) String ip, @PathVariable UUID id, @RequestBody Map<String, Object> body) {

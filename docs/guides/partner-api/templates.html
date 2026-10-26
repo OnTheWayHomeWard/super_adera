@@ -173,7 +173,7 @@ params {"name":"A","reference":"x"*21,"zzz":1} -> 422 {"error":"param_invalid","
 <h2 id="validity">Validity, versions and timing</h2>
 <ul>
 <li>The validity window and <code>active</code> flag are checked <strong>when you send</strong> (acceptance). A notification already accepted is still delivered if the template is switched off or expires afterwards.</li>
-<li>The template <strong>text is read at delivery time</strong>, so an edit by staff between acceptance and delivery applies to messages still in the queue. The version that was current at acceptance is stored for staff, but the delivered text is the current one.</li>
+<li>The template <strong>text is read at delivery time</strong>, so an edit by staff between acceptance and delivery applies to messages still in the queue (a deliberate decision, 2026-10-26: Adera keeps this behaviour and the staff edit form warns about it; for a different message staff create a new template). The version that was current at acceptance is stored for staff, but the delivered text is the current one.</li>
 <li>Replaying a request (same <code>externalId</code>) returns the stored result even if the template has meanwhile become unusable.</li>
 </ul>
 

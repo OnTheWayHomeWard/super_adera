@@ -1,7 +1,7 @@
 import dayjs from "dayjs";
 import { describe, expect, it } from "vitest";
 import type { Template } from "../../lib/types";
-import { buildTemplatePayload, cleanContent, emptyTemplateForm, toTemplateForm, undeclaredPlaceholders } from "./templateForm";
+import { buildTemplatePayload, cleanContent, emptyTemplateForm, TEMPLATE_EDIT_NOTICE, toTemplateForm, undeclaredPlaceholders } from "./templateForm";
 
 const t: Template = {
   id: "t1",
@@ -52,5 +52,12 @@ describe("helpers", () => {
   });
   it("finds placeholders that are not declared", () => {
     expect(undeclaredPlaceholders({ params: [{ name: "a", maxLength: 1, required: true, allowLinks: false }], content: { en: { body: "{a} {b}", sms: "{c}" } } }).sort()).toEqual(["b", "c"]);
+  });
+});
+
+describe("template edit notice", () => {
+  it("says that queued messages are affected too", () => {
+    expect(TEMPLATE_EDIT_NOTICE).toMatch(/already queued/);
+    expect(TEMPLATE_EDIT_NOTICE).toMatch(/when a message is sent/);
   });
 });

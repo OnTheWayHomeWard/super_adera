@@ -107,3 +107,6 @@ export function undeclaredPlaceholders(values: Pick<TemplateFormValues, "params"
   }
   return [...missing];
 }
+
+/** Shown above the edit form: templates are rendered when a message is delivered, not when it was accepted. */
+export const TEMPLATE_EDIT_NOTICE = "Changes also apply to messages already queued for delivery: the text is filled in when a message is sent, using the template as it is then.";
