@@ -102,7 +102,7 @@
 <tr><td>Extra data (free-form JSON)</td><td>hidden; only the <em>names</em> of the keys are listed</td><td>the whole JSON</td></tr>
 <tr><td>First and last name, status, language, market, tier, timestamps, location summary (country, region, city), device counts, mute preferences</td><td colspan="2">shown to everyone (names are not masked)</td></tr>
 </tbody></table></div>
-<div class="callout warn"><span class="label">Search still sees the full value</span><p>A VIEWER can type a full email or phone into the search box and the server matches it against the unmasked data. That tells a viewer whether a given address or number is registered, even though the result row is masked. The screen says so ("You can still search by the full value"). Keep this in mind when deciding who gets VIEWER.</p></div>
+<div class="callout ok"><span class="label">Search and masking</span><p>A VIEWER can search by name or user id only. Phone and email are masked for a VIEWER, so they are not searched: typing a full phone or email finds nothing. ADMIN and SUPER_ADMIN search all fields. (Changed 2026-10-26.)</p></div>
 </section>
 
 <section><h2 id="signin">2. Signing in</h2>

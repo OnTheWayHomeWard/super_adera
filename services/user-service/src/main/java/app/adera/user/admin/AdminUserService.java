@@ -67,11 +67,13 @@ public class AdminUserService {
 			else {
 				String like = "%" + escapeLike(term.toLowerCase()) + "%";
 				params.put("like", like);
-				where.append(" AND (lower(email) LIKE :like ESCAPE '\\' OR lower(phone_e164) LIKE :like ESCAPE '\\'"
-						+ " OR lower(first_name) LIKE :like ESCAPE '\\' OR lower(last_name) LIKE :like ESCAPE '\\'"
+				// A VIEWER sees phone and email masked, so matching on them would let them confirm a full value they cannot see.
+				boolean contactVisible = role.atLeast(StaffRole.ADMIN);
+				where.append(" AND (" + (contactVisible ? "lower(email) LIKE :like ESCAPE '\\' OR lower(phone_e164) LIKE :like ESCAPE '\\' OR " : "")
+						+ "lower(first_name) LIKE :like ESCAPE '\\' OR lower(last_name) LIKE :like ESCAPE '\\'"
 						+ " OR lower(coalesce(first_name, '') || ' ' || coalesce(last_name, '')) LIKE :like ESCAPE '\\'");
 				String digits = term.replaceAll("[^0-9]", "");
-				if (digits.length() >= 3 && digits.length() == term.replaceAll("[\\s+()-]", "").length()) {
+				if (contactVisible && digits.length() >= 3 && digits.length() == term.replaceAll("[\\s+()-]", "").length()) {
 					// a phone typed with spaces or dashes still matches
 					params.put("digits", "%" + digits + "%");
 					where.append(" OR regexp_replace(phone_e164, '[^0-9]', '', 'g') LIKE :digits");

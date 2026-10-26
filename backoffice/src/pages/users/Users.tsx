@@ -29,7 +29,7 @@ export function UsersPage() {
   return (
     <div>
       <PageHeading title="Users" subtitle="Registered users (customers)" />
-      {!canSeeAll && <Alert type="info" showIcon style={{ marginBottom: 12 }} message="Phone numbers and emails are masked for your role. You can still search by the full value." />}
+      {!canSeeAll && <Alert type="info" showIcon style={{ marginBottom: 12 }} message="Phone numbers and emails are masked for your role. You can search by name or user id; searching by phone or email needs the ADMIN role." />}
       <Space style={{ marginBottom: 12 }} wrap>
         <Input.Search
           allowClear

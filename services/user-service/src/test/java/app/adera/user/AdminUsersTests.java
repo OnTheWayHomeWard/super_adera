@@ -113,11 +113,18 @@ class AdminUsersTests {
 	}
 
 	@Test
-	void viewersGetMaskedContactDetailsButCanStillSearch() throws Exception {
+	void viewersGetMaskedContactDetailsAndSearchOnlyByNameOrId() throws Exception {
 		String t = tag();
 		UUID id = user("Hana" + t, "Girma", "hana." + t + "@example.com", "+251911234567");
-		mvc.perform(as(get("/admin/api/v1/users").param("q", "hana." + t), "VIEWER")).andExpect(jsonPath("$.items[0].id").value(id.toString()))
+		mvc.perform(as(get("/admin/api/v1/users").param("q", "Hana" + t + " Gir"), "VIEWER")).andExpect(jsonPath("$.items[0].id").value(id.toString()))
 			.andExpect(jsonPath("$.items[0].email").value("h***@e***.com")).andExpect(jsonPath("$.items[0].phone").value("+251*****4567"));
+		mvc.perform(as(get("/admin/api/v1/users").param("q", id.toString()), "VIEWER")).andExpect(jsonPath("$.total").value(1));
+		// contact details are masked for a VIEWER, so searching them would reveal them: it finds nothing
+		for (String q : new String[] { "hana." + t, "hana." + t + "@example.com", "+251911234567", "251 91-1234", "911234567" }) {
+			mvc.perform(as(get("/admin/api/v1/users").param("q", q), "VIEWER")).andExpect(jsonPath("$.total").value(0));
+		}
+		// an ADMIN can see the full value, so can search it
+		mvc.perform(as(get("/admin/api/v1/users").param("q", "hana." + t), "ADMIN")).andExpect(jsonPath("$.items[0].id").value(id.toString()));
 		mvc.perform(as(get("/admin/api/v1/users/{id}", id), "VIEWER")).andExpect(status().isOk())
 			.andExpect(jsonPath("$.masked").value(true)).andExpect(jsonPath("$.email").value("h***@e***.com")).andExpect(jsonPath("$.phone").value("+251*****4567"))
 			.andExpect(jsonPath("$.dateOfBirth").value((Object) null)).andExpect(jsonPath("$.gender").value((Object) null))
