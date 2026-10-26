@@ -63,9 +63,144 @@ routes:
         content_type: application/json
         response_example: '{"error":"forbidden"}'
 
-  # Anything that submits a login/registration step (sends or checks an OTP): strict per-IP limit.
-  # This is the first line of SMS-cost protection; per-recipient limits come in the notification service.
-  - id: kratos-self-service-submit
+  # ---- App-user sign-in flows (native API): one route per step so each gets the limit it needs. -------------------------
+  # Passwords can be guessed and Kratos has NO lockout of its own, so these limits are the only brake on guessing:
+  # per IP, and per identifier (the phone/email being tried, read from the JSON body) so rotating IPs does not help.
+  # Codes sent by SMS/email cost money and can be used to annoy a person: registration and recovery are the tightest.
+
+  # Password / code sign-in (and the staff authenticator step, which has no identifier).
+  - id: kratos-login-submit
+    uri: /kratos/self-service/login
+    methods: [POST]
+    priority: 25
+    plugins:
+      proxy-rewrite:
+        regex_uri: ["^/kratos/(.*)", "/$1"]
+        # Native (API) flows carry no cookies, so there is nothing for CSRF checks to protect, but Kratos refuses a
+        # native-flow submit that has an Origin header, and every browser fetch() POST sends one (the dashboard does).
+        headers:
+          remove: ["Origin", "Cookie"]   # a browser also sends any cookie stored for 127.0.0.1 (cookies ignore the port); Kratos refuses a native flow that carries one
+      limit-count:
+        rules:
+          - count: 10
+            time_window: 60
+            key: "kratos-login-submit:${remote_addr}"
+          - count: 10
+            time_window: 900
+            key: "kratos-login-submit:${post_arg.identifier}"
+        rejected_code: 429
+        policy: redis
+        redis_host: redis
+        redis_port: 6379
+        redis_username: apisix
+        redis_password: ${{APISIX_REDIS_PASSWORD}}
+    upstream_id: kratos-public
+
+  # Sign-up: sends a verification code by SMS/email.
+  - id: kratos-registration-submit
+    uri: /kratos/self-service/registration
+    methods: [POST]
+    priority: 25
+    plugins:
+      proxy-rewrite:
+        regex_uri: ["^/kratos/(.*)", "/$1"]
+        # Native (API) flows carry no cookies, so there is nothing for CSRF checks to protect, but Kratos refuses a
+        # native-flow submit that has an Origin header, and every browser fetch() POST sends one (the dashboard does).
+        headers:
+          remove: ["Origin", "Cookie"]   # a browser also sends any cookie stored for 127.0.0.1 (cookies ignore the port); Kratos refuses a native flow that carries one
+      limit-count:
+        rules:
+          - count: 5
+            time_window: 60
+            key: "kratos-registration-submit:${remote_addr}"
+        rejected_code: 429
+        policy: redis
+        redis_host: redis
+        redis_port: 6379
+        redis_username: apisix
+        redis_password: ${{APISIX_REDIS_PASSWORD}}
+    upstream_id: kratos-public
+
+  # Forgot password by email: sends a code, then checks it.
+  - id: kratos-recovery-submit
+    uri: /kratos/self-service/recovery
+    methods: [POST]
+    priority: 25
+    plugins:
+      proxy-rewrite:
+        regex_uri: ["^/kratos/(.*)", "/$1"]
+        # Native (API) flows carry no cookies, so there is nothing for CSRF checks to protect, but Kratos refuses a
+        # native-flow submit that has an Origin header, and every browser fetch() POST sends one (the dashboard does).
+        headers:
+          remove: ["Origin", "Cookie"]   # a browser also sends any cookie stored for 127.0.0.1 (cookies ignore the port); Kratos refuses a native flow that carries one
+      limit-count:
+        rules:
+          - count: 5
+            time_window: 60
+            key: "kratos-recovery-submit:${remote_addr}"
+          - count: 5
+            time_window: 900
+            key: "kratos-recovery-submit:${post_arg.email}"
+        rejected_code: 429
+        policy: redis
+        redis_host: redis
+        redis_port: 6379
+        redis_username: apisix
+        redis_password: ${{APISIX_REDIS_PASSWORD}}
+    upstream_id: kratos-public
+
+  # Verification code check.
+  - id: kratos-verification-submit
+    uri: /kratos/self-service/verification
+    methods: [POST]
+    priority: 25
+    plugins:
+      proxy-rewrite:
+        regex_uri: ["^/kratos/(.*)", "/$1"]
+        # Native (API) flows carry no cookies, so there is nothing for CSRF checks to protect, but Kratos refuses a
+        # native-flow submit that has an Origin header, and every browser fetch() POST sends one (the dashboard does).
+        headers:
+          remove: ["Origin", "Cookie"]   # a browser also sends any cookie stored for 127.0.0.1 (cookies ignore the port); Kratos refuses a native flow that carries one
+      limit-count:
+        rules:
+          - count: 10
+            time_window: 60
+            key: "kratos-verification-submit:${remote_addr}"
+        rejected_code: 429
+        policy: redis
+        redis_host: redis
+        redis_port: 6379
+        redis_username: apisix
+        redis_password: ${{APISIX_REDIS_PASSWORD}}
+    upstream_id: kratos-public
+
+  # Change password / authenticator while signed in.
+  - id: kratos-settings-submit
+    uri: /kratos/self-service/settings
+    methods: [POST]
+    priority: 25
+    plugins:
+      proxy-rewrite:
+        regex_uri: ["^/kratos/(.*)", "/$1"]
+        # Native (API) flows carry no cookies, so there is nothing for CSRF checks to protect, but Kratos refuses a
+        # native-flow submit that has an Origin header, and every browser fetch() POST sends one (the dashboard does).
+        headers:
+          remove: ["Origin", "Cookie"]   # a browser also sends any cookie stored for 127.0.0.1 (cookies ignore the port); Kratos refuses a native flow that carries one
+      limit-count:
+        rules:
+          - count: 10
+            time_window: 60
+            key: "kratos-settings-submit:${remote_addr}"
+        rejected_code: 429
+        policy: redis
+        redis_host: redis
+        redis_port: 6379
+        redis_username: apisix
+        redis_password: ${{APISIX_REDIS_PASSWORD}}
+    upstream_id: kratos-public
+
+  # Anything else that submits (kept strict as before).
+  - id: kratos-self-service-other-submit
     uri: /kratos/self-service/*
     methods: [POST]
     priority: 20
@@ -77,10 +212,10 @@ routes:
         headers:
           remove: ["Origin", "Cookie"]   # a browser also sends any cookie stored for 127.0.0.1 (cookies ignore the port); Kratos refuses a native flow that carries one
       limit-count:
-        count: 10
-        time_window: 60
-        key_type: var
-        key: remote_addr
+        rules:
+          - count: 10
+            time_window: 60
+            key: "kratos-self-service-other-submit:${remote_addr}"
         rejected_code: 429
         policy: redis
         redis_host: redis
@@ -88,6 +223,63 @@ routes:
         redis_username: apisix
         redis_password: ${{APISIX_REDIS_PASSWORD}}
     upstream_id: kratos-public
+
+  # Public registration is for app users only: refuse a request that asks for any other identity schema (the staff schema
+  # "default" signs in with a code and is created by the dashboard, never by self-registration).
+  - id: kratos-registration-schema-guard
+    uris: ["/kratos/self-service/registration/api", "/kratos/self-service/registration/browser"]
+    priority: 100
+    vars:
+      - ["arg_identity_schema", "~~", "."]
+      - ["arg_identity_schema", "~=", "user"]
+    plugins:
+      mocking:
+        response_status: 403
+        content_type: application/json
+        response_example: '{"error":"forbidden","reason":"only the app-user schema can self-register"}'
+
+  # ---- Forgot password by PHONE (our endpoints; Kratos' recovery flow only takes an email address) ------------------
+  - id: password-reset-start
+    uri: /public/v1/password-reset/start
+    methods: [POST]
+    priority: 20
+    plugins:
+      limit-count:
+        rules:
+          - count: 5
+            time_window: 60
+            key: "password-reset-start:${remote_addr}"
+          - count: 5
+            time_window: 900
+            key: "password-reset-start:${post_arg.identifier}"
+        rejected_code: 429
+        policy: redis
+        redis_host: redis
+        redis_port: 6379
+        redis_username: apisix
+        redis_password: ${{APISIX_REDIS_PASSWORD}}
+    upstream_id: notification-service
+
+  - id: password-reset-finish
+    uri: /public/v1/password-reset/finish
+    methods: [POST]
+    priority: 20
+    plugins:
+      limit-count:
+        rules:
+          - count: 10
+            time_window: 60
+            key: "password-reset-finish:${remote_addr}"
+          - count: 10
+            time_window: 900
+            key: "password-reset-finish:${post_arg.identifier}"
+        rejected_code: 429
+        policy: redis
+        redis_host: redis
+        redis_port: 6379
+        redis_username: apisix
+        redis_password: ${{APISIX_REDIS_PASSWORD}}
+    upstream_id: notification-service
 
   # Pre-flight for sign-in screens: "may I ask for a code for this address?" (see notification-service LoginCodeGate). Public,
   # same strict per-IP limit as the submit route above. It answers the same way for every address, registered or not.
