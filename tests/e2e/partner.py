@@ -260,11 +260,14 @@ try:
     st, tpl2 = staff.call("POST", G + "/admin/api/v1/notification/templates", {
         "appId": app_id, "code": "ride-here", "kind": "IN_APP", "category": "TRANSACTIONAL", "params": [{"name": "name", "maxLength": 30}],
         "content": {"en": {"title": "Hello {name}", "body": "Your ride is here"}}}, A)
-    code, r, *_ = partner_call(key_id, "POST", "/v1/notifications", {"externalId": "inapp-1", "userId": alias, "templateId": tpl2.get("id"), "params": {"name": "Abebe"}})
-    ok("IN_APP accepted", code == 202, f"{code} {r}")
+    code, r, *_ = partner_call(key_id, "POST", "/v1/notifications", {"externalId": "inapp-1", "userId": alias, "templateId": tpl2.get("id"), "params": {"name": "Abebe"}, "data": {"screen": "ride", "driver": {"name": "Sara"}}})
+    ok("IN_APP accepted", code == 202, f"{code} {r}"); inapp_nid = r.get("notificationId")
     time.sleep(4)
     st, inbox = staff.call("GET", G + "/api/v1/me/notifications", None, {"Authorization": "Bearer " + session})
     ok("shows in the user's inbox", st == 200 and isinstance(inbox, list) and any(i.get("title") == "Hello Abebe" for i in inbox), f"{st} {inbox}")
+    item = next((i for i in inbox if i.get("title") == "Hello Abebe"), {}) if isinstance(inbox, list) else {}
+    ok("inbox item: data is a JSON object (not a string)", isinstance(item.get("data"), dict) and item["data"].get("driver", {}).get("name") == "Sara", item.get("data"))
+    ok("inbox item: notificationId is the id the partner got (and the push carries), externalId is not exposed", item.get("notificationId") == inapp_nid and "externalId" not in item and "inapp-1" not in json.dumps(item), item)
     st, c = staff.call("GET", G + "/api/v1/me/notifications/unread-count", None, {"Authorization": "Bearer " + session})
     ok("unread count is 1", st == 200 and c.get("count") == 1, c)
 

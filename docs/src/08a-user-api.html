@@ -665,19 +665,25 @@ X-Request-Id: 07c8f669-449d-4d8a-8063-f359c467b5a5
 [
   {
     "id": "69f7217d-f4f2-4f77-8578-89e3bcecc565",
+    "notificationId": "8b4486c5-99cb-481b-aeb5-8eea34854702",
     "appId": "fc32bca2-89a9-4426-b834-aad34a3eebbe",
     "title": "Hello Abebe",
     "body": "Your ride is here",
-    "data": "{\"rideId\": \"102\"}",
+    "data": {
+      "rideId": "102"
+    },
     "createdAt": "2026-10-25T05:46:13.509Z",
     "readAt": null
   },
   {
     "id": "e9103dbb-a43c-4f96-acfd-62d711cc2416",
+    "notificationId": "f37fe7b9-c6bd-4881-a0bc-3fd70e87a553",
     "appId": "fc32bca2-89a9-4426-b834-aad34a3eebbe",
     "title": "Hello Abebe",
     "body": "Your ride is here",
-    "data": "{\"rideId\": \"101\"}",
+    "data": {
+      "rideId": "101"
+    },
     "createdAt": "2026-10-25T05:46:13.423Z",
     "readAt": null
   }
@@ -694,16 +700,19 @@ X-Request-Id: a6a0bd3b-f672-4637-8fc3-c976cb00907b
 [
   {
     "id": "69f7217d-f4f2-4f77-8578-89e3bcecc565",
+    "notificationId": "baec8076-0aaf-4a94-ba2d-4f33c3b072e1",
     "appId": "fc32bca2-89a9-4426-b834-aad34a3eebbe",
     "title": "Hello Abebe",
     "body": "Your ride is here",
-    "data": "{\"rideId\": \"102\"}",
+    "data": {
+      "rideId": "102"
+    },
     "createdAt": "2026-10-25T05:46:13.509Z",
     "readAt": null
   }
 ]</code></pre>
 <h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th>Error code</th><th>When it happens</th></tr></thead><tbody><tr><td><strong>400</strong></td><td><code>invalid_request</code></td><td>A parameter cannot be parsed (e.g. <code>size=abc</code>).</td></tr><tr><td><strong>401</strong></td><td><code>(empty body)</code></td><td>Missing, expired, revoked or malformed session token. Produced by the gateway's forward-auth step (user-service <code>/internal/auth/verify</code> answers 401, the body is empty). A session of an account that has an authenticator app but only completed the first step (<code>aal1</code>) is also a 401 here.</td></tr><tr><td><strong>429</strong></td><td><code>(HTML page)</code></td><td>Gateway rate limit exceeded. The body is APISIX's HTML page, not JSON; the response carries <code>X-RateLimit-*</code> headers (see <a href="08f-operational.html#gateway-behaviour">8f</a>).</td></tr><tr><td><strong>503</strong></td><td><code>identity_service_unavailable</code></td><td>Kratos could not be reached while the gateway asked who the token belongs to (forward-auth is sent to user-service, which answers 503 instead of a misleading 401).</td></tr></tbody></table></div>
-<h4>How to use it</h4><ul><li><code>data</code> is the partner's <code>data</code> object <strong>serialized as a string</strong> (the jsonb column is returned as text); parse it in the app.</li><li>The answer is a bare JSON array: there is no total count. Page until you get fewer than <code>size</code> items.</li><li>Items are written by notification-service when a partner sends an <code>IN_APP</code> template (<a href="08c-partner-api.html">8c</a>).</li></ul>
+<h4>How to use it</h4><ul><li><code>data</code> is the partner's <code>data</code> object as a <strong>JSON object</strong> (<code>{}</code> when none; until 2026-10-26 it was a string you had to parse). <code>notificationId</code> is the id of the notification that created the item: the same value the push carries in its <code>data</code>, so a push can be matched to its inbox row. The partner's <code>externalId</code> is never returned.</li><li>The answer is a bare JSON array: there is no total count. Page until you get fewer than <code>size</code> items.</li><li>Items are written by notification-service when a partner sends an <code>IN_APP</code> template (<a href="08c-partner-api.html">8c</a>).</li></ul>
 </div></details>
 <details class="endpoint" id="ep-user-get-unread">
 <summary><span class="method m-get">GET</span><span class="path">/api/v1/me/notifications/unread-count</span><span class="sum">Count my unread notifications</span></summary>

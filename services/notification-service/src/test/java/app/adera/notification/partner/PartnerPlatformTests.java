@@ -338,6 +338,27 @@ class PartnerPlatformTests {
 	}
 
 	@Test
+	void theInboxReturnsDataAsAnObjectAndTheNotificationIdOfThePush() throws Exception {
+		String template = createTemplate("IN_APP", "{\"en\":{\"title\":\"Hello {name}\",\"body\":\"Your ride is here\"}}", "");
+		String ext = "inbox-" + UUID.randomUUID();
+		String body = "{\"externalId\":\"" + ext + "\",\"userId\":\"" + alias + "\",\"templateId\":\"" + template
+				+ "\",\"params\":{\"name\":\"Abebe\"},\"data\":{\"screen\":\"ride\",\"driver\":{\"name\":\"Sara\"},\"stops\":[1,2]}}";
+		assertThat(sendRaw(body)).isEqualTo(202);
+		deliveries.runOnce();
+		String notificationId = json.readTree(mvc.perform(signed(get("/v1/notifications/" + ext), "GET", "/v1/notifications/" + ext, "")).andReturn().getResponse().getContentAsString())
+			.get("notificationId").asString();
+		String inbox = mvc.perform(get("/api/v1/me/notifications").header("X-Gateway-Secret", "gw-secret").header("X-User-Id", userId.toString()))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$[0].data.screen").value("ride")).andExpect(jsonPath("$[0].data.driver.name").value("Sara")).andExpect(jsonPath("$[0].data.stops[1]").value(2))
+			.andExpect(jsonPath("$[0].notificationId").value(notificationId))
+			.andReturn().getResponse().getContentAsString();
+		// the same id the push carries, so a push can be matched to its inbox row
+		assertThat(push.sent.get(push.sent.size() - 1).data()).containsEntry("notificationId", notificationId);
+		assertThat(inbox).as("the partner's externalId is not exposed to users").doesNotContain(ext).doesNotContain("externalId");
+		assertThat(json.readTree(inbox).get(0).get("data").isObject()).isTrue();
+	}
+
+	@Test
 	void aRejectedPushIsReportedAsAFailedAttemptAndKeepsTheDeviceToken() throws Exception {
 		String template = createTemplate("IN_APP", "{\"en\":{\"title\":\"Hello {name}\",\"body\":\"Your ride is here\"}}", "");
 		try {

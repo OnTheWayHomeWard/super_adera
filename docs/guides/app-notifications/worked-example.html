@@ -57,14 +57,18 @@ Content-Type: application/json
 }</code></pre><pre><code>curl -s "$GATEWAY/api/v1/me/notifications?unread=true" -H "Authorization: Bearer $TOKEN"</code></pre><pre class="out"><code>[
   {
     "id": "2d7e9b41-6ec3-41e1-8b49-b3701d0d8e38",
+    "notificationId": "a8d42934-33e7-48a0-a81f-9b0cbf4e7af6",
     "appId": "24daadb5-f356-416d-8b91-43f5e6be386b",
     "title": "ትዕዛዝዎ በመንገድ ላይ ነው",
     "body": "ሰላም Selam፣ በ7 min ውስጥ ይደርሳል።",
-    "data": "{\"screen\": \"order\", \"orderId\": \"1042\"}",
+    "data": {
+      "screen": "order",
+      "orderId": "1042"
+    },
     "createdAt": "2026-10-26T10:51:15.474Z",
     "readAt": null
   }
-]</code></pre><div class="callout warn"><span class="label">Look closely</span><p><code>data</code> is a JSON <em>string</em> (note the escaped quotes), not an object: the client must decode it a second time. The item <code>id</code> differs from the partner's <code>notificationId</code>. The title and body are already in the user's language. The amharic text interpolates the values exactly as the partner sent them ("7 min" was not translated).</p></div><h2 id="step4">Step 4: the user taps the item</h2><p>The client decodes <code>data</code> (<code>{"screen":"order","orderId":"1042"}</code>), opens the <code>demo-food</code> mini app (looked up by <code>appId</code> in the app catalog) at the order screen, and marks the item read:</p><pre><code>curl -s -X PUT "$GATEWAY/api/v1/me/notifications/$ITEM_ID/read" -H "Authorization: Bearer $TOKEN"</code></pre><pre class="out"><code>{
+]</code></pre><div class="callout warn"><span class="label">Look closely</span><p><code>data</code> is a JSON <em>object</em> (since 2026-10-26; it used to be a string that needed a second decode). The item <code>id</code> is the inbox row; <code>notificationId</code> is the id of the notification itself, the same one the push carries and the partner received in its <code>202</code> answer. The title and body are already in the user's language. The amharic text interpolates the values exactly as the partner sent them ("7 min" was not translated).</p></div><h2 id="step4">Step 4: the user taps the item</h2><p>The client decodes <code>data</code> (<code>{"screen":"order","orderId":"1042"}</code>), opens the <code>demo-food</code> mini app (looked up by <code>appId</code> in the app catalog) at the order screen, and marks the item read:</p><pre><code>curl -s -X PUT "$GATEWAY/api/v1/me/notifications/$ITEM_ID/read" -H "Authorization: Bearer $TOKEN"</code></pre><pre class="out"><code>{
   "read": true,
   "id": "2d7e9b41-6ec3-41e1-8b49-b3701d0d8e38"
 }</code></pre><p>The badge count becomes 0 on the next <code>unread-count</code> call.</p><h2 id="variants">Variants seen in the same run</h2><div class="table-wrap"><table><thead><tr><th>Situation</th><th>What the partner got</th><th>What the user saw</th></tr></thead><tbody><tr><td>The user had muted in-app messages for the mini app (<code>muteInApp: true</code>)</td><td><code>200</code> with <code>status: SUPPRESSED</code>, <code>reason: recipient_opted_out</code> (immediately, not <code>202</code>)</td><td>Nothing: no inbox item, no push</td></tr><tr><td>The user's account is suspended or deleted</td><td><code>422 {"error":"user_unreachable"}</code></td><td>Nothing</td></tr><tr><td>The same request is sent again with the same <code>externalId</code></td><td><code>200</code> with the current status and <code>"replayed": true</code></td><td>Still one inbox item (the partner's retry is safe)</td></tr><tr><td>A user without any registered phone</td><td><code>202</code>, then <code>SENT</code></td><td>Inbox item only (attempt log: <code>SKIPPED no_devices</code>)</td></tr></tbody></table></div>

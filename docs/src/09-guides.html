@@ -410,15 +410,18 @@ curl -sS -X PUT $BASE/api/v1/me/notifications/read-all -H "Authorization: Bearer
 <pre class="out"><code>[
   {
     "id": "de6dffd6-7d8e-47a4-94a1-3307b8997bcb",
+    "notificationId": "6c0f4b1e-2d63-4f0a-9a57-31d1bc4f9e22",
     "appId": "41548c1e-b03e-412a-bbbe-1e46343505b9",
     "title": "Hello Abebe",
     "body": "Your technician is here",
-    "data": "{\"deepLink\": \"adera://job/1001\"}",
+    "data": {
+      "deepLink": "adera://job/1001"
+    },
     "createdAt": "2026-10-25T06:07:26.663Z",
     "readAt": null
   }
 ]</code></pre>
-<p><code>data</code> is a JSON <em>string</em> (the key-values the partner sent), not an object: parse it. <code>readAt</code> is <code>null</code> until read. Details and errors: <a href="08a-user-api.html">user API</a>.</p></section>
+<p><code>data</code> is a JSON object (the key-values the partner sent; since 2026-10-26, before it was a string); <code>notificationId</code> is the id the push carries, so a push can be matched to its inbox row. <code>readAt</code> is <code>null</code> until read. Details and errors: <a href="08a-user-api.html">user API</a>.</p></section>
 <section><h2 id="mute-app">7. Mute an app</h2><p>A user can switch off SMS, email or in-app messages <em>per app</em>. The partner is not told: its requests are answered <code>200</code> with status <code>SUPPRESSED</code> (reason <code>recipient_opted_out</code>).</p>
 <pre><code>curl -sS -X PUT $BASE/api/v1/me/apps/$APP/preferences -H "Authorization: Bearer $USER_TOKEN" -H "Content-Type: application/json" -d '{"muteSms":true}'</code></pre>
 <pre class="out"><code>{

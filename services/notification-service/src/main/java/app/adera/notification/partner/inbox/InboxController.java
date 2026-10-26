@@ -13,6 +13,7 @@ import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import tools.jackson.databind.json.JsonMapper;
 
 /** The signed-in user's in-app notifications (the bell menu). The user id comes from the gateway-verified header. */
 @RestController
@@ -20,21 +21,35 @@ import org.springframework.web.bind.annotation.RestController;
 public class InboxController {
 
 	private final JdbcClient jdbc;
+	private final JsonMapper mapper;
 
-	public InboxController(JdbcClient jdbc) {
+	public InboxController(JdbcClient jdbc, JsonMapper mapper) {
 		this.jdbc = jdbc;
+		this.mapper = mapper;
 	}
 
+	/**
+	 * Newest first. Each item has {@code id} (the inbox row, used to mark it read), {@code notificationId} (the same id the push
+	 * carries in its data, so a push can be matched to its inbox row) and {@code data} as a JSON object (what the partner sent).
+	 * The partner's own externalId is never exposed to users.
+	 */
 	@GetMapping
 	public List<Map<String, Object>> list(@RequestHeader("X-User-Id") UUID userId, @RequestParam(defaultValue = "false") boolean unread,
 			@RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "20") int size) {
 		int limit = Math.max(1, Math.min(size, 100));
 		return jdbc.sql("""
-				SELECT id, app_id AS "appId", title, body, data::text AS data, created_at AS "createdAt", read_at AS "readAt"
+				SELECT id, notification_id AS "notificationId", app_id AS "appId", title, body, data::text AS data, created_at AS "createdAt", read_at AS "readAt"
 				FROM inbox_item WHERE user_id = :u AND (:unread = FALSE OR read_at IS NULL)
 				ORDER BY created_at DESC LIMIT :limit OFFSET :offset""")
 			.param("u", userId).param("unread", unread).param("limit", limit).param("offset", Math.max(0, page) * limit)
-			.query().listOfRows();
+			.query().listOfRows().stream().map(this::withJsonData).toList();
+	}
+
+	private Map<String, Object> withJsonData(Map<String, Object> row) {
+		Map<String, Object> out = new java.util.LinkedHashMap<>(row);
+		Object raw = row.get("data");
+		out.put("data", raw == null || String.valueOf(raw).isBlank() ? Map.of() : mapper.readValue(String.valueOf(raw), Map.class));
+		return out;
 	}
 
 	@GetMapping("/unread-count")
