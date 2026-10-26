@@ -4,11 +4,10 @@ import { useState } from "react";
 import { ConfirmButton, ErrorAlert, Mono, RoleGate, Time, useCan } from "../../../components/common";
 import { api } from "../../../lib/client";
 import { i18nText } from "../../../lib/format";
+import { LOGO_ACCEPT, LOGO_FORMATS_TEXT, logoFileProblem } from "../../../lib/logoFile";
 import { AppForm } from "../AppForm";
 import { toFormValues } from "../appForm";
 import type { TabProps } from "./types";
-
-const MAX_LOGO_BYTES = 2 * 1024 * 1024;
 
 export function GeneralTab({ detail, reload }: TabProps) {
   const app = detail.app;
@@ -18,12 +17,9 @@ export function GeneralTab({ detail, reload }: TabProps) {
 
   const upload = async (file: File) => {
     setUploadError(null);
-    if (file.size > MAX_LOGO_BYTES) {
-      setUploadError(new Error("The logo is larger than 2 MiB."));
-      return false;
-    }
-    if (!/^image\/(png|jpeg|webp)$/.test(file.type)) {
-      setUploadError(new Error("Use a PNG, JPEG or WebP image."));
+    const problem = logoFileProblem(file);
+    if (problem) {
+      setUploadError(new Error(problem));
       return false;
     }
     setUploading(true);
@@ -47,12 +43,12 @@ export function GeneralTab({ detail, reload }: TabProps) {
         {app.logoUrl ? <Image src={app.logoUrl} width={96} alt="App logo" /> : <Alert type="warning" showIcon message="No logo yet (needed to go LIVE)." />}
         <RoleGate ability="write">
           <Space direction="vertical">
-            <Upload accept="image/png,image/jpeg,image/webp" showUploadList={false} beforeUpload={upload}>
+            <Upload accept={LOGO_ACCEPT} showUploadList={false} beforeUpload={upload}>
               <Button icon={<UploadOutlined />} loading={uploading}>
                 {app.logoUrl ? "Replace logo" : "Upload logo"}
               </Button>
             </Upload>
-            <Typography.Text type="secondary">PNG, JPEG or WebP, up to 2 MiB. It is resized on the server.</Typography.Text>
+            <Typography.Text type="secondary">{LOGO_FORMATS_TEXT}, up to 2 MiB. It is resized on the server.</Typography.Text>
             {app.logoUrl && (
               <ConfirmButton
                 label="Remove logo"

@@ -61,6 +61,23 @@ class LogoImageProcessorTest {
 	}
 
 	@Test
+	void aWebpFileIsRefusedWithAMessageThatNamesTheAcceptedFormats() {
+		// the header of a WebP file (RIFF....WEBPVP8 ): not decodable by the JDK, and not one of the accepted formats
+		byte[] webp = new byte[64];
+		System.arraycopy("RIFF".getBytes(), 0, webp, 0, 4);
+		System.arraycopy("WEBPVP8 ".getBytes(), 0, webp, 8, 8);
+		assertThatThrownBy(() -> LogoImageProcessor.process(webp, 512)).isInstanceOfSatisfying(Errors.ValidationFailed.class,
+				e -> assertThat(e.fields().get("file")).isEqualTo("not a supported image (use PNG, JPEG, GIF or BMP)"));
+	}
+
+	@Test
+	void gifAndBmpLogosAreAccepted() throws Exception {
+		for (String format : new String[] { "gif", "bmp" }) {
+			assertThat(LogoImageProcessor.process(image(format, 120, 80, BufferedImage.TYPE_INT_RGB, Color.BLUE), 512).contentType()).isEqualTo("image/png");
+		}
+	}
+
+	@Test
 	void absurdDimensionsAreRejectedBeforeDecoding() throws Exception {
 		byte[] sliver = image("png", 13_000, 1, BufferedImage.TYPE_INT_RGB, Color.RED);
 		assertThatThrownBy(() -> LogoImageProcessor.process(sliver, 512)).isInstanceOf(Errors.ValidationFailed.class).hasMessageContaining("too large");
