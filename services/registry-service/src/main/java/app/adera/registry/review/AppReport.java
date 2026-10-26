@@ -53,8 +53,10 @@ public class AppReport {
 
 	public void handle(String status, UUID staffId, Instant now) {
 		this.status = status;
-		this.handledBy = staffId;
-		this.handledAt = now;
+		// Reopening puts the report back in the queue: nobody has handled it any more.
+		boolean open = "OPEN".equals(status);
+		this.handledBy = open ? null : staffId;
+		this.handledAt = open ? null : now;
 	}
 
 	public UUID getId() { return id; }

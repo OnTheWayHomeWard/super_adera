@@ -187,7 +187,7 @@ X-Total-Count: 1
 <pre class="out nocopy"><code>PATCH /admin/api/v1/reports/$REPORT_ID  {"status":"CLOSED"}
 HTTP 400  {"error": "validation_failed", "fields": {"status": "must be OPEN, REVIEWED or DISMISSED"}}</code></pre>
 <h4>Effects, audit</h4>
-<ul><li>Sets <code>status</code>, <code>handledBy</code> (the staff id) and <code>handledAt</code>. Nothing else happens automatically: a REVIEWED report does <em>not</em> pause the app. To act on an app, change its status (see the status page), then close the report.</li><li>Audit: <code>report.handle</code> (target type <code>app_report</code>, target id the report id, meta <code>{"status", "appId"}</code>).</li></ul>
+<ul><li>Sets <code>status</code>, <code>handledBy</code> (the staff id) and <code>handledAt</code>; reopening (<code>OPEN</code>) clears both again. Nothing else happens automatically: a REVIEWED report does <em>not</em> pause the app. To act on an app, change its status (see the status page), then close the report.</li><li>Audit: <code>report.handle</code> (target type <code>app_report</code>, target id the report id, meta <code>{"status", "appId"}</code>).</li></ul>
 </div></details>
 <h2 id="audit">The audit log</h2>
 <p>Every change staff make is written, in the same database transaction as the change, to an append-only audit log: who (staff id, email and role), what (action name), on which object, details, from which IP, and when. A change and its audit event are committed together or not at all.</p>

@@ -87,11 +87,11 @@
   "reason": "SPAM",
   "details": "doc-tmp: example report",
   "createdAt": "2026-10-26T10:56:44.627339Z",
-  "handledAt": "2026-10-26T10:56:44.786507315Z",
-  "handledBy": "a44fc404-7813-4fce-8fe4-dde4c455ece4",
+  "handledAt": null,
+  "handledBy": null,
   "id": "347e2491-c20e-402e-b881-6773d4a744be",
   "status": "OPEN"
-}</code></pre><div class="callout warn"><span class="label">Reopened reports keep a handler</span><p>Setting OPEN does <strong>not</strong> clear <code>handledBy</code>/<code>handledAt</code>: they now name the person who reopened it and the time. An OPEN report can therefore show a handler (the seeded data has such rows). Treat <code>status</code> as the truth and <code>handledBy</code> as "last person to touch it".</p></div><h4>Errors (verified)</h4><pre class="out"><code>HTTP/1.1 400 Bad Request
+}</code></pre><div class="callout ok"><span class="label">Reopen clears the handler</span><p>Setting OPEN clears <code>handledBy</code> and <code>handledAt</code> (both <code>null</code> again, as for any report nobody has handled). The audit entry <code>report.handle</code> with <code>status: OPEN</code> records who reopened it and when.</p></div><h4>Errors (verified)</h4><pre class="out"><code>HTTP/1.1 400 Bad Request
 
 {
   "error": "validation_failed",
