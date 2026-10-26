@@ -202,7 +202,7 @@ jvm_memory_used_bytes{area="heap", job="registry-service"}</code></pre>
 <dt>Rate limit</dt><dd>none</dd>
 <dt>Implemented in</dt><dd><code>services/notification-service/src/main/java/app/adera/notification/dev/DevMessageController.java</code>, store in <code>dispatch/DevMessageStore.java</code></dd>
 </dl>
-<h4>Purpose</h4><p>Shows the last 100 messages that the <em>non-real</em> providers handled (console SMS and Mailpit email), newest first, so a developer or test can read one-time codes without a phone. It is in-memory: it is empty after a restart. Messages sent by real providers are never stored here.</p>
+<h4>Purpose</h4><p>Shows the last 100 messages that the <em>non-real</em> providers handled (console SMS and Mailpit email), newest first, so a developer or test can read verification and reset codes without a phone. It is in-memory: it is empty after a restart. Messages sent by real providers are never stored here.</p>
 <h4>Request parameters</h4><div class="table-wrap"><table><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why it exists</th></tr></thead><tbody><tr><td><code>to</code></td><td>query</td><td>string</td><td>no</td><td>exact recipient, case-insensitive (phone in E.164, or email); URL-encode the <code>+</code> as <code>%2B</code></td><td>Filter to one person, avoiding confusion between parallel tests.</td></tr></tbody></table></div>
 <h4>Example request</h4>
 <pre><code>curl -s "http://127.0.0.1:8085/dev/messages"</code></pre>
@@ -359,7 +359,7 @@ apisix_bandwidth{type="egress",route="apps-catalog",service="",consumer="",node=
 <dt>Rate limit</dt><dd>none</dd>
 <dt>Implemented in</dt><dd>Mailpit v1.21 (third-party; <code>docker-compose.yml</code> service <code>mailpit</code>)</dd>
 </dl>
-<h4>Purpose</h4><p>Mailpit is the fake SMTP server that receives all dev emails (login codes from Kratos, Infisical mail). The UI is at <code>/</code>; the JSON API is below <code>/api/v1</code>. Useful calls: <code>GET /api/v1/info</code> (counts, version), <code>GET /api/v1/messages?limit=N</code> (list, newest first), <code>GET /api/v1/message/{ID}</code> (one message with body), <code>GET /api/v1/search?query=to:someone@example.com</code> (search), <code>DELETE /api/v1/messages</code> with <code>{"IDs":[...]}</code> (delete selected; no body deletes all), <code>GET /readyz</code> (health).</p>
+<h4>Purpose</h4><p>Mailpit is the fake SMTP server that receives all dev emails (verification, recovery and staff sign-in codes from Kratos, Infisical mail). The UI is at <code>/</code>; the JSON API is below <code>/api/v1</code>. Useful calls: <code>GET /api/v1/info</code> (counts, version), <code>GET /api/v1/messages?limit=N</code> (list, newest first), <code>GET /api/v1/message/{ID}</code> (one message with body), <code>GET /api/v1/search?query=to:someone@example.com</code> (search), <code>DELETE /api/v1/messages</code> with <code>{"IDs":[...]}</code> (delete selected; no body deletes all), <code>GET /readyz</code> (health).</p>
 <h4>Request parameters</h4><div class="table-wrap"><table><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why it exists</th></tr></thead><tbody><tr><td><code>limit</code></td><td>query</td><td>integer</td><td>no</td><td>default 50</td><td>Page size.</td></tr><tr><td><code>start</code></td><td>query</td><td>integer</td><td>no</td><td>default 0</td><td>Offset.</td></tr></tbody></table></div>
 <h4>Example request</h4>
 <pre><code>curl -s "http://127.0.0.1:8025/api/v1/messages?limit=2"</code></pre>

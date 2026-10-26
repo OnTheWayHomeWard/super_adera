@@ -165,7 +165,7 @@ docker compose down -v          # stop AND DELETE all data (databases, Redis, fi
 <tr><td>Grafana</td><td><code>http://localhost:3001</code></td><td>user <code>admin</code>, password = <code>GRAFANA_ADMIN_PASSWORD</code></td><td>Container port 3000, published as 3001.</td></tr>
 <tr><td>Infisical</td><td><code>http://localhost:8080</code></td><td>your Infisical account</td><td>Invite-only sign-up.</td></tr>
 <tr><td>Mailpit inbox (web and API)</td><td><code>http://localhost:8025</code></td><td>none</td><td>SMTP on <code>127.0.0.1:1025</code>. Dev email lands here.</td></tr>
-<tr><td>notification-service (direct)</td><td><code>http://localhost:8085</code></td><td>none (dev only)</td><td>Container 8080. <code>GET /dev/messages</code> shows dev SMS and email, including one-time codes.</td></tr>
+<tr><td>notification-service (direct)</td><td><code>http://localhost:8085</code></td><td>none (dev only)</td><td>Container 8080. <code>GET /dev/messages</code> shows dev SMS and email, including verification, reset and staff sign-in codes.</td></tr>
 <tr><td>user-service (direct)</td><td><code>http://localhost:8086</code></td><td>needs gateway or internal secret</td><td>Container 8080. Dev convenience only.</td></tr>
 <tr><td>registry-service (direct)</td><td><code>http://localhost:8087</code></td><td>needs gateway or internal secret</td><td>Container 8080. Dev convenience only.</td></tr>
 <tr><td>Kratos public / admin</td><td><code>http://127.0.0.1:4433</code> / <code>http://127.0.0.1:4434</code></td><td>admin has none: never expose</td><td>Reach the public API through the gateway at <code>/kratos</code>. The admin API is used by tests and by our services inside the compose network.</td></tr>
@@ -199,7 +199,7 @@ docker compose logs --since 1m notification-service | grep -E "NOTIFICATION MODE
 PARTNER PLATFORM: push=fcm-fake (dev), workers=true, privateCallbacks=true</code></pre>
 <p>The real-mode start was verified once with a throwaway instance (it loaded the Twilio and Resend secrets and printed <code>sms=twilio (REAL)</code>, <code>email=resend (REAL)</code> without sending). The first real send must use the allowlist. The full checklist is <a href="09-guides.html#go-real">Guides: switching to real delivery</a>.</p>
 <div class="callout why"><span class="label">Why so many guards</span>
-<p>A mistake here costs money (SMS) or exposes one-time codes (the dev endpoint), so the dangerous combinations are impossible to start rather than merely discouraged: dev endpoints with real providers, private callbacks with real providers, a real provider without a persistent signing key.</p></div>
+<p>A mistake here costs money (SMS) or exposes verification and reset codes (the dev endpoint), so the dangerous combinations are impossible to start rather than merely discouraged: dev endpoints with real providers, private callbacks with real providers, a real provider without a persistent signing key.</p></div>
 </section>
 
 <section>
@@ -209,7 +209,7 @@ PARTNER PLATFORM: push=fcm-fake (dev), workers=true, privateCallbacks=true</code
 JAVA_HOME=/usr/lib/jvm/java-21-openjdk ./mvnw test</code></pre>
 <p>The integration tests start a real Postgres with Testcontainers, so Docker must be running; they do not touch the compose stack. Last full run (reports in each <code>target/surefire-reports</code>): notification-service 54 tests, registry-service 60, user-service 65, all passing. (The older <code>SETUP.md</code> numbers, 28 and 47, are out of date.) What each test class covers is listed per service on the <a href="04-services.html">services page</a>.</p>
 <h3 id="tests-e2e">End-to-end scripts (<code>tests/e2e</code>)</h3>
-<p>They go through the real gateway with every real service. They need the stack running in <strong>dev mode</strong> because they read one-time codes from <code>/dev/messages</code>. Python standard library only. Run from the repository root:</p>
+<p>They go through the real gateway with every real service. They need the stack running in <strong>dev mode</strong> because they read verification, reset and staff codes from <code>/dev/messages</code>. Python standard library only. Run from the repository root:</p>
 <div class="table-wrap"><div class="table-wrap"><table>
 <thead><tr><th>Script</th><th>What it proves</th><th>Run</th></tr></thead>
 <tbody>
@@ -249,7 +249,7 @@ JAVA_HOME=/usr/lib/jvm/java-21-openjdk ./mvnw test</code></pre>
 <thead><tr><th>Symptom</th><th>Cause and fix</th></tr></thead>
 <tbody>
 <tr><td>A container cannot read its mounted config, or exits at start</td><td>Bind-mounted config files must be world-readable (<code>644</code>/<code>755</code>); containers run as other users.</td></tr>
-<tr><td>Kratos: migration error at start</td><td>In Kratos 26 use <code>kratos migrate sql up -e --yes</code> (as <code>kratos-migrate</code> does). To get a <code>session_token</code> right after sign-up add <code>hook: session</code> under <code>registration.after.code</code>.</td></tr>
+<tr><td>Kratos: migration error at start</td><td>In Kratos 26 use <code>kratos migrate sql up -e --yes</code> (as <code>kratos-migrate</code> does). Registration returns no session on purpose (the address must be verified first); to get a <code>session_token</code> right after sign-up you would add <code>hook: session</code> under <code>registration.after.password</code>.</td></tr>
 <tr><td>Redis refuses to start</td><td>ACL files cannot contain comment lines. <code>infra/redis/entrypoint.sh</code> writes the file from env for that reason.</td></tr>
 <tr><td>Gateway has no CORS headers, no request id and no metrics, with no error</td><td>An unknown plugin in a global rule drops the <strong>whole</strong> rule silently. The plugin list in <code>apisix/config.yaml</code> <em>replaces</em> APISIX's defaults; add a plugin there (and restart) before using it in <code>apisix.yaml</code>.</td></tr>
 <tr><td>No traces from the gateway</td><td>APISIX 3.x reads OpenTelemetry exporter settings from <code>plugin_metadata</code> in <code>apisix.yaml</code>, not from <code>config.yaml</code>.</td></tr>

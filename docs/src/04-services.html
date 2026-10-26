@@ -217,7 +217,7 @@ The integration tests start a real Postgres 16 in Testcontainers (<code>Testcont
 
 <h3 id="ns-safety">Startup safety checks</h3>
 <ul>
-<li><strong><code>ProviderSafetyCheck</code>:</strong> <code>NOTIFY_DEV_ENDPOINTS=true</code> together with a real SMS or email provider aborts startup (dev endpoints would expose one-time codes). On ready it logs <code>NOTIFICATION MODE: sms=... email=... allowlist=... devEndpoints=...</code> at WARN.</li>
+<li><strong><code>ProviderSafetyCheck</code>:</strong> <code>NOTIFY_DEV_ENDPOINTS=true</code> together with a real SMS or email provider aborts startup (dev endpoints would expose verification and reset codes). On ready it logs <code>NOTIFICATION MODE: sms=... email=... allowlist=... devEndpoints=...</code> at WARN.</li>
 <li><strong><code>PartnerSafetyCheck</code>:</strong> <code>PARTNER_ALLOW_PRIVATE_CALLBACKS=true</code> together with <em>any</em> real provider (SMS, email or push) aborts startup. On ready it logs <code>PARTNER PLATFORM: push=... workers=... privateCallbacks=...</code>.</li>
 <li><strong><code>SigningKeyHolder</code>:</strong> no <code>PARTNER_SIGNING_PRIVATE_KEY_B64</code> with a real SMS/email provider aborts startup; otherwise an ephemeral key <code>ephemeral-xxxxxxxx</code> is generated and a warning is logged (partners cannot rely on it across restarts).</li>
 <li>Real providers fail fast with a clear message when credentials are missing (Twilio account SID/token and a messaging service SID or number; Resend key and sender; Firebase credentials).</li>

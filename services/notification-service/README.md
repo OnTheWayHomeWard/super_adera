@@ -2,8 +2,7 @@
 
 Spring Boot 4.1 · Java 21 · Maven · Postgres (Flyway) · its own independent project (no parent build).
 
-Delivers every message the platform sends to a person. Today that is the one-time codes Kratos produces for
-login and sign-up; push (FCM) and event-driven messages come next.
+Delivers every message the platform sends to a person. Today that is the codes Kratos produces (verification codes by SMS/email, recovery codes by email, staff sign-in codes), the SMS code of the phone password reset; push (FCM) and event-driven messages come next.
 
 ```
 Kratos ──HTTP──► POST /internal/kratos/sms    ┐
@@ -26,7 +25,7 @@ The dispatcher, for every message, in this order:
 | | `twilio` | **Real SMS, costs money.** Messaging Service SID preferred, sender number as fallback. |
 | `EMAIL_PROVIDER` | `mailpit` (default) | SMTP to the local Mailpit inbox (<http://localhost:8025>). |
 | | `resend` | **Real email** via Resend. Sender domain must be verified there. |
-| `NOTIFY_DEV_ENDPOINTS` | `true` / `false` | Exposes `GET /dev/messages` (recent dev messages, so tests can read OTP codes). **The service refuses to start if this is true while any real provider is on.** |
+| `NOTIFY_DEV_ENDPOINTS` | `true` / `false` | Exposes `GET /dev/messages` (recent dev messages, so tests can read verification and reset codes). **The service refuses to start if this is true while any real provider is on.** |
 | `NOTIFY_LIVE_ALLOWLIST` | comma-separated | Limits real sends to these recipients. |
 
 These are set in the repo-root `.env` and passed by `docker-compose.yml`. The banner printed at startup states the active mode
@@ -56,6 +55,9 @@ Expected keys: `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_MESSAGING_SERV
 |---|---|
 | `POST /internal/kratos/sms` | `{to, body, templateType}`. **Internal only: never route it through the gateway.** |
 | `POST /internal/kratos/email` | `{recipient, subject, body, htmlBody, templateType}`. Internal only. |
+| `POST /public/v1/login-codes/check` | Public (through the gateway, 10/min per IP). `{identifier}`: may a code be sent to this phone/email now? Counts requests per address the same way for registered and unknown ones. Call it before registration, a resend and email recovery. |
+| `POST /public/v1/password-reset/start` | Public (gateway: 5/min per IP + 5 per 15 min per phone). `{identifier: phone}`: sends an SMS code if the phone belongs to an active app-user account (same `202` for any phone; staff and suspended accounts get nothing). Kratos' recovery flow cannot take a phone, hence this. |
+| `POST /public/v1/password-reset/finish` | Public (10/min per IP + 10 per 15 min per phone). `{identifier, code, password}`: code valid 10 minutes, 5 tries, once (stored as a salted hash in `password_reset`); sets the new password through Kratos' admin API (`KRATOS_ADMIN_URL`) and signs the account out everywhere. Wrong/expired/used/unknown: `400 invalid_code`. |
 | `GET/DELETE /dev/messages[?to=]` | Dev only (see above). |
 | `GET /actuator/health`, `/actuator/prometheus` | Health (mail check disabled on purpose) and metrics. |
 
@@ -79,8 +81,10 @@ sms/       SmsProvider, ConsoleSmsProvider, TwilioSmsProvider, GsmText
 email/     EmailProvider, MailpitEmailProvider, ResendEmailProvider
 dispatch/  NotificationDispatcher, SendLog(+Repository), DevMessageStore, Masking, DeliveryException
 kratos/    KratosCourierController, ApiExceptionHandler
+gate/      LoginCodeGate, LoginCodeCheckController (pre-flight)
+reset/     PasswordResetService, PasswordResetController, KratosAdminClient (phone password reset)
 dev/       DevMessageController, ProviderSafetyCheck
-db/migration/V1__send_log.sql
+db/migration/  V1 send_log, V2 partner platform, V3 environments, V4 code_request, V5 password_reset
 ```
 
 ## Lessons learned while building it
@@ -97,4 +101,4 @@ environment (migration `V3__environments_dev_prod.sql` renamed TEST/LIVE rows to
 (console SMS, Mailpit, fake push). Only the synthetic users `u_p_test_*` are simulated in DEV (nothing sent, attempt provider `sandbox`); in PROD they
 are refused (`422 synthetic_user_not_allowed`).
 
-Besides OTP delivery for Kratos, this service runs the partner notification platform (signed `/v1/*` API, templates, workers, callbacks, inbox). See `docs/PARTNER_API.md` and `docs/SETUP.md` section 7c.
+Besides code delivery for Kratos, this service runs the partner notification platform (signed `/v1/*` API, templates, workers, callbacks, inbox). See `docs/PARTNER_API.md` and `docs/SETUP.md` section 7c.

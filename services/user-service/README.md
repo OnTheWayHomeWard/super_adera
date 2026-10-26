@@ -8,7 +8,7 @@ service owns everything else about the person. Full description, data model and 
 ```
 app ─► APISIX ─forward-auth─► /internal/auth/verify ─► Kratos whoami ─► X-User-Id
         └────────────────────► /api/v1/me/**  (X-User-Id + X-Gateway-Secret)
-Kratos ─web_hook─► /internal/kratos/after-registration  (creates the profile)
+Kratos ─web_hook (registration, password method)─► /internal/kratos/after-registration  (creates the profile; users sign in with phone/email + password after verifying the address by code)
 profile ─► Postgres "users" (app_user, device)        avatar files ─► RustFS bucket adera-media
 ```
 

@@ -69,7 +69,7 @@
 <h2 id="what-is-adera">What Adera is</h2>
 <p>The Adera app (a Flutter mobile app, not part of this repository) talks to one backend through one front door, the API gateway on port 9080. The backend does three jobs today:</p>
 <ol>
-  <li><strong>Identity and login.</strong> Email-or-phone login with a one-time code, no passwords, 30-day sessions. This is done by Ory Kratos, an off-the-shelf identity server. We wrote only the pieces around it: the SMS/email delivery (<code>notification-service</code>) and the profile that Kratos does not hold (<code>user-service</code>).</li>
+  <li><strong>Identity and login.</strong> Phone-or-email sign-in with a password (6 characters minimum), the address verified once by a code, password reset by code, 30-day sessions. Dashboard staff keep their emailed code plus authenticator app. This is done by Ory Kratos, an off-the-shelf identity server. We wrote only the pieces around it: the SMS/email delivery (<code>notification-service</code>) and the profile that Kratos does not hold (<code>user-service</code>).</li>
   <li><strong>The user's own data.</strong> Profile, optional location, free-form <code>extra</code> JSON, avatar picture, and the phone's push (FCM) tokens: <code>user-service</code>.</li>
   <li><strong>The mini-app platform.</strong> Staff register a mini app, grant it capabilities (what it may ask for), set limits, register the partner's public key and approve message templates (<code>registry-service</code> plus an admin API in <code>notification-service</code>). The partner's server then sends notifications to users with signed requests; Adera delivers them by SMS, email, or in-app inbox plus push, and reports the result by a signed callback.</li>
 </ol>
@@ -84,7 +84,7 @@
 <thead><tr><th>Area</th><th>State</th><th>Notes</th></tr></thead>
 <tbody>
 <tr><td>Local platform: Postgres, Redis, RabbitMQ, Mailpit, Infisical, Kratos, APISIX, RustFS, Prometheus, Grafana, Loki, Alloy, Tempo, OTel Collector</td><td><span class="badge built">built</span></td><td>One <code>docker-compose.yml</code>, all host ports on <code>127.0.0.1</code>. RabbitMQ is installed and configured but no service publishes or consumes yet.</td></tr>
-<tr><td>Login with email/phone one-time code, sessions, logout</td><td><span class="badge built">built</span></td><td>Kratos + our courier. Logout needs our <code>POST /api/v1/me/logout</code> because Kratos has no native-app logout hook.</td></tr>
+<tr><td>Register + verify (code), password login, forgot/change password, sessions, logout</td><td><span class="badge built">built</span></td><td>Kratos + our courier. Logout needs our <code>POST /api/v1/me/logout</code> because Kratos has no native-app logout hook.</td></tr>
 <tr><td>notification-service: Kratos courier to SMS/email, dev and real providers</td><td><span class="badge built">built</span></td><td>Real Twilio/Resend providers are implemented and unit-tested against mocked HTTP but <strong>no real SMS or email has been sent through the final code path</strong> (see <a href="02-setup.html#delivery-modes">delivery modes</a>). An earlier real email did arrive; SMS to Ethiopia (+251) failed from the US Twilio sender (error 21612).</td></tr>
 <tr><td>user-service: profile, location, extra, avatar, devices, gateway verify, Kratos webhook, pseudonymous ids, per-app mute</td><td><span class="badge built">built</span></td><td></td></tr>
 <tr><td>registry-service: apps, capabilities, limits, allowed IPs, partner keys, staff roles, reviews and reports, audit, public catalog</td><td><span class="badge built">built</span></td><td>Staff need an email code plus an authenticator app (aal2).</td></tr>
@@ -126,7 +126,7 @@
 <!-- kratos -->
 <rect class="box tool" x="700" y="108" width="230" height="52" rx="8"/>
 <text class="title" x="815" y="130" text-anchor="middle">Ory Kratos :4433</text>
-<text class="muted" x="815" y="148" text-anchor="middle">identity, one-time code login, sessions</text>
+<text class="muted" x="815" y="148" text-anchor="middle">identity, password login, sessions</text>
 <path class="edge" d="M580 134 L698 134" marker-end="url(#ah-arch)"/>
 <text class="muted" x="640" y="126" text-anchor="middle">/kratos/*</text>
 
@@ -193,7 +193,7 @@
 <div class="table-wrap"><div class="table-wrap"><table>
 <thead><tr><th>Need</th><th>Tool used</th><th>Our code is only</th></tr></thead>
 <tbody>
-<tr><td>Login with one-time codes, sessions, TOTP</td><td>Ory Kratos</td><td>The identity schema (two traits), delivery of its messages, webhook receiver, the "who is this session" translator for the gateway</td></tr>
+<tr><td>Password login, verification and recovery codes, sessions, TOTP (staff)</td><td>Ory Kratos</td><td>Two identity schemas (user, staff), delivery of its messages, webhook receiver, phone password reset, code pre-flight, the "who is this session" translator for the gateway</td></tr>
 <tr><td>Front door, rate limits, request ids, CORS</td><td>APISIX (standalone)</td><td>Route file <code>infra/apisix/apisix.yaml</code></td></tr>
 <tr><td>Secrets</td><td>Infisical + <code>.env</code></td><td>A start-up loader that reads API keys from Infisical</td></tr>
 <tr><td>Files</td><td>RustFS (S3 API)</td><td>Image re-encoding and signed-URL handling</td></tr>

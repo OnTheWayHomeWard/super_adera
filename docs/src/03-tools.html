@@ -132,7 +132,7 @@ docker compose exec -T postgres pg_dump -U adera_admin -d users | gzip &gt; user
 <h3 id="postgres-use">What we use from it</h3>
 <ul>
 <li>Plain SQL tables, <code>jsonb</code>, unique constraints and <code>INSERT ... ON CONFLICT</code> (race-safe profile creation).</li>
-<li>Per-recipient OTP rate limiting is done in Postgres too: <code>notification-service</code> counts rows of <code>send_log</code> per recipient hash (limits: SMS 5/hour and 10/day, email 10/hour and 20/day by default). It does <em>not</em> use Redis for this.</li>
+<li>Per-recipient code rate limiting (verification, recovery, staff sign-in codes) is done in Postgres too: <code>notification-service</code> counts rows of <code>send_log</code> per recipient hash (limits: SMS 5/hour and 10/day, email 10/hour and 20/day by default). It does <em>not</em> use Redis for this.</li>
 <li>Table-by-table documentation: <a href="07-data.html">Data</a>.</li>
 </ul>
 <p>Not done yet: Postgres exporter for metrics, automated backups (see <a href="10-reference.html#not-built">not built yet</a>).</p>
@@ -233,7 +233,7 @@ docker compose run --rm rabbitmq-setup     # re-run the idempotent setup after c
 curl -s http://127.0.0.1:8025/api/v1/info          # version and message count
 curl -s "http://127.0.0.1:8025/api/v1/messages?limit=5"
 curl -s -X DELETE http://127.0.0.1:8025/api/v1/messages     # empty the inbox</code></pre>
-<p>Tip: for one-time codes you do not need to open the inbox for phone logins at all; SMS in dev mode goes to the console and <code>GET http://127.0.0.1:8085/dev/messages</code> returns recent codes (see <a href="08f-operational.html">operational endpoints</a>).</p>
+<p>Tip: for verification and reset codes you do not need to open the inbox for phones at all; SMS in dev mode goes to the console and <code>GET http://127.0.0.1:8085/dev/messages</code> returns recent codes (see <a href="08f-operational.html">operational endpoints</a>).</p>
 
 <h3 id="mailpit-use">What we use from it</h3>
 <p>SMTP sink plus read API for tests and humans. Switching to real email is <code>EMAIL_PROVIDER=resend</code>; see <a href="02-setup.html#delivery-modes">delivery modes</a>.</p>
@@ -286,10 +286,10 @@ docker compose up -d --force-recreate notification-service</code></pre>
 
 <!-- ============================================================ KRATOS -->
 <h2 id="kratos">Ory Kratos</h2>
-<p><span class="badge built">built</span> identity, one-time-code login, sessions, authenticator-app (TOTP) second factor.</p>
+<p><span class="badge built">built</span> identity, password login with code-verified addresses, code recovery, sessions, and for staff the emailed code plus authenticator-app (TOTP) second factor.</p>
 
 <h3 id="kratos-why">Why</h3>
-<p>Login, sessions and second factor are security-critical and easy to get wrong. Kratos is headless (no UI we must theme), API-first (native mobile flows return JSON and a <code>session_token</code>) and supports passwordless login by one-time code over email and SMS. Chosen over Keycloak and SuperTokens for those reasons (SETUP.md section 3).</p>
+<p>Login, sessions and second factor are security-critical and easy to get wrong. Kratos is headless (no UI we must theme), API-first (native mobile flows return JSON and a <code>session_token</code>) and supports password login, verification and recovery by code over email and SMS, and passwordless code login (used by dashboard staff). Chosen over Keycloak and SuperTokens for those reasons (SETUP.md section 3).</p>
 
 <h3 id="kratos-config">How it is configured here</h3>
 <p>Files: <code>infra/kratos/kratos.yml</code>, <code>infra/kratos/identity.schema.json</code>; compose services <code>kratos-migrate</code> (one-shot: <code>migrate sql up -e --yes</code>) and <code>kratos</code> (<code>serve --watch-courier</code>). Secrets <code>DSN</code>, <code>SECRETS_COOKIE</code>, <code>SECRETS_CIPHER</code> come from environment, never from the file.</p>
@@ -298,20 +298,20 @@ docker compose up -d --force-recreate notification-service</code></pre>
 <tbody>
 <tr><td><code>serve.public.base_url</code></td><td><code>http://127.0.0.1:9080/kratos/</code> (the gateway)</td><td>Flow action URLs in responses lead back through the gateway, never to the internal address. Must change for a real domain.</td></tr>
 <tr><td><code>serve.admin.base_url</code></td><td><code>http://kratos:4434/</code></td><td>Internal only. The gateway answers 403 for <code>/kratos/admin/*</code>.</td></tr>
-<tr><td>identity schema</td><td>traits <code>email</code> and <code>phone_number</code>, each a code-login identifier (<code>via: email</code> / <code>via: sms</code>); <code>anyOf</code> at least one; <code>additionalProperties: false</code></td><td>Passwordless; no profile data in Kratos, that lives in user-service.</td></tr>
-<tr><td><code>methods.password</code></td><td>disabled</td><td>No passwords exist anywhere.</td></tr>
-<tr><td><code>methods.code</code></td><td>enabled, <code>passwordless_enabled</code>, <code>lifespan: 5m</code></td><td>One-time code valid 5 minutes.</td></tr>
+<tr><td>identity schema</td><td>Two schemas. <code>user</code> (default, app users): traits <code>phone_number</code> and <code>email</code>, each a password identifier with verification and recovery <code>via</code> sms / email; at least one required. <code>default</code> (staff): email, code login identifier.</td><td>Different sign-in per kind of person; no profile data in Kratos, that lives in user-service.</td></tr>
+<tr><td><code>methods.password</code></td><td>enabled; <code>min_password_length: 6</code>, haveibeenpwned off, similarity check off</td><td>Product decision: simple passwords allowed; staff have no password credential.</td></tr>
+<tr><td><code>methods.code</code></td><td>enabled, <code>passwordless_enabled</code>, <code>lifespan: 10m</code></td><td>Codes for verification and recovery (app users) and staff sign-in; app users have no code credential so they cannot sign in with it.</td></tr>
 <tr><td><code>methods.totp</code></td><td>enabled, issuer <code>Adera</code></td><td>Second step for dashboard staff only; customers never enrol one.</td></tr>
-<tr><td>registration flow</td><td>lifespan 10m; hooks <code>web_hook</code> then <code>session</code></td><td>Create our profile, then issue a session so the app gets a <code>session_token</code> directly after sign-up.</td></tr>
-<tr><td>login flow</td><td>lifespan 10m</td><td></td></tr>
-<tr><td><code>settings.privileged_session_max_age</code></td><td>15m</td><td>Re-authentication window for sensitive changes such as enrolling TOTP.</td></tr>
+<tr><td>registration flow</td><td>lifespan 10m; after the password method: <code>web_hook</code> (profile) then <code>show_verification_ui</code>; no session hook</td><td>Create our profile; the account gets no session until its address is verified.</td></tr>
+<tr><td>login flow</td><td>lifespan 10m; <code>require_verified_address</code> after the password method</td><td>An unverified sign-in address cannot sign in (staff code login unaffected).</td></tr><tr><td>verification / recovery flows</td><td>by code, 10m, <code>notify_unknown_recipients: false</code></td><td>No messages to unknown addresses.</td></tr>
+<tr><td><code>settings.privileged_session_max_age</code></td><td>15m</td><td>Re-authentication window for changing the password or enrolling TOTP. After a password change the <code>revoke_active_sessions</code> hook signs out other sessions.</td></tr>
 <tr><td><code>session.lifespan</code></td><td>720h (30 days)</td><td>Long-lived mobile sessions.</td></tr>
 <tr><td><code>ui_url</code>, <code>allowed_return_urls</code></td><td><code>http://localhost:3000/...</code></td><td>Browser flows are not used by the app; placeholders for the future dashboard.</td></tr>
 <tr><td>tracing</td><td>otel, service <code>kratos</code>, OTLP to <code>otel-collector:4318</code></td><td>Traces in Tempo.</td></tr>
 </tbody></table></div></div>
 
 <h4>The registration web hook</h4>
-<p><code>registration.after.code.hooks[0]</code> posts to <code>http://user-service:8080/internal/kratos/after-registration</code> with <code>response.ignore: true</code>, which makes it non-blocking: a slow or down user-service can never block a sign-up. The body is a base64-encoded Jsonnet template in the YAML; decoded it is:</p>
+<p><code>registration.after.password.hooks[0]</code> posts to <code>http://user-service:8080/internal/kratos/after-registration</code> with <code>response.ignore: true</code>, which makes it non-blocking: a slow or down user-service can never block a sign-up. The body is a base64-encoded Jsonnet template in the YAML; decoded it is:</p>
 <pre><code>function(ctx) { identityId: ctx.identity.id, email: std.get(ctx.identity.traits, 'email', null), phone: std.get(ctx.identity.traits, 'phone_number', null) }</code></pre>
 <p>So user-service receives <code>{"identityId":"&lt;uuid&gt;","email":"..."|null,"phone":"..."|null}</code> and creates the profile row whose id <em>is</em> the Kratos identity id. The hook must come before <code>session</code> in the list.</p>
 
@@ -334,11 +334,11 @@ curl -s "http://127.0.0.1:4434/admin/identities?page_size=5" | python3 -m json.t
 docker compose run --rm kratos-migrate
 docker compose logs -f kratos</code></pre>
 <p>Client-facing flows are documented in <a href="08e-kratos-flows.html">Kratos flows</a>; the API spec is <code>docs/kratos-openapi-v26.2.0.json</code>. Prometheus scrapes <code>kratos:4434/admin/metrics/prometheus</code>. After editing <code>kratos.yml</code> run <code>docker compose restart kratos</code>.</p>
-<p>Lessons: use <code>migrate sql up -e --yes</code> in Kratos 26; add <code>hook: session</code> under <code>registration.after.code</code> or sign-up returns no <code>session_token</code>.</p>
+<p>Lessons: use <code>migrate sql up -e --yes</code> in Kratos 26; registration returns no <code>session_token</code> now by design (verify, then log in); it would need <code>hook: session</code> under <code>registration.after.password</code>.</p>
 
 <h3 id="kratos-use">What we use from it</h3>
 <ul>
-<li>Identities and traits, code login (register/login/verify), sessions and <code>whoami</code>, session list/revoke, TOTP enrol and aal2 upgrade, the admin API (used by user-service as a safety net to create a missing profile, and by logout).</li>
+<li>Identities and traits, password login, verification and recovery by code, sessions and <code>whoami</code>, session list/revoke, TOTP enrol and aal2 upgrade, the admin API (used by user-service as a safety net to create a missing profile, and by logout).</li>
 </ul>
 <div class="callout warn"><span class="label">Where Kratos did not fit, so we wrote code</span>
 <ul>
@@ -366,7 +366,14 @@ docker compose logs -f kratos</code></pre>
 <thead><tr><th>Route id</th><th>Match (priority)</th><th>Upstream</th><th>Plugins</th><th>Limit per 60 s per IP</th></tr></thead>
 <tbody>
 <tr><td><code>kratos-admin-blocked</code></td><td><code>/kratos/admin/*</code> (100)</td><td>none</td><td><code>mocking</code>: 403 <code>{"error":"forbidden"}</code></td><td>-</td></tr>
-<tr><td><code>kratos-self-service-submit</code></td><td><code>POST /kratos/self-service/*</code> (20)</td><td>kratos-public</td><td>proxy-rewrite (strip <code>/kratos</code>), limit-count</td><td>10 (first line of SMS-cost protection)</td></tr>
+<tr><td><code>kratos-login-submit</code></td><td><code>POST /kratos/self-service/login</code> (25)</td><td>kratos-public</td><td>proxy-rewrite (strip <code>/kratos</code>, remove Origin and Cookie), limit-count with two rules</td><td>10 per IP and 10 per 900 s per <code>identifier</code> (JSON body)</td></tr>
+<tr><td><code>kratos-registration-submit</code></td><td><code>POST .../registration</code> (25)</td><td>kratos-public</td><td>same</td><td>5 per IP (first line of SMS-cost protection)</td></tr>
+<tr><td><code>kratos-recovery-submit</code></td><td><code>POST .../recovery</code> (25)</td><td>kratos-public</td><td>same</td><td>5 per IP and 5 per 900 s per <code>email</code></td></tr>
+<tr><td><code>kratos-verification-submit</code>, <code>kratos-settings-submit</code></td><td><code>POST .../verification</code>, <code>POST .../settings</code> (25)</td><td>kratos-public</td><td>same</td><td>10 per IP each</td></tr>
+<tr><td><code>kratos-self-service-other-submit</code></td><td><code>POST /kratos/self-service/*</code> (20)</td><td>kratos-public</td><td>same</td><td>10 (anything else that submits)</td></tr>
+<tr><td><code>kratos-registration-schema-guard</code></td><td><code>/kratos/self-service/registration/api|browser</code> with <code>identity_schema</code> other than <code>user</code> (100)</td><td>none</td><td><code>mocking</code>: 403</td><td>-</td></tr>
+<tr><td><code>password-reset-start</code>, <code>password-reset-finish</code></td><td><code>POST /public/v1/password-reset/start|finish</code> (20)</td><td>notification-service</td><td>limit-count with two rules</td><td>start 5 per IP + 5 per 900 s per phone; finish 10 + 10 per 900 s per phone</td></tr>
+<tr><td><code>login-code-check</code></td><td><code>POST /public/v1/login-codes/check</code> (20)</td><td>notification-service</td><td>limit-count</td><td>10</td></tr>
 <tr><td><code>kratos-public</code></td><td><code>/kratos/*</code> (10)</td><td>kratos-public</td><td>proxy-rewrite, limit-count</td><td>120</td></tr>
 <tr><td><code>me-avatar</code></td><td><code>/api/v1/me/avatar</code> (30)</td><td>user-service</td><td>forward-auth (user-service), proxy-rewrite (sets <code>X-Gateway-Secret</code>), limit-count</td><td>20</td></tr>
 <tr><td><code>me</code></td><td><code>/api/v1/me</code>, <code>/api/v1/me/*</code> (20)</td><td>user-service</td><td>same</td><td>300</td></tr>
@@ -500,7 +507,7 @@ curl -s "http://127.0.0.1:9090/api/v1/query?query=sum(rate(apisix_http_status%5B
 <pre><code>{service="notification-service"}
 {service="kratos"} |= "error"
 {service=~"user-service|registry-service"} |~ "(?i)exception"</code></pre></li>
-<li><strong>Use:</strong> all application and tool logs. Services log OTP/recipient data masked, never codes (see the send-log tests).</li>
+<li><strong>Use:</strong> all application and tool logs. Services log recipient data masked, never codes (see the send-log tests).</li>
 </ul>
 
 <h3 id="alloy">Alloy</h3>
@@ -542,7 +549,7 @@ curl -s "http://127.0.0.1:9090/api/v1/query?query=sum(rate(apisix_http_status%5B
 <tr><td>APISIX</td><td>No built-in "ask Kratos" session check with our headers</td><td><code>/internal/auth/verify</code> and <code>/internal/staff/verify</code> used through <code>forward-auth</code></td><td><code>VerifyController</code> (user), <code>StaffVerifyController</code> (registry)</td></tr>
 <tr><td>APISIX</td><td>Partner signature check cannot be done by a stock plugin</td><td><code>PartnerAuthFilter</code> and <code>ResponseSigningFilter</code> verify/sign ADERA-SIG-1 in the service</td><td>notification-service</td></tr>
 <tr><td>Infisical</td><td>User declined wrapping compose with <code>infisical run</code>; no injection into containers</td><td>startup loader reading <code>/api/v4/secrets</code></td><td><code>InfisicalEnvironmentPostProcessor</code>, notification-service</td></tr>
-<tr><td>Redis</td><td>APISIX limits are per IP only; OTP cost needs per-recipient limits</td><td>per-recipient limits counted in Postgres <code>send_log</code>, not Redis</td><td><code>NotificationDispatcher</code></td></tr>
+<tr><td>Redis</td><td>APISIX limits are per IP only; SMS/email cost needs per-recipient limits</td><td>per-recipient limits counted in Postgres <code>send_log</code>, not Redis</td><td><code>NotificationDispatcher</code></td></tr>
 <tr><td>Redis ACL</td><td>Infisical's key names unknown, so its user is not prefix-restricted</td><td>nothing (open item)</td><td><code>infra/redis/entrypoint.sh</code></td></tr>
 <tr><td>RabbitMQ</td><td>Not used yet: partner queue is Postgres plus in-process workers</td><td>delivery workers and retry policy in code</td><td><code>DeliveryWorker</code>, <code>CallbackWorker</code>, <code>RetryPolicy</code></td></tr>
 <tr><td>RustFS / S3</td><td>Presigned URLs depend on the host; no bucket bootstrap</td><td>public-endpoint presigning, bucket auto-create, image re-encoding</td><td><code>S3AvatarStorage</code>, <code>S3ObjectStorage</code>, image processors</td></tr>

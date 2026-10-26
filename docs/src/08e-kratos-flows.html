@@ -55,7 +55,7 @@
 <li><a href="08d-internal-api.html">8d. Internal API</a>
 </li>
 <li><a href="08e-kratos-flows.html" class=current>8e. Kratos flows</a>
-<ul><li><a href="#model">How a native flow works</a></li><li><a href="#messages">Message catalogue (captured)</a></li><li><a href="#sessions">Sessions and assurance levels</a></li><li><a href="#walkthrough">Walkthrough: sign up with a phone, then call the API</a></li><li><a href="#endpoints">Endpoints</a></li></ul>
+<ul><li><a href="#model">How a native flow works</a></li><li><a href="#messages">Message catalogue (captured)</a></li><li><a href="#sessions">Sessions and assurance levels</a></li><li><a href="#walkthrough">Walkthrough: sign up, verify, sign in</a></li><li><a href="#protection">Enumeration and brute-force summary</a></li><li><a href="#endpoints">Endpoints</a></li></ul>
 </li>
 <li><a href="08f-operational.html">8f. Operational endpoints</a>
 </li>
@@ -63,496 +63,750 @@
 </nav>
 <main>
 <h1>8e. Kratos self-service flows</h1>
-<p class="lead">The sign-up, login, session and authenticator-app calls the app makes to Ory Kratos through the gateway. They are Kratos' own API (we wrote no code for them); this page documents how Adera configured and uses them. 13 endpoint blocks.</p>
-<div class="callout why"><span class="label">Why Kratos, and what this means for the app</span>
-<p>Passwordless login with email or SMS codes, sessions and TOTP are solved problems; building them ourselves would add risk and no product value. Kratos is "headless": it returns a <em>flow</em> object that describes the form, and the Flutter app renders its own UI from it. Our code only (a) sends the codes (notification-service is Kratos' courier), (b) creates the profile after sign-up (webhook to user-service) and (c) turns a session token into <code>X-User-Id</code> for the gateway.</p></div>
-<p>Examples captured <strong>2026-10-25</strong> through <code>$GATEWAY/kratos</code> in dev mode with throwaway users (phone numbers masked, deleted afterwards). <code>$TOKEN</code> is the <code>session_token</code>.</p>
+<p class="lead">The sign-up, verification, sign-in, forgot-password, change-password and session calls the super app makes to Ory Kratos through the gateway, plus our two small public endpoints around them (phone password reset, code pre-flight). Kratos' calls are Kratos' own API; this page documents how Adera configured and uses them. Captured live on 2026-10-26.</p>
+<div class="callout why"><span class="label">What changed (2026-10-26)</span>
+<p>End users no longer sign in with one-time codes. They register with a <strong>phone (email optional) and a password</strong> (at least 6 characters, nothing else), <strong>verify</strong> the address with a code sent by SMS or email, then <strong>sign in with identifier and password</strong>. <strong>Forgot password</strong> works by code: email through Kratos' recovery flow, phone through our <code>/public/v1/password-reset/*</code> endpoints (Kratos recovery only accepts an email address). Dashboard staff are unchanged: emailed code, then authenticator app (<a href="08b-staff-api.html">8b</a>). The two kinds of people live in two Kratos identity schemas: <code>user</code> (app users, the default) and <code>default</code> (staff, created through the admin API).</p>
+<p>Kratos is "headless": it returns a <em>flow</em> object that describes the form and the app renders its own UI. Our code (a) sends the codes (notification-service is Kratos' courier: SMS and email endpoints unchanged), (b) creates the profile after sign-up (Kratos web_hook to user-service on the password registration method), (c) the phone reset and the code pre-flight.</p></div>
+<p>Examples captured <strong>2026-10-26</strong> through <code>$GATEWAY/kratos</code> in dev mode with throwaway users (deleted afterwards; session tokens shortened). <code>$TOKEN</code> is the <code>session_token</code>.</p>
 <h2 id="model">How a native flow works</h2>
 <ol>
-<li><strong>Create</strong> the flow with a GET (<code>.../registration/api</code> or <code>.../login/api</code>). You receive an object with <code>id</code>, <code>state</code>, <code>expires_at</code> and <code>ui</code> (<code>action</code>, <code>method</code>, <code>nodes</code>, <code>messages</code>).</li>
-<li><strong>Submit</strong> with a POST to <code>ui.action</code> (JSON body; field names are the node names). Kratos answers the <em>next</em> state of the flow.</li>
-<li><strong>Read the answer by state, not only by HTTP status.</strong> In API flows a step that needs more input is answered with <code>400</code> and the updated flow (<code>state: sent_email</code> after the code was sent; the error texts are in node or <code>ui</code> <code>messages</code>). A finished flow is <code>200</code> with <code>session_token</code> and <code>session</code>.</li>
+<li><strong>Create</strong> the flow with a GET (<code>.../registration/api</code>, <code>.../login/api</code>, <code>.../recovery/api</code>, <code>.../settings/api</code>). You receive <code>id</code>, <code>state</code>, <code>expires_at</code> and <code>ui</code> (<code>action</code>, <code>method</code>, <code>nodes</code>, <code>messages</code>).</li>
+<li><strong>Submit</strong> with a POST to <code>ui.action</code> (JSON; field names are node names).</li>
+<li><strong>Read the answer by state and message ids, not only by HTTP status.</strong> A finished sign-in is <code>200</code> with <code>session_token</code>; rejected input is <code>400</code> with the flow and messages; some "try again" answers (wrong verification or recovery code) are <code>200</code> with an error message; a refused sign-in for an unverified address is <code>403</code> with <code>error.id</code>.</li>
 </ol>
-<div class="table-wrap"><table><thead><tr><th>State</th><th>Meaning</th></tr></thead><tbody><tr><td><code>choose_method</code></td><td>Nothing submitted yet, or the last submit was rejected before a code was sent (unknown account, invalid number).</td></tr><tr><td><code>sent_email</code></td><td>A code was sent (the name says email, but it is used for SMS as well). Next: submit with <code>code</code>.</td></tr><tr><td><code>passed_challenge</code></td><td>The challenge was passed but something else stopped the flow (for example "account exists already" at registration).</td></tr><tr><td><code>show_form</code> / <code>success</code></td><td>Settings flow: form shown / changes saved.</td></tr></tbody></table></div>
+<h3>The whole user journey (call sequence)</h3>
+<ol>
+<li><code>GET /kratos/self-service/registration/api</code> then <code>POST .../registration?flow=ID</code> with <code>{"method":"password","password":...,"traits.phone_number":...}</code> (optional <code>traits.email</code>). Answer: identity (unverified) and <code>continue_with[0].flow</code> = a verification flow whose code was <em>already sent</em> to <code>verifiable_address</code>. <strong>No session yet.</strong></li>
+<li><code>POST .../verification?flow=VID</code> with <code>{"method":"code","code":"123456"}</code> until <code>state</code> is <code>passed_challenge</code>.</li>
+<li><code>GET .../login/api</code> then <code>POST .../login?flow=ID</code> with <code>{"method":"password","identifier":...,"password":...}</code>. Answer: <code>session_token</code> (30 days). Use <code>Authorization: Bearer $TOKEN</code> on <code>/api/v1/me</code> etc.</li>
+<li>Forgot password: by email <code>GET .../recovery/api</code>, <code>POST .../recovery?flow=ID</code> (<code>email</code>, then <code>code</code>) gives a privileged token and a settings flow; by phone <code>POST /public/v1/password-reset/start</code> then <code>/finish</code>.</li>
+<li>Change password: <code>GET .../settings/api</code> with the session, <code>POST .../settings?flow=ID</code> with <code>{"method":"password","password":...}</code>.</li>
+</ol>
+<div class="table-wrap"><table><thead><tr><th>State</th><th>Meaning</th></tr></thead><tbody><tr><td><code>choose_method</code></td><td>Nothing submitted yet, or the last submit was rejected before anything was sent.</td></tr><tr><td><code>sent_email</code></td><td>A code was sent (the name says email, it is used for SMS too). Next: submit <code>code</code>.</td></tr><tr><td><code>passed_challenge</code></td><td>Verification or recovery succeeded.</td></tr><tr><td><code>show_form</code> / <code>success</code></td><td>Settings flow: form shown / saved.</td></tr></tbody></table></div>
 <h3 id="nodes">The nodes you will meet</h3>
-<div class="table-wrap"><table><thead><tr><th>Node name</th><th>Type</th><th>Group</th><th>Meaning</th></tr></thead><tbody><tr><td><code>csrf_token</code></td><td>hidden</td><td>default</td><td>Browser-only protection. In API flows it is present but empty; ignore it.</td></tr><tr><td><code>identifier</code></td><td>text</td><td>default</td><td>Login: the email or phone to log in with (label "ID").</td></tr><tr><td><code>traits.email</code></td><td>email</td><td>default / profile</td><td>Registration: the email identifier.</td></tr><tr><td><code>traits.phone_number</code></td><td>tel</td><td>default / profile</td><td>Registration: the phone identifier (E.164).</td></tr><tr><td><code>method</code></td><td>submit / hidden</td><td>code, profile, totp</td><td>Which strategy the submit button belongs to; you send <code>method</code> with the value of the strategy you use.</td></tr><tr><td><code>code</code></td><td>text</td><td>code</td><td>Appears once the code was sent (<code>state: sent_email</code>): the field for the one-time code.</td></tr><tr><td><code>resend</code></td><td>submit</td><td>code</td><td>Send <code>{"method":"code","resend":"code", ...}</code> to have another code sent.</td></tr><tr><td><code>screen</code></td><td>submit</td><td>profile</td><td>"Back": go back to choosing a method.</td></tr><tr><td><code>totp_qr / totp_secret_key</code></td><td>img / text</td><td>totp</td><td>Settings flow: QR image and text secret for the authenticator app. Secret material, never log it.</td></tr><tr><td><code>totp_code</code></td><td>text</td><td>totp</td><td>6-digit code field (settings enrolment and aal2 login).</td></tr><tr><td><code>totp_unlink</code></td><td>submit</td><td>totp</td><td>Shown after enrolment; removes the authenticator app.</td></tr></tbody></table></div>
+<div class="table-wrap"><table><thead><tr><th>Node name</th><th>Type</th><th>Group</th><th>Meaning</th></tr></thead><tbody><tr><td><code>csrf_token</code></td><td>hidden</td><td>default</td><td>Browser-only protection. In API flows it is present but empty; ignore it.</td></tr><tr><td><code>identifier</code></td><td>text</td><td>default</td><td>Login: the phone or email to sign in with.</td></tr><tr><td><code>traits.email</code></td><td>email</td><td>default / profile</td><td>Registration: the email identifier.</td></tr><tr><td><code>traits.phone_number</code></td><td>tel</td><td>default / profile</td><td>Registration: the phone identifier (E.164).</td></tr><tr><td><code>method</code></td><td>submit / hidden</td><td>code, profile, totp</td><td>Which strategy the submit button belongs to; you send <code>method</code> with the value of the strategy you use.</td></tr><tr><td><code>code</code></td><td>text</td><td>code</td><td>Appears once the code was sent (<code>state: sent_email</code>): the field for the one-time code.</td></tr><tr><td><code>password</code></td><td>text / password</td><td>default, password</td><td>The password field (registration, login, settings).</td></tr><tr><td><code>screen</code></td><td>submit</td><td>profile</td><td>"Back": go back to choosing a method.</td></tr><tr><td><code>totp_qr / totp_secret_key</code></td><td>img / text</td><td>totp</td><td>Settings flow: QR image and text secret for the authenticator app. Secret material, never log it.</td></tr><tr><td><code>totp_code</code></td><td>text</td><td>totp</td><td>6-digit code field (settings enrolment and aal2 login).</td></tr><tr><td><code>totp_unlink</code></td><td>submit</td><td>totp</td><td>Shown after enrolment; removes the authenticator app.</td></tr></tbody></table></div>
 <h3 id="lifetimes">Lifetimes and limits</h3>
-<div class="table-wrap"><table><thead><tr><th>What</th><th>Value</th><th>Where it is set</th></tr></thead><tbody><tr><td>Registration and login flow</td><td>10 minutes</td><td><code>selfservice.flows.registration.lifespan</code>, <code>login.lifespan</code></td></tr><tr><td>One-time code</td><td>5 minutes, single use</td><td><code>selfservice.methods.code.config.lifespan</code></td></tr><tr><td>Session</td><td>30 days (<code>720h</code>)</td><td><code>session.lifespan</code></td></tr><tr><td>Settings need a recent session</td><td>15 minutes</td><td><code>settings.privileged_session_max_age</code></td></tr><tr><td>Submit calls (POST on <code>/kratos/self-service/*</code>)</td><td>10 per minute per IP</td><td>gateway route <code>kratos-self-service-submit</code></td></tr><tr><td>All other <code>/kratos/*</code></td><td>120 per minute per IP</td><td>gateway route <code>kratos-public</code></td></tr><tr><td>Codes per recipient</td><td>SMS 5/hour and 10/day, email 10/hour and 20/day</td><td>notification-service <code>adera.notification.limits.*</code> (silent: Kratos still reports "sent")</td></tr></tbody></table></div>
+<div class="table-wrap"><table><thead><tr><th>What</th><th>Value</th><th>Where it is set</th></tr></thead><tbody>
+<tr><td>Registration and login flow</td><td>10 minutes</td><td><code>selfservice.flows.registration.lifespan</code>, <code>login.lifespan</code></td></tr>
+<tr><td>Verification and recovery flow, and their codes</td><td>10 minutes, single use</td><td><code>flows.verification.lifespan</code>, <code>flows.recovery.lifespan</code>, <code>methods.code.config.lifespan</code></td></tr>
+<tr><td>Phone reset code (ours)</td><td>10 minutes, 5 tries, single use</td><td>notification-service <code>PasswordResetService</code></td></tr>
+<tr><td>Session</td><td>30 days (<code>720h</code>)</td><td><code>session.lifespan</code></td></tr>
+<tr><td>Settings need a recent session</td><td>15 minutes</td><td><code>settings.privileged_session_max_age</code></td></tr>
+<tr><td>Password rules</td><td>at least 6 characters; no breach check, no similarity check, no digit/symbol rule</td><td><code>methods.password.config</code> (<code>min_password_length: 6</code>, <code>haveibeenpwned_enabled: false</code>, <code>identifier_similarity_check_enabled: false</code>)</td></tr>
+<tr><td>Gateway: login submit</td><td>10/min per IP and 10 per 15 min per identifier</td><td>route <code>kratos-login-submit</code></td></tr>
+<tr><td>Gateway: registration submit</td><td>5/min per IP</td><td>route <code>kratos-registration-submit</code></td></tr>
+<tr><td>Gateway: recovery submit</td><td>5/min per IP and 5 per 15 min per email</td><td>route <code>kratos-recovery-submit</code></td></tr>
+<tr><td>Gateway: verification / settings submit, other self-service POST</td><td>10/min per IP each</td><td>routes <code>kratos-verification-submit</code>, <code>kratos-settings-submit</code>, <code>kratos-self-service-other-submit</code></td></tr>
+<tr><td>Gateway: phone reset start / finish</td><td>start 5/min + 5 per 15 min per phone; finish 10/min + 10 per 15 min per phone</td><td>routes <code>password-reset-start</code>, <code>password-reset-finish</code></td></tr>
+<tr><td>Gateway: code pre-flight</td><td>10/min per IP</td><td>route <code>login-code-check</code></td></tr>
+<tr><td>All other <code>/kratos/*</code> (flow creation GET, whoami, sessions, logout)</td><td>120/min per IP</td><td>route <code>kratos-public</code></td></tr>
+<tr><td>Codes per recipient</td><td>SMS 5/hour and 10/day, email 10/hour and 20/day</td><td>notification-service <code>adera.notification.limits.*</code> (silent: Kratos still reports "sent"; use the pre-flight check)</td></tr>
+</tbody></table></div>
 <h2 id="messages">Message catalogue (captured)</h2>
 <p>Every text below was returned by the running stack. Match on the numeric <code>id</code> in the app (and translate), not on the English text.</p>
-<div class="table-wrap"><table><thead><tr><th>Message id</th><th>Type</th><th>Text (as returned)</th><th>Where</th></tr></thead><tbody><tr><td>1040005</td><td>info</td><td>A code has been sent to the address(es) you provided. If you have not received a message, check the spelling of the address and retry the registration.</td><td>registration step 1 (also shown for an already-registered number)</td></tr><tr><td>4040003</td><td>error</td><td>The registration code is invalid or has already been used. Please try again.</td><td>registration step 2</td></tr><tr><td>4000041</td><td>error</td><td>Enter a valid phone number</td><td>registration step 1, on the phone node</td></tr><tr><td>4000002</td><td>error</td><td>Property email is missing.</td><td>registration step 1 with no identifier</td></tr><tr><td>4000002</td><td>error</td><td>Property phone_number is missing.</td><td>registration step 1 with no identifier</td></tr><tr><td>4000007</td><td>error</td><td>An account with the same identifier (email, phone, username, ...) exists already.</td><td>registration step 2 when the account already exists</td></tr><tr><td>1010014</td><td>info</td><td>A code was sent to the address you provided. If you didn't receive it, please check the spelling of the address and try again.</td><td>login step 1</td></tr><tr><td>4010008</td><td>error</td><td>The login code is invalid or has already been used. Please try again.</td><td>login step 2</td></tr><tr><td>4010002</td><td>error</td><td>Could not find a strategy to log you in with. Did you fill out the form correctly?</td><td>login step 2 after the flow already succeeded</td></tr><tr><td>4000035</td><td>error</td><td>This account does not exist or has not setup sign in with code.</td><td>login step 1 with an unknown or malformed identifier</td></tr><tr><td>4000008</td><td>error</td><td>The provided authentication code is invalid, please try again.</td><td>settings flow, wrong TOTP code</td></tr><tr><td>1010004</td><td>info</td><td>Please complete the second authentication challenge.</td><td>aal2 flow, shown on creation</td></tr><tr><td>4000008</td><td>error</td><td>The provided authentication code is invalid, please try again.</td><td>aal2 flow, wrong TOTP code</td></tr><tr><td>1050001</td><td>success</td><td>Your changes have been saved!</td><td>settings flow, success</td></tr></tbody></table></div>
+<div class="table-wrap"><table><thead><tr><th>Message id</th><th>Type</th><th>Text (as returned)</th><th>Where</th></tr></thead><tbody><tr><td>4000006</td><td>error</td><td>The provided credentials are invalid, check for spelling mistakes in your password or username, email address, or phone number.</td><td>login: wrong password or unknown account (identical)</td></tr><tr><td>4000032</td><td>error</td><td>The password must be at least 6 characters long, but got 3.</td><td>registration, settings (context: min_length, actual_length)</td></tr><tr><td>4000007</td><td>error</td><td>An account with the same identifier (email, phone, username, ...) exists already.</td><td>registration of an already used phone/email (reveals the account exists)</td></tr><tr><td>4000041</td><td>error</td><td>Enter a valid phone number</td><td>registration, phone node</td></tr><tr><td>4000002</td><td>error</td><td>Property ... is missing.</td><td>registration with no identifier</td></tr><tr><td>4000035</td><td>error</td><td>This account does not exist or has not setup sign in with code.</td><td>login with method code by an app user</td></tr><tr><td>4070006</td><td>error</td><td>The verification code is invalid or has already been used. Please try again.</td><td>verification, wrong code</td></tr><tr><td>1080002</td><td>success</td><td>You successfully verified your email address.</td><td>verification success (also for a phone)</td></tr><tr><td>4060006</td><td>error</td><td>The recovery code is invalid or has already been used. Please try again.</td><td>recovery, wrong code</td></tr><tr><td>1060003</td><td>info</td><td>An email containing a recovery code has been sent to the email address you provided. If you have not received an email, check the spelling of the address and make sure to use the address you registered with.</td><td>recovery step 1 (known or unknown email)</td></tr><tr><td>4000040</td><td>error</td><td>Enter a valid email address</td><td>recovery or verification with a phone typed into the email field</td></tr></tbody></table></div>
+<p>Error ids (not messages): <code>session_verified_address_required</code> (login, address not verified, HTTP 403), <code>session_aal2_required</code>.</p>
 <h2 id="sessions">Sessions and assurance levels</h2>
-<p><code>aal1</code> = one factor (the emailed/SMS code). <code>aal2</code> = a second factor (authenticator app) was also completed. Customers are always <code>aal1</code>. Staff must reach <code>aal2</code> (<code>ADMIN_REQUIRE_AAL2=true</code>) before the gateway lets them into <code>/admin/api/v1</code>. Because Kratos is configured with the default <code>whoami</code> behaviour (<code>highest_available</code>), an <code>aal1</code> session of an identity that <em>has</em> an authenticator app gets <code>403 session_aal2_required</code> from <code>whoami</code>; registry-service reports that as <code>403 mfa_required</code> and user-service treats it as invalid (<code>401</code>).</p>
-<h2 id="walkthrough">Walkthrough: sign up with a phone, then call the API</h2>
+<p><code>aal1</code> = one factor (an app user's password, or a staff member's emailed code). <code>aal2</code> = a second factor (authenticator app) was also completed. Customers are always <code>aal1</code>. Staff must reach <code>aal2</code> (<code>ADMIN_REQUIRE_AAL2=true</code>) before the gateway lets them into <code>/admin/api/v1</code>. Because Kratos is configured with the default <code>whoami</code> behaviour (<code>highest_available</code>), an <code>aal1</code> session of an identity that <em>has</em> an authenticator app gets <code>403 session_aal2_required</code> from <code>whoami</code>; registry-service reports that as <code>403 mfa_required</code> and user-service treats it as invalid (<code>401</code>).</p>
+<h2 id="walkthrough">Walkthrough: sign up, verify, sign in, call the API</h2>
 <pre><code>export GATEWAY=http://127.0.0.1:9080
 PHONE=+2519XXXXXXXX            # a number you control; in dev nothing is really sent
+j() { python3 -c "import sys,json; print(json.load(sys.stdin)$1)"; }
+H='Content-Type: application/json'
 
-FLOW=$(curl -s $GATEWAY/kratos/self-service/registration/api | python3 -c 'import sys,json; print(json.load(sys.stdin)["id"])')
-curl -s -X POST "$GATEWAY/kratos/self-service/registration?flow=$FLOW" \
-  -H 'Content-Type: application/json' \
-  -d "{\"method\":\"code\",\"traits.phone_number\":\"$PHONE\"}" &gt;/dev/null     # 400 sent_email is expected
+# 1. register (no session comes back; a verification code is sent)
+FLOW=$(curl -s $GATEWAY/kratos/self-service/registration/api | j '["id"]')
+VFLOW=$(curl -s -X POST "$GATEWAY/kratos/self-service/registration?flow=$FLOW" -H "$H" \
+  -d "{\"method\":\"password\",\"password\":\"tadesse\",\"traits.phone_number\":\"$PHONE\"}" | j '["continue_with"][0]["flow"]["id"]')
 
-# dev mode only: read the code from notification-service
-curl -s "http://127.0.0.1:8085/dev/messages?to=$(python3 -c "import urllib.parse,sys; print(urllib.parse.quote('$PHONE'))")"
+# 2. dev mode only: read the code from notification-service, then verify
+curl -s "http://127.0.0.1:8085/dev/messages?to=$(python3 -c "import urllib.parse; print(urllib.parse.quote('$PHONE'))")"
 CODE=123456                    # copy the 6 digits from the body above
+curl -s -X POST "$GATEWAY/kratos/self-service/verification?flow=$VFLOW" -H "$H" -d "{\"method\":\"code\",\"code\":\"$CODE\"}"   # state passed_challenge
 
-TOKEN=$(curl -s -X POST "$GATEWAY/kratos/self-service/registration?flow=$FLOW" \
-  -H 'Content-Type: application/json' \
-  -d "{\"method\":\"code\",\"traits.phone_number\":\"$PHONE\",\"code\":\"$CODE\"}" \
-  | python3 -c 'import sys,json; print(json.load(sys.stdin)["session_token"])')
+# 3. sign in with the password
+LFLOW=$(curl -s $GATEWAY/kratos/self-service/login/api | j '["id"]')
+TOKEN=$(curl -s -X POST "$GATEWAY/kratos/self-service/login?flow=$LFLOW" -H "$H" \
+  -d "{\"method\":\"password\",\"identifier\":\"$PHONE\",\"password\":\"tadesse\"}" | j '["session_token"]')
 
 curl -s "$GATEWAY/api/v1/me" -H "Authorization: Bearer $TOKEN"</code></pre>
-<p>Login of an existing user is the same with <code>/login/api</code>, <code>/login?flow=</code> and <code>"identifier"</code> instead of <code>"traits.phone_number"</code>. See also <a href="09-guides.html">the guides</a>.</p>
+<p>The seeded demo users can sign in the same way (<a href="13-sample-data.html#users">sample data</a>). The same sequence is automated in <code>tests/e2e/journey.py</code> (63 checks). See also <a href="09-guides.html">the guides</a>.</p>
+<h2 id="protection">Enumeration and brute-force summary</h2>
+<div class="table-wrap"><table><thead><tr><th>Question</th><th>Answer (checked live)</th></tr></thead><tbody>
+<tr><td>Can the login screen tell whether a phone/email has an account?</td><td>No: unknown and wrong password give the same status, message <code>4000006</code> and flow shape.</td></tr>
+<tr><td>Recovery by email, phone reset, verification of unknown addresses?</td><td>No: the same <code>200</code>/<code>202</code> answer, and nothing is sent for an unknown address (<code>notify_unknown_recipients: false</code>).</td></tr>
+<tr><td>Registration?</td><td><strong>Yes, it leaks</strong>: an existing identifier gives message <code>4000007</code>. Mitigation: 5 registration submits a minute per IP. Not closable with Kratos configuration.</td></tr>
+<tr><td>Account lockout after wrong passwords?</td><td><strong>None.</strong> Kratos has no lockout.</td></tr>
+<tr><td>What limits password guessing?</td><td>Gateway only: 10 tries/min per IP, 10 tries per 15 min per identifier, 6-character minimum. Side effect: someone can exhaust a victim's per-identifier budget (a 15-minute denial of sign-in attempts). IPs are keyed on the address the gateway sees: behind a proxy they need a real-IP setting (deferred, SETUP section 12).</td></tr>
+<tr><td>What limits code abuse (SMS cost)?</td><td>Registration 5/min per IP, recovery 5/min per IP + 5 per 15 min per email, reset start 5/min per IP + 5 per 15 min per phone, per-recipient SMS 5/hour and 10/day (silent drop, see the pre-flight check), 5 wrong tries per reset code.</td></tr>
+</tbody></table></div>
 <h2 id="endpoints">Endpoints</h2>
 <details class="endpoint" id="ep-kratos-get-registration-api">
 <summary><span class="method m-get">GET</span><span class="path">/kratos/self-service/registration/api</span><span class="sum">Start a registration flow (native app)</span></summary>
 <div class="body"><dl class="meta">
-<dt>Audience</dt><dd>signed-out or signed-in end user (the Flutter app); staff use the same endpoints for their login (<a href="08b-staff-api.html">8b</a>)</dd>
+<dt>Audience</dt><dd>end user (the super app). Staff use their own sign-in (<a href="08b-staff-api.html">8b</a>)</dd>
 <dt>Client path</dt><dd><code>/kratos/self-service/registration/api</code> (through the gateway, base <code>$GATEWAY</code>)</dd>
-<dt>Internal path</dt><dd><code>/self-service/registration/api</code> on Kratos public API <code>kratos:4433</code> (the gateway strips the <code>/kratos</code> prefix with <code>proxy-rewrite</code>)</dd>
+<dt>Internal path</dt><dd><code>/self-service/registration/api</code> on Kratos public API <code>kratos:4433</code> (the gateway strips <code>/kratos</code>, and removes <code>Origin</code> and <code>Cookie</code> from the request: native flows carry neither)</dd>
 <dt>Auth</dt><dd>none: the caller is not signed in yet</dd>
 <dt>Rate limit</dt><dd>120 per 60 s per client IP (gateway route <code>kratos-public</code>)</dd>
-<dt>Implemented in</dt><dd>Ory Kratos v26.2.0 (no code of ours); spec <code>docs/kratos-openapi-v26.2.0.json</code>, config <code>infra/kratos/kratos.yml</code>, routes in <code>infra/apisix/apisix.yaml</code></dd>
-</dl>
-<h4>Purpose</h4><p>Creates a registration flow of type <code>api</code> and returns its form description. The flow id in the answer goes into the <code>flow</code> query parameter of the submit call. Registration is the same as first login here: there are no passwords, so a new person proves control of a phone number or an email address with a one-time code and the account is created at that moment.</p>
-<h4>Request parameters</h4><p>None.</p>
-<h4>Example request</h4>
-<pre><code>curl -s "$GATEWAY/kratos/self-service/registration/api"</code></pre>
-<pre class="out"><code>HTTP/1.1 200 OK
+<dt>Implemented in</dt><dd>Ory Kratos v26.2.0 (no code of ours); config <code>infra/kratos/kratos.yml</code>, identity schema <code>infra/kratos/identity.user.schema.json</code>, routes in <code>infra/apisix/apisix.yaml</code></dd>
+</dl><h4>Purpose</h4><p>Creates a registration flow of type <code>api</code>. Registration now means <strong>phone (or email) plus a password</strong>; the address is verified afterwards with a code (see the verification endpoints). The flow uses the identity schema <code>user</code> (the default). The gateway refuses <code>?identity_schema=default</code> (the staff schema) with 403, so nobody can self-register as a staff-style identity.</p><h4>Request parameters</h4><p>None.</p><h4>Example request</h4><pre><code>curl -s &quot;$GATEWAY/kratos/self-service/registration/api&quot;</code></pre><pre class="out"><code>HTTP/1.1 200 OK
 Content-Type: application/json; charset=utf-8
-X-RateLimit-Limit: 120
-X-RateLimit-Remaining: 116
 
 {
-  "id": "b72b8ef5-0a4e-4f24-8ec6-9b8e7f9673c9",
-  "type": "api",
-  "expires_at": "2026-10-25T05:40:52.421072746Z",
-  "issued_at": "2026-10-25T05:30:52.421072746Z",
-  "request_url": "http://127.0.0.1:9080/self-service/registration/api",
-  "ui": {
-    "action": "http://127.0.0.1:9080/kratos/self-service/registration?flow=b72b8ef5-0a4e-4f24-8ec6-9b8e7f9673c9",
-    "method": "POST",
-    "nodes": [
-      "default: csrf_token (hidden) = '&lt;csrf_token&gt;'",
-      "default: traits.email (email)",
-      "default: traits.phone_number (tel)",
-      "profile: method (submit)"
-    ]
+  &quot;id&quot;: &quot;f0bab070-469a-4a37-9c58-41ec187eb1d8&quot;,
+  &quot;type&quot;: &quot;api&quot;,
+  &quot;expires_at&quot;: &quot;2026-10-26T21:50:27.304440518Z&quot;,
+  &quot;issued_at&quot;: &quot;2026-10-26T21:40:27.304440518Z&quot;,
+  &quot;request_url&quot;: &quot;http://127.0.0.1:9080/self-service/registration/api&quot;,
+  &quot;ui&quot;: {
+    &quot;action&quot;: &quot;http://127.0.0.1:9080/kratos/self-service/registration?flow=f0bab070-469a-4a37-9c58-41ec187eb1d8&quot;,
+    &quot;method&quot;: &quot;POST&quot;,
+    &quot;nodes&quot;: [
+      &quot;default: csrf_token (hidden)&quot;,
+      &quot;default: traits.phone_number (tel)&quot;,
+      &quot;default: traits.email (email)&quot;,
+      &quot;profile: method (submit)&quot;
+    ],
+    &quot;messages&quot;: null
   },
-  "state": "choose_method"
-}</code></pre><p class="masked">The &lt;code&gt;ui.nodes&lt;/code&gt; array is abridged to one line per node (see the node table below). &lt;code&gt;request_url&lt;/code&gt; lacks the &lt;code&gt;/kratos&lt;/code&gt; prefix because the gateway strips it before Kratos sees the request; &lt;code&gt;ui.action&lt;/code&gt; is the correct client URL.</p>
-<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th>Error code</th><th>When it happens</th></tr></thead><tbody><tr><td><strong>429</strong></td><td><code>(HTML page)</code></td><td>Gateway rate limit (see Rate limit above). The body is APISIX's HTML page.</td></tr></tbody></table></div>
-<h4>How to use it</h4><ul><li>Use <code>ui.action</code> as the submit URL, or build it as <code>$GATEWAY/kratos/self-service/registration?flow=&lt;id&gt;</code>.</li><li>A flow is valid for 10 minutes (<code>expires_at</code>); start a new one when it expires.</li><li>To re-read a flow: <code>GET /kratos/self-service/registration/flows?id=&lt;flow id&gt;</code> (answers the same object; unknown id gives 404).</li></ul>
+  &quot;state&quot;: &quot;choose_method&quot;
+}</code></pre><h4>Notes</h4><ul><li>Both <code>traits.phone_number</code> and <code>traits.email</code> are shown, but the schema requires at least one of them.</li><li>The flow lives 10 minutes.</li></ul><h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th>Error</th><th>When it happens</th></tr></thead><tbody><tr><td><strong>403</strong></td><td><code>{"error":"forbidden","reason":"only the app-user schema can self-register"}</code></td><td><code>identity_schema</code> other than <code>user</code> was requested.</td></tr></tbody></table></div>
 </div></details>
 <details class="endpoint" id="ep-kratos-post-registration">
-<summary><span class="method m-post">POST</span><span class="path">/kratos/self-service/registration?flow={id}</span><span class="sum">Submit a registration step (send the code, then verify it)</span></summary>
+<summary><span class="method m-post">POST</span><span class="path">/kratos/self-service/registration?flow={id}</span><span class="sum">Register with phone or email and a password</span></summary>
 <div class="body"><dl class="meta">
-<dt>Audience</dt><dd>signed-out or signed-in end user (the Flutter app); staff use the same endpoints for their login (<a href="08b-staff-api.html">8b</a>)</dd>
+<dt>Audience</dt><dd>end user (the super app). Staff use their own sign-in (<a href="08b-staff-api.html">8b</a>)</dd>
 <dt>Client path</dt><dd><code>/kratos/self-service/registration?flow={id}</code> (through the gateway, base <code>$GATEWAY</code>)</dd>
-<dt>Internal path</dt><dd><code>/self-service/registration?flow={id}</code> on Kratos public API <code>kratos:4433</code> (the gateway strips the <code>/kratos</code> prefix with <code>proxy-rewrite</code>)</dd>
-<dt>Auth</dt><dd>none: the caller is not signed in yet</dd>
-<dt>Rate limit</dt><dd><strong>10 per 60 s per client IP</strong> (gateway route <code>kratos-self-service-submit</code>): this is the first line of SMS-cost protection. The 11th request in the window is a <code>429</code> with an HTML body</dd>
-<dt>Implemented in</dt><dd>Ory Kratos v26.2.0 (no code of ours); spec <code>docs/kratos-openapi-v26.2.0.json</code>, config <code>infra/kratos/kratos.yml</code>, routes in <code>infra/apisix/apisix.yaml</code></dd>
-</dl>
-<h4>Purpose</h4><p>Used twice per sign-up. <strong>Step 1</strong>: send the identifier; Kratos answers <code>400</code> with <code>state: sent_email</code> (this 400 is the normal "now ask for the code" answer in Kratos' API flow, not a failure) and asks our notification-service to send the code (SMS or email). <strong>Step 2</strong>: send the same identifier plus <code>code</code>; on success Kratos creates the identity and returns <code>200</code> with the <code>session_token</code>. Right after creation Kratos calls our registration webhook (user-service creates the profile row; non-blocking) and issues the session, because <code>hook: session</code> is configured.</p>
-<h4>Request parameters</h4><div class="table-wrap"><table><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why it exists</th></tr></thead><tbody><tr><td><code>method</code></td><td>body</td><td>string</td><td>yes</td><td>always <code>code</code></td><td>Selects the one-time-code strategy (the only login method enabled; <code>password</code> is off).</td></tr><tr><td><code>traits.phone_number</code></td><td>body</td><td>string</td><td>one of the two</td><td>valid E.164 number such as <code>+2519XXXXXXXX</code>; spaces or a national format are refused</td><td>Phone login identifier. A code is sent by SMS.</td></tr><tr><td><code>traits.email</code></td><td>body</td><td>string</td><td>one of the two</td><td>valid email address</td><td>Email login identifier. A code is sent by email.</td></tr><tr><td><code>code</code></td><td>body</td><td>string</td><td>second call only</td><td>the 6-digit code from the SMS/email; valid 5 minutes, single use</td><td>Proves control of the identifier. Omit it in the first call.</td></tr><tr><td><code>flow</code></td><td>query</td><td>UUID</td><td>yes</td><td>id from the create call</td><td>Identifies the flow.</td></tr></tbody></table></div>
-<h4>Step 1: request the code (phone)</h4>
-<pre><code>curl -s -X POST "$GATEWAY/kratos/self-service/registration?flow=4d6c9cf0-5ca7-499a-9645-756381473b5c" \
-  -H "Content-Type: application/json" \
-  -d '{"method": "code", "traits.phone_number": "+2519******98"}'</code></pre>
-<pre class="out"><code>HTTP/1.1 400 Bad Request
+<dt>Internal path</dt><dd><code>/self-service/registration?flow={id}</code> on Kratos public API <code>kratos:4433</code> (the gateway strips <code>/kratos</code>, and removes <code>Origin</code> and <code>Cookie</code> from the request: native flows carry neither)</dd>
+<dt>Auth</dt><dd>none</dd>
+<dt>Rate limit</dt><dd><strong>5 per 60 s per client IP</strong> (gateway route <code>kratos-registration-submit</code>). The 6th is a 429.</dd>
+<dt>Implemented in</dt><dd>Ory Kratos v26.2.0 (no code of ours); config <code>infra/kratos/kratos.yml</code>, identity schema <code>infra/kratos/identity.user.schema.json</code>, routes in <code>infra/apisix/apisix.yaml</code></dd>
+</dl><h4>Purpose</h4><p>Creates the account in one call: identifier(s) and password. There is <strong>no session in the answer</strong>: the account cannot sign in until an address is verified. Instead the answer carries <code>continue_with: [{"action":"show_verification_ui","flow":{"id","verifiable_address"}}]</code>, a verification flow that has <em>already sent a code</em> to <code>verifiable_address</code>. After the identity is created Kratos calls user-service (<code>POST /internal/kratos/after-registration</code>, non-blocking) to create the profile row.</p><h4>Request parameters</h4><div class="table-wrap"><table><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why</th></tr></thead><tbody><tr><td><code>method</code></td><td>body</td><td>string</td><td>yes</td><td><code>password</code></td><td>selects the password strategy</td></tr><tr><td><code>password</code></td><td>body</td><td>string</td><td>yes</td><td>at least 6 characters; nothing else (no digit/symbol rules, no breach check, no similarity check)</td><td>the credential; Kratos stores a hash only</td></tr><tr><td><code>traits.phone_number</code></td><td>body</td><td>string</td><td>one of the two</td><td>E.164, e.g. <code>+251911234567</code></td><td>sign-in identifier; verified by SMS</td></tr><tr><td><code>traits.email</code></td><td>body</td><td>string</td><td>one of the two</td><td>valid email</td><td>optional second identifier; verified by email</td></tr></tbody></table></div><h4>Example: password too short</h4><pre><code>curl -s -X POST &quot;$GATEWAY/kratos/self-service/registration?flow=f0bab070-...&quot; \
+  -H &quot;Content-Type: application/json&quot; \
+  -d &#x27;{&quot;method&quot;:&quot;password&quot;,&quot;password&quot;:&quot;abc&quot;,&quot;traits.phone_number&quot;:&quot;+251903050827&quot;}&#x27;</code></pre><pre class="out"><code>HTTP/1.1 400 Bad Request
 Content-Type: application/json; charset=utf-8
-X-RateLimit-Limit: 10
-X-RateLimit-Remaining: 8
 
 {
-  "id": "4d6c9cf0-5ca7-499a-9645-756381473b5c",
-  "type": "api",
-  "expires_at": "2026-10-25T05:40:52.386774Z",
-  "issued_at": "2026-10-25T05:30:52.386774Z",
-  "request_url": "http://127.0.0.1:9080/self-service/registration/api",
-  "active": "code",
-  "ui": {
-    "action": "http://127.0.0.1:9080/kratos/self-service/registration?flow=4d6c9cf0-5ca7-499a-9645-756381473b5c",
-    "method": "POST",
-    "nodes": [
-      "default: csrf_token (hidden) = '&lt;csrf_token&gt;'",
-      "default: traits.email (hidden)",
-      "default: traits.phone_number (hidden) = '+2519******98'",
-      "code: method (hidden) = 'code'",
-      "code: code (text)",
-      "code: method (submit)",
-      "code: resend (submit)",
-      "profile: screen (submit)"
+  &quot;id&quot;: &quot;f0bab070-469a-4a37-9c58-41ec187eb1d8&quot;,
+  &quot;type&quot;: &quot;api&quot;,
+  &quot;expires_at&quot;: &quot;2026-10-26T21:50:27.30444Z&quot;,
+  &quot;issued_at&quot;: &quot;2026-10-26T21:40:27.30444Z&quot;,
+  &quot;request_url&quot;: &quot;http://127.0.0.1:9080/self-service/registration/api&quot;,
+  &quot;ui&quot;: {
+    &quot;action&quot;: &quot;http://127.0.0.1:9080/kratos/self-service/registration?flow=f0bab070-469a-4a37-9c58-41ec187eb1d8&quot;,
+    &quot;method&quot;: &quot;POST&quot;,
+    &quot;nodes&quot;: [
+      &quot;default: csrf_token (hidden)&quot;,
+      &quot;default: traits.phone_number (tel)&quot;,
+      &quot;default: password (text) messages=[{\&quot;id\&quot;: 4000032, \&quot;text\&quot;: \&quot;The password must be at least 6 characters long, but got 3.\&quot;}]&quot;,
+      &quot;default: traits.email (email)&quot;,
+      &quot;profile: method (submit)&quot;
     ],
-    "messages": [
-      {
-        "id": 1040005,
-        "text": "A code has been sent to the address(es) you provided. If you have not received a message, check the spelling of the address and retry the registration.",
-        "type": "info"
-      }
-    ]
+    &quot;messages&quot;: null
   },
-  "state": "sent_email"
-}</code></pre><p class="masked">Values masked: the phone number.</p>
-<h4>Step 2: send the code, get the session</h4>
-<pre><code>curl -s -X POST "$GATEWAY/kratos/self-service/registration?flow=4d6c9cf0-5ca7-499a-9645-756381473b5c" \
-  -H "Content-Type: application/json" \
-  -d '{"method": "code", "traits.phone_number": "+2519******98", "code": "123456"}'</code></pre>
-<pre class="out"><code>HTTP/1.1 200 OK
+  &quot;state&quot;: &quot;choose_method&quot;
+}</code></pre><h4>Example: success (phone only)</h4><pre><code>curl -s -X POST &quot;$GATEWAY/kratos/self-service/registration?flow=f0bab070-...&quot; \
+  -H &quot;Content-Type: application/json&quot; \
+  -d &#x27;{&quot;method&quot;:&quot;password&quot;,&quot;password&quot;:&quot;tadesse&quot;,&quot;traits.phone_number&quot;:&quot;+251903050827&quot;}&#x27;</code></pre><pre class="out"><code>HTTP/1.1 200 OK
 Content-Type: application/json; charset=utf-8
-X-RateLimit-Limit: 10
-X-RateLimit-Remaining: 6
 
 {
-  "session_token": "&lt;session_token&gt;",
-  "session": {
-    "id": "6b7c7b4a-00ea-422e-92c3-2633e702c66a",
-    "active": true,
-    "expires_at": "2026-11-24T05:30:52.88650483Z",
-    "authenticated_at": "2026-10-25T05:30:52.88650483Z",
-    "authenticator_assurance_level": "aal1",
-    "authentication_methods": [
+  &quot;identity&quot;: {
+    &quot;id&quot;: &quot;bfa0c48c-f574-451f-936a-b02291f5a190&quot;,
+    &quot;schema_id&quot;: &quot;user&quot;,
+    &quot;schema_url&quot;: &quot;http://127.0.0.1:9080/kratos/schemas/dXNlcg&quot;,
+    &quot;state&quot;: &quot;active&quot;,
+    &quot;state_changed_at&quot;: &quot;2026-10-26T21:40:27.601650453Z&quot;,
+    &quot;traits&quot;: {
+      &quot;phone_number&quot;: &quot;+251903050827&quot;
+    },
+    &quot;verifiable_addresses&quot;: [
       {
-        "method": "code",
-        "aal": "aal1",
-        "completed_at": "2026-10-25T05:30:52.886501664Z"
+        &quot;id&quot;: &quot;db703a2a-1082-418e-9667-2bffa0ec8fc7&quot;,
+        &quot;value&quot;: &quot;+251903050827&quot;,
+        &quot;verified&quot;: false,
+        &quot;via&quot;: &quot;sms&quot;,
+        &quot;status&quot;: &quot;sent&quot;,
+        &quot;created_at&quot;: &quot;2026-10-26T21:40:27.603286Z&quot;,
+        &quot;updated_at&quot;: &quot;2026-10-26T21:40:27.603286Z&quot;
       }
     ],
-    "issued_at": "2026-10-25T05:30:52.88650483Z",
-    "identity": {
-      "id": "6c31a934-2d3a-433c-9dd1-6d30a530404c",
-      "schema_id": "default",
-      "state": "active",
-      "traits": {
-        "phone_number": "+2519******98"
-      }
-    }
-  },
-  "identity": "(same identity object as in session.identity)",
-  "continue_with": [
-    {
-      "action": "set_ory_session_token",
-      "ory_session_token": "&lt;session_token&gt;"
-    }
-  ]
-}</code></pre><p class="masked">Values masked: phone number, session token (&lt;code&gt;&amp;lt;session_token&amp;gt;&lt;/code&gt;), the one-time code (&lt;code&gt;123456&lt;/code&gt; is a placeholder). The &lt;code&gt;identity.id&lt;/code&gt; is the user id used everywhere else.</p>
-<h4>Email works the same way: step 1</h4>
-<pre><code>curl -s -X POST "$GATEWAY/kratos/self-service/registration?flow=c25eee9d-508b-4bdd-8be6-b96877fd275e" \
-  -H "Content-Type: application/json" \
-  -d '{"method": "code", "traits.email": "a***@example.com"}'</code></pre>
-<pre class="out"><code>HTTP/1.1 400 Bad Request
-Content-Type: application/json; charset=utf-8
-
-{
-  "id": "c25eee9d-508b-4bdd-8be6-b96877fd275e",
-  "type": "api",
-  "expires_at": "2026-10-25T05:40:52.953715Z",
-  "issued_at": "2026-10-25T05:30:52.953715Z",
-  "request_url": "http://127.0.0.1:9080/self-service/registration/api",
-  "active": "code",
-  "ui": {
-    "action": "http://127.0.0.1:9080/kratos/self-service/registration?flow=c25eee9d-508b-4bdd-8be6-b96877fd275e",
-  ... (abridged)</code></pre>
-<h4>Wrong code</h4>
-<pre><code>curl -s -X POST "$GATEWAY/kratos/self-service/registration?flow=4d6c9cf0-5ca7-499a-9645-756381473b5c" \
-  -H "Content-Type: application/json" \
-  -d '{"method": "code", "traits.phone_number": "+2519******98", "code": "123456"}'</code></pre>
-<pre class="out"><code>HTTP/1.1 400 Bad Request
-Content-Type: application/json; charset=utf-8
-
-{
-  "state": "sent_email",
-  "messages": [
-    {
-      "id": 4040003,
-      "text": "The registration code is invalid or has already been used. Please try again.",
-      "type": "error"
-    }
-  ]
-}</code></pre>
-<h4>Invalid phone number</h4>
-<pre><code>curl -s -X POST "$GATEWAY/kratos/self-service/registration?flow=ceb96c78-79cb-4ece-9115-9dc6959a7f70" \
-  -H "Content-Type: application/json" \
-  -d '{"method": "code", "traits.phone_number": "+1 555 010 0199"}'</code></pre>
-<pre class="out"><code>HTTP/1.1 400 Bad Request
-Content-Type: application/json; charset=utf-8
-
-{
-  "state": "choose_method",
-  "messages": [
-    {
-      "id": 4000041,
-      "text": "Enter a valid phone number",
-      "type": "error",
-      "context": {
-        "value": "+1 555 010 0199"
-      }
-    }
-  ]
-}</code></pre>
-<h4>Phone already registered, step 2</h4>
-<pre><code>curl -s -X POST "$GATEWAY/kratos/self-service/registration?flow=73c1d94f-ecd4-42a7-b2b9-0e49b8a878ab" \
-  -H "Content-Type: application/json" \
-  -d '{"method": "code", "traits.phone_number": "+2519******98", "code": "123456"}'</code></pre>
-<pre class="out"><code>HTTP/1.1 400 Bad Request
-Content-Type: application/json; charset=utf-8
-
-{
-  "state": "passed_challenge",
-  "ui.messages": [
-    {
-      "id": 4000007,
-      "text": "An account with the same identifier (email, phone, username, ...) exists already.",
-      "type": "error"
-    }
-  ]
-}</code></pre>
-<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th>Error code</th><th>When it happens</th></tr></thead><tbody><tr><td><strong>400</strong></td><td>(flow JSON, <code>state: sent_email</code>)</td><td>Not an error: step 1 accepted, code sent. <code>ui.messages[0].id = 1040005</code>.</td></tr><tr><td><strong>400</strong></td><td><code>(flow JSON with error messages)</code></td><td>Wrong or reused code (message id 4040003); invalid phone/email (4000041 for a bad phone number); no identifier at all (4000002 "Property email is missing." and "Property phone_number is missing."); identifier belongs to an existing account, shown only after the code step (4000007).</td></tr><tr><td><strong>404</strong></td><td><code>(Kratos error JSON)</code></td><td>Unknown or wrong flow id (<code>{"error":{"code":404,"status":"Not Found","message":"Unable to locate the resource"}}</code>).</td></tr><tr><td><strong>410</strong></td><td><code>self_service_flow_expired</code></td><td>The flow is older than its lifetime (10 minutes for registration and login); start a new flow. Per the Kratos spec; not reproduced here (would need a 10-minute wait).</td></tr><tr><td><strong>429</strong></td><td><code>(HTML page)</code></td><td>Gateway rate limit (see Rate limit above). The body is APISIX's HTML page.</td></tr><tr><td><strong>(no response)</strong></td><td><code>-</code></td><td>If notification-service rate-limits the recipient (5 SMS/hour, 10 SMS/day, 10 email/hour, 20 email/day per recipient), Kratos still answers <code>sent_email</code> but no message is sent. The user simply never receives a code until the window passes.</td></tr></tbody></table></div>
-<h4>How to use it</h4><ul><li><strong>Anti-enumeration at registration:</strong> sending a phone that already has an account still answers "a code has been sent"; the "account exists" error appears only after the code is entered, so a stranger cannot probe which numbers are registered. Login behaves differently (see below).</li><li>The session returned is <code>aal1</code> (<code>code</code> method completed). Store <code>session_token</code> securely (Keychain/Keystore); it lives 30 days (<code>session.lifespan: 720h</code>).</li><li>Dev mode: the code is not delivered; read it from <code>GET http://127.0.0.1:8085/dev/messages?to=&lt;phone&gt;</code> (<a href="08f-operational.html#ep-ops-get-dev-messages">8f</a>) or from Mailpit.</li><li>Right after step 2, user-service has the profile row (webhook), so <code>GET /api/v1/me</code> works immediately.</li></ul>
-</div></details>
-<details class="endpoint" id="ep-kratos-get-login-api">
-<summary><span class="method m-get">GET</span><span class="path">/kratos/self-service/login/api</span><span class="sum">Start a login flow (native app); also the second-factor flow</span></summary>
-<div class="body"><dl class="meta">
-<dt>Audience</dt><dd>signed-out or signed-in end user (the Flutter app); staff use the same endpoints for their login (<a href="08b-staff-api.html">8b</a>)</dd>
-<dt>Client path</dt><dd><code>/kratos/self-service/login/api</code> (through the gateway, base <code>$GATEWAY</code>)</dd>
-<dt>Internal path</dt><dd><code>/self-service/login/api</code> on Kratos public API <code>kratos:4433</code> (the gateway strips the <code>/kratos</code> prefix with <code>proxy-rewrite</code>)</dd>
-<dt>Auth</dt><dd>none for a normal login; for the second factor send the aal1 session token in <code>X-Session-Token</code></dd>
-<dt>Rate limit</dt><dd>120 per 60 s per client IP (gateway route <code>kratos-public</code>)</dd>
-<dt>Implemented in</dt><dd>Ory Kratos v26.2.0 (no code of ours); spec <code>docs/kratos-openapi-v26.2.0.json</code>, config <code>infra/kratos/kratos.yml</code>, routes in <code>infra/apisix/apisix.yaml</code></dd>
-</dl>
-<h4>Purpose</h4><p>Creates a login flow of type <code>api</code>. With no query it is the normal first step (identifier + emailed/SMS code). With <code>?aal=aal2&amp;refresh=false</code> and the current session token it is the <strong>second-factor</strong> flow used by staff: it asks for an authenticator-app code (<code>totp_code</code>) to raise the session from <code>aal1</code> to <code>aal2</code>.</p>
-<h4>Request parameters</h4><div class="table-wrap"><table><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why it exists</th></tr></thead><tbody><tr><td><code>aal</code></td><td>query</td><td>string</td><td>no</td><td><code>aal1</code> (default) or <code>aal2</code></td><td>Which assurance level the flow should reach. <code>aal2</code> means "add the second factor to my current session".</td></tr><tr><td><code>refresh</code></td><td>query</td><td>boolean</td><td>no</td><td><code>false</code> for an aal2 upgrade; <code>true</code> re-authenticates an existing session</td><td>Without <code>refresh=false</code>, Kratos refuses an aal2 flow when a valid session already exists.</td></tr><tr><td><code>X-Session-Token</code></td><td>header</td><td>string</td><td>only for aal2</td><td>the aal1 session token</td><td>Tells Kratos whose session to upgrade.</td></tr></tbody></table></div>
-<h4>Example request: normal login</h4>
-<pre><code>curl -s "$GATEWAY/kratos/self-service/login/api"</code></pre>
-<pre class="out"><code>HTTP/1.1 200 OK
-Content-Type: application/json; charset=utf-8
-
-{
-  "id": "934e0ba9-5d31-4ed5-a30c-28523513e170",
-  "type": "api",
-  "expires_at": "2026-10-25T05:42:04.223995041Z",
-  "issued_at": "2026-10-25T05:32:04.223995041Z",
-  "request_url": "http://127.0.0.1:9080/self-service/login/api",
-  "ui": {
-    "action": "http://127.0.0.1:9080/kratos/self-service/login?flow=934e0ba9-5d31-4ed5-a30c-28523513e170",
-    "method": "POST",
-    "nodes": [
-      "default: identifier (text)",
-      "code: method (submit)"
-    ]
-  },
-  "created_at": "2026-10-25T05:32:04.25857Z",
-  "updated_at": "2026-10-25T05:32:04.25857Z",
-  "refresh": false,
-  "requested_aal": "aal1",
-  "state": "choose_method"
-}</code></pre>
-<h4>Example request: second factor (aal2)</h4>
-<pre><code>curl -s "$GATEWAY/kratos/self-service/login/api?aal=aal2&amp;refresh=false" \
-  -H "X-Session-Token: $TOKEN"</code></pre>
-<pre class="out"><code>HTTP/1.1 200 OK
-Content-Type: application/json; charset=utf-8
-
-{
-  "id": "a455c7b7-b794-4764-8cdf-3d759233f4a2",
-  "type": "api",
-  "expires_at": "2026-10-25T05:48:50.554519976Z",
-  "issued_at": "2026-10-25T05:38:50.554519976Z",
-  "request_url": "http://127.0.0.1:9080/self-service/login/api?aal=aal2&amp;refresh=false",
-  "ui": {
-    "action": "http://127.0.0.1:9080/kratos/self-service/login?flow=a455c7b7-b794-4764-8cdf-3d759233f4a2",
-    "method": "POST",
-    "nodes": [
-      "default: csrf_token (hidden) = '&lt;csrf_token&gt;'",
-      "totp: totp_code (text)",
-      "totp: method (submit)"
-    ],
-    "messages": [
+    &quot;recovery_addresses&quot;: [
       {
-        "id": 1010004,
-        "text": "Please complete the second authentication challenge.",
-        "type": "info"
-      }
-    ]
-  },
-  "created_at": "2026-10-25T05:38:50.573905Z",
-  "updated_at": "2026-10-25T05:38:50.573905Z",
-  "refresh": false,
-  "requested_aal": "aal2",
-  "state": "choose_method"
-}</code></pre>
-<h4>Calling the aal2 flow with a session that is already aal2 (e.g. right after enrolling)</h4>
-<pre><code>curl -s "$GATEWAY/kratos/self-service/login/api?aal=aal2&amp;refresh=false" \
-  -H "X-Session-Token: $TOKEN"</code></pre>
-<p>Kratos answers <code>400</code> with <code>error.id = session_already_available</code> ("you are already logged in"). Log in again (aal1) before upgrading, or skip the upgrade: a session that enrolled TOTP is already aal2. Observed during testing; the 400 body is Kratos' standard error JSON.</p>
-<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th>Error code</th><th>When it happens</th></tr></thead><tbody><tr><td><strong>429</strong></td><td><code>(HTML page)</code></td><td>Gateway rate limit (see Rate limit above). The body is APISIX's HTML page.</td></tr><tr><td><strong>400</strong></td><td><code>session_already_available</code></td><td>A valid session is already present and you did not ask for <code>refresh</code>/<code>aal2</code> properly.</td></tr><tr><td><strong>200</strong></td><td><code>(flow JSON)</code></td><td>Note: the aal2 flow is also created, and shows the TOTP challenge, for a user who has no authenticator app; the failure only appears on submit.</td></tr></tbody></table></div>
-<h4>How to use it</h4><ul><li>The login flow asks for <code>identifier</code> (labelled "ID"): it can be an email address or an E.164 phone number.</li><li>Flow ids are single-use per attempt chain: after a successful login the same flow cannot be reused (a second submit gives message 4010002 "Could not find a strategy to log you in with").</li></ul>
-</div></details>
-<details class="endpoint" id="ep-kratos-post-login">
-<summary><span class="method m-post">POST</span><span class="path">/kratos/self-service/login?flow={id}</span><span class="sum">Submit a login step (code or authenticator-app code)</span></summary>
-<div class="body"><dl class="meta">
-<dt>Audience</dt><dd>signed-out or signed-in end user (the Flutter app); staff use the same endpoints for their login (<a href="08b-staff-api.html">8b</a>)</dd>
-<dt>Client path</dt><dd><code>/kratos/self-service/login?flow={id}</code> (through the gateway, base <code>$GATEWAY</code>)</dd>
-<dt>Internal path</dt><dd><code>/self-service/login?flow={id}</code> on Kratos public API <code>kratos:4433</code> (the gateway strips the <code>/kratos</code> prefix with <code>proxy-rewrite</code>)</dd>
-<dt>Auth</dt><dd>none (first factor); <code>X-Session-Token</code> for the aal2 step</dd>
-<dt>Rate limit</dt><dd><strong>10 per 60 s per client IP</strong> (gateway route <code>kratos-self-service-submit</code>): this is the first line of SMS-cost protection. The 11th request in the window is a <code>429</code> with an HTML body</dd>
-<dt>Implemented in</dt><dd>Ory Kratos v26.2.0 (no code of ours); spec <code>docs/kratos-openapi-v26.2.0.json</code>, config <code>infra/kratos/kratos.yml</code>, routes in <code>infra/apisix/apisix.yaml</code></dd>
-</dl>
-<h4>Purpose</h4><p>Used twice for a passwordless login. <strong>Step 1</strong>: <code>method=code</code> and <code>identifier</code>: Kratos asks notification-service to send a code and answers <code>400</code> <code>state: sent_email</code>. <strong>Step 2</strong>: the same plus <code>code</code>; success is <code>200</code> with <code>session_token</code>. For the second factor use <code>method=totp</code> and <code>totp_code</code> on an aal2 flow; the answer is <code>200</code> with a session at <code>aal2</code> (same token value in our test).</p>
-<h4>Request parameters</h4><div class="table-wrap"><table><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why it exists</th></tr></thead><tbody><tr><td><code>method</code></td><td>body</td><td>string</td><td>yes</td><td><code>code</code> (first factor) or <code>totp</code> (second factor)</td><td>Selects the strategy.</td></tr><tr><td><code>identifier</code></td><td>body</td><td>string</td><td>code method</td><td>email or E.164 phone of an existing account</td><td>Who is logging in.</td></tr><tr><td><code>code</code></td><td>body</td><td>string</td><td>code, step 2</td><td>6 digits, valid 5 minutes, single use</td><td>Proves control of the identifier.</td></tr><tr><td><code>totp_code</code></td><td>body</td><td>string</td><td>totp method</td><td>6 digits from the authenticator app; a code cannot be reused in the same 30-second window</td><td>Second factor.</td></tr><tr><td><code>flow</code></td><td>query</td><td>UUID</td><td>yes</td><td>id from the create call</td><td>Identifies the flow.</td></tr></tbody></table></div>
-<h4>Step 1: send the code</h4>
-<pre><code>curl -s -X POST "$GATEWAY/kratos/self-service/login?flow=934e0ba9-5d31-4ed5-a30c-28523513e170" \
-  -H "Content-Type: application/json" \
-  -d '{"method": "code", "identifier": "+2519******98"}'</code></pre>
-<pre class="out"><code>HTTP/1.1 400 Bad Request
-Content-Type: application/json; charset=utf-8
-
-{
-  "id": "934e0ba9-5d31-4ed5-a30c-28523513e170",
-  "type": "api",
-  "expires_at": "2026-10-25T05:42:04.223995Z",
-  "issued_at": "2026-10-25T05:32:04.223995Z",
-  "request_url": "http://127.0.0.1:9080/self-service/login/api",
-  "active": "code",
-  "ui": {
-    "action": "http://127.0.0.1:9080/kratos/self-service/login?flow=934e0ba9-5d31-4ed5-a30c-28523513e170",
-    "method": "POST",
-    "nodes": [
-      "default: identifier (hidden) = '+2519******98'",
-      "code: method (hidden) = 'code'",
-      "code: code (text)",
-      "code: method (submit)",
-      "code: resend (submit)"
-    ],
-    "messages": [
-      {
-        "id": 1010014,
-        "text": "A code was sent to the address you provided. If you didn't receive it, please check the spelling of the address and try again.",
-        "type": "info"
-      }
-    ]
-  },
-  "created_at": "2026-10-25T05:32:04.25857Z",
-  "updated_at": "2026-10-25T05:32:04.25857Z",
-  "refresh": false,
-  "requested_aal": "aal1",
-  "state": "sent_email"
-}</code></pre><p class="masked">Values masked: the phone number.</p>
-<h4>Step 2: verify the code</h4>
-<pre><code>curl -s -X POST "$GATEWAY/kratos/self-service/login?flow=934e0ba9-5d31-4ed5-a30c-28523513e170" \
-  -H "Content-Type: application/json" \
-  -d '{"method": "code", "identifier": "+2519******98", "code": "123456"}'</code></pre>
-<pre class="out"><code>HTTP/1.1 200 OK
-Content-Type: application/json; charset=utf-8
-
-{
-  "session_token": "&lt;session_token&gt;",
-  "session": {
-    "id": "54d78856-3ae3-4bad-a523-0e42c177c139",
-    "active": true,
-    "expires_at": "2026-11-24T05:32:06.032553519Z",
-    "authenticated_at": "2026-10-25T05:32:06.032553519Z",
-    "authenticator_assurance_level": "aal1",
-    "authentication_methods": [
-      {
-        "method": "code",
-        "aal": "aal1",
-        "completed_at": "2026-10-25T05:32:06.027265555Z"
+        &quot;id&quot;: &quot;2328227f-98a9-4565-9286-afbb0977acb2&quot;,
+        &quot;value&quot;: &quot;+251903050827&quot;,
+        &quot;via&quot;: &quot;sms&quot;,
+        &quot;created_at&quot;: &quot;2026-10-26T21:40:27.60369Z&quot;,
+        &quot;updated_at&quot;: &quot;2026-10-26T21:40:27.60369Z&quot;
       }
     ],
-    "issued_at": "2026-10-25T05:32:06.032553519Z",
-    "identity": {
-      "id": "6c31a934-2d3a-433c-9dd1-6d30a530404c",
-      "schema_id": "default",
-      "state": "active",
-      "traits": {
-        "phone_number": "+2519******98"
+    &quot;metadata_public&quot;: null,
+    &quot;created_at&quot;: &quot;2026-10-26T21:40:27.602748Z&quot;,
+    &quot;updated_at&quot;: &quot;2026-10-26T21:40:27.602748Z&quot;,
+    &quot;organization_id&quot;: null
+  },
+  &quot;continue_with&quot;: [
+    {
+      &quot;action&quot;: &quot;show_verification_ui&quot;,
+      &quot;flow&quot;: {
+        &quot;id&quot;: &quot;44fa614f-a431-4863-b936-f4327804d214&quot;,
+        &quot;verifiable_address&quot;: &quot;+251903050827&quot;
       }
     }
-  },
-  "continue_with": null
-}</code></pre><p class="masked">Values masked: phone number, token, code (placeholder). Compared with sign-up, &lt;code&gt;continue_with&lt;/code&gt; is absent here.</p>
-<h4>Wrong code</h4>
-<pre><code>curl -s -X POST "$GATEWAY/kratos/self-service/login?flow=934e0ba9-5d31-4ed5-a30c-28523513e170" \
-  -H "Content-Type: application/json" \
-  -d '{"method": "code", "identifier": "+2519******98", "code": "123456"}'</code></pre>
-<pre class="out"><code>HTTP/1.1 400 Bad Request
-Content-Type: application/json; charset=utf-8
-
-{
-  "state": "sent_email",
-  "messages": [
-    {
-      "id": 4010008,
-      "text": "The login code is invalid or has already been used. Please try again.",
-      "type": "error"
-    }
   ]
-}</code></pre>
-<h4>Unknown account (login is NOT anti-enumeration)</h4>
-<pre><code>curl -s -X POST "$GATEWAY/kratos/self-service/login?flow=9c986d97-2376-4124-b4da-6e2bb70cf8c2" \
-  -H "Content-Type: application/json" \
-  -d '{"method": "code", "identifier": "+2519******00"}'</code></pre>
-<pre class="out"><code>HTTP/1.1 400 Bad Request
+}</code></pre><h4>Example: phone and email (one code only)</h4><p>With both identifiers Kratos creates two verifiable addresses but starts the verification flow for <strong>one</strong> of them (here the phone; read <code>verifiable_address</code>, do not assume). The other address stays unverified (<code>status: pending</code>) until it is verified too; see "Which address must be verified" below.</p><pre class="out"><code>HTTP/1.1 200 OK
 Content-Type: application/json; charset=utf-8
 
 {
-  "state": "choose_method",
-  "messages": [
-    {
-      "id": 4000035,
-      "text": "This account does not exist or has not setup sign in with code.",
-      "type": "error"
-    }
-  ]
-}</code></pre>
-<h4>Second factor: wrong authenticator code</h4>
-<pre><code>curl -s -X POST "$GATEWAY/kratos/self-service/login?flow=a455c7b7-b794-4764-8cdf-3d759233f4a2" \
-  -H "X-Session-Token: $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"method": "totp", "totp_code": "123456"}'</code></pre>
-<pre class="out"><code>HTTP/1.1 400 Bad Request
-Content-Type: application/json; charset=utf-8
-
-{
-  "state": "choose_method",
-  "messages": [
-    {
-      "id": 4000008,
-      "text": "The provided authentication code is invalid, please try again.",
-      "type": "error"
-    }
-  ]
-}</code></pre>
-<h4>Second factor: success</h4>
-<pre><code>curl -s -X POST "$GATEWAY/kratos/self-service/login?flow=a455c7b7-b794-4764-8cdf-3d759233f4a2" \
-  -H "X-Session-Token: $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"method": "totp", "totp_code": "123456"}'</code></pre>
-<pre class="out"><code>HTTP/1.1 200 OK
-Content-Type: application/json; charset=utf-8
-
-{
-  "session_token": "&lt;session_token&gt;",
-  "session": {
-    "authenticator_assurance_level": "aal2",
-    "authentication_methods": [
+  &quot;identity&quot;: {
+    &quot;id&quot;: &quot;120cae69-3e78-4a88-9f94-78f43ad5accc&quot;,
+    &quot;schema_id&quot;: &quot;user&quot;,
+    &quot;traits&quot;: {
+      &quot;phone_number&quot;: &quot;+251903050828&quot;,
+      &quot;email&quot;: &quot;docb-339b39@example.com&quot;
+    },
+    &quot;verifiable_addresses&quot;: [
       {
-        "method": "code",
-        "aal": "aal1",
-        "completed_at": "2026-10-25T05:38:50.524496155Z"
+        &quot;value&quot;: &quot;+251903050828&quot;,
+        &quot;via&quot;: &quot;sms&quot;,
+        &quot;verified&quot;: false,
+        &quot;status&quot;: &quot;sent&quot;
       },
       {
-        "method": "totp",
-        "aal": "aal2",
-        "completed_at": "2026-10-25T05:39:01.037127255Z"
+        &quot;value&quot;: &quot;docb-339b39@example.com&quot;,
+        &quot;via&quot;: &quot;email&quot;,
+        &quot;verified&quot;: false,
+        &quot;status&quot;: &quot;pending&quot;
+      }
+    ],
+    &quot;recovery_addresses&quot;: [
+      {
+        &quot;value&quot;: &quot;+251903050828&quot;,
+        &quot;via&quot;: &quot;sms&quot;
+      },
+      {
+        &quot;value&quot;: &quot;docb-339b39@example.com&quot;,
+        &quot;via&quot;: &quot;email&quot;
       }
     ]
+  },
+  &quot;continue_with&quot;: [
+    {
+      &quot;action&quot;: &quot;show_verification_ui&quot;,
+      &quot;flow&quot;: {
+        &quot;id&quot;: &quot;65412215-7591-4ed1-8358-35b14b1ce5fd&quot;,
+        &quot;verifiable_address&quot;: &quot;+251903050828&quot;
+      }
+    }
+  ]
+}</code></pre><h4>Enumeration warning (honest)</h4><p>Registering an identifier that already has an account answers <code>400</code> with message <code>4000007</code> "An account with the same identifier (email, phone, username, ...) exists already." (checked live 2026-10-26). So registration <strong>does reveal</strong> whether a phone or email is registered. Kratos offers no switch for this. The only brake is the gateway limit of 5 registration submits a minute per IP. The login, recovery and phone-reset answers do not reveal it (below).</p><h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th>Error</th><th>When it happens</th></tr></thead><tbody><tr><td><strong>400</strong></td><td>message <code>4000032</code></td><td>password shorter than 6 (<code>context.min_length</code> = 6)</td></tr><tr><td><strong>400</strong></td><td>message <code>4000007</code></td><td>identifier already registered</td></tr><tr><td><strong>400</strong></td><td>message <code>4000041</code> / <code>4000002</code></td><td>invalid phone / nothing given</td></tr><tr><td><strong>429</strong></td><td></td><td>gateway limit</td></tr></tbody></table></div>
+</div></details>
+<details class="endpoint" id="ep-kratos-get-verification-api">
+<summary><span class="method m-get">GET</span><span class="path">/kratos/self-service/verification/api</span><span class="sum">Start a verification flow (resend a code)</span></summary>
+<div class="body"><dl class="meta">
+<dt>Audience</dt><dd>end user (the super app). Staff use their own sign-in (<a href="08b-staff-api.html">8b</a>)</dd>
+<dt>Client path</dt><dd><code>/kratos/self-service/verification/api</code> (through the gateway, base <code>$GATEWAY</code>)</dd>
+<dt>Internal path</dt><dd><code>/self-service/verification/api</code> on Kratos public API <code>kratos:4433</code> (the gateway strips <code>/kratos</code>, and removes <code>Origin</code> and <code>Cookie</code> from the request: native flows carry neither)</dd>
+<dt>Auth</dt><dd>none</dd>
+<dt>Rate limit</dt><dd>120 per 60 s per IP (<code>kratos-public</code>)</dd>
+<dt>Implemented in</dt><dd>Ory Kratos v26.2.0 (no code of ours); config <code>infra/kratos/kratos.yml</code>, identity schema <code>infra/kratos/identity.user.schema.json</code>, routes in <code>infra/apisix/apisix.yaml</code></dd>
+</dl><h4>Purpose</h4><p>Normally you do not call this: registration and a refused login both hand you a verification flow that has already sent a code. Fetch an existing flow with <code>GET /kratos/self-service/verification/flows?id={flow id}</code>. To get a <em>new</em> code for an address, sign in with that address again (the refused login starts a fresh flow and sends a fresh code), or submit <code>{"method":"code","email":"..."}</code> on a flow for an email address.</p><p><strong>Phone caveat (verified live):</strong> Kratos validates the verification input field as an <em>email</em>; sending <code>{"method":"code","sms":"+251..."}</code> or a phone in <code>email</code> is rejected (<code>Property email is missing</code> / <code>Enter a valid email address</code>). A phone can therefore only be re-sent a code by signing in again with it.</p><h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th>Error</th><th>When it happens</th></tr></thead><tbody><tr><td><strong>429</strong></td><td></td><td>gateway limit</td></tr></tbody></table></div>
+</div></details>
+<details class="endpoint" id="ep-kratos-post-verification">
+<summary><span class="method m-post">POST</span><span class="path">/kratos/self-service/verification?flow={id}</span><span class="sum">Verify an address with the code</span></summary>
+<div class="body"><dl class="meta">
+<dt>Audience</dt><dd>end user (the super app). Staff use their own sign-in (<a href="08b-staff-api.html">8b</a>)</dd>
+<dt>Client path</dt><dd><code>/kratos/self-service/verification?flow={id}</code> (through the gateway, base <code>$GATEWAY</code>)</dd>
+<dt>Internal path</dt><dd><code>/self-service/verification?flow={id}</code> on Kratos public API <code>kratos:4433</code> (the gateway strips <code>/kratos</code>, and removes <code>Origin</code> and <code>Cookie</code> from the request: native flows carry neither)</dd>
+<dt>Auth</dt><dd>none (the flow id is the capability)</dd>
+<dt>Rate limit</dt><dd><strong>10 per 60 s per IP</strong> (<code>kratos-verification-submit</code>); a code allows a limited number of wrong submits (Kratos <code>max_submissions</code>)</dd>
+<dt>Implemented in</dt><dd>Ory Kratos v26.2.0 (no code of ours); config <code>infra/kratos/kratos.yml</code>, identity schema <code>infra/kratos/identity.user.schema.json</code>, routes in <code>infra/apisix/apisix.yaml</code></dd>
+</dl><h4>Purpose</h4><p>Submit the 6-digit code that arrived by SMS (phone) or email. On success the address is marked verified; the flow does <em>not</em> sign the user in. The app then calls the login flow with the password. Codes live 10 minutes. Wording: <code>infra/kratos/courier-templates/verification-code.*</code>.</p><h4>Request parameters</h4><div class="table-wrap"><table><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th><th>Why</th></tr></thead><tbody><tr><td><code>method</code></td><td>body</td><td>string</td><td>yes</td><td><code>code</code></td></tr><tr><td><code>code</code></td><td>body</td><td>string</td><td>yes</td><td>the 6 digits</td></tr></tbody></table></div><h4>Which address must be verified</h4><p>Login is refused with <code>session_verified_address_required</code> when the address used <em>to sign in</em> is not verified, even if the account's other address is. A refused login returns a verification flow (and sends a code) for the address Kratos picks (<code>details.continue_with[0].flow.verifiable_address</code>, not always the one typed). Verify what the flow names, sign in again, repeat if needed.</p><h4>Example: login before verification (the refusal that starts a flow and sends a code)</h4><pre class="out"><code>HTTP/1.1 403 Forbidden
+Content-Type: application/json; charset=utf-8
+
+{
+  &quot;error&quot;: {
+    &quot;id&quot;: &quot;session_verified_address_required&quot;,
+    &quot;code&quot;: 400,
+    &quot;status&quot;: &quot;Bad Request&quot;,
+    &quot;request&quot;: &quot;b21a557b-7b74-419d-ac42-c58ecc7b2fca&quot;,
+    &quot;reason&quot;: &quot;Your account&#x27;s email or phone address are not verified yet. Please check your email or phone inbox or re-request verification.&quot;,
+    &quot;details&quot;: {
+      &quot;continue_with&quot;: [
+        {
+          &quot;action&quot;: &quot;show_verification_ui&quot;,
+          &quot;flow&quot;: {
+            &quot;id&quot;: &quot;4fa6a848-0ed6-44b2-b615-116f66406050&quot;,
+            &quot;verifiable_address&quot;: &quot;+251903050827&quot;,
+            &quot;url&quot;: &quot;http://localhost:3000/verification?flow=4fa6a848-0ed6-44b2-b615-116f66406050&quot;
+          }
+        }
+      ]
+    },
+    &quot;message&quot;: &quot;your email or phone address is not yet verified&quot;
   }
-}</code></pre>
-<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th>Error code</th><th>When it happens</th></tr></thead><tbody><tr><td><strong>400</strong></td><td>(flow JSON, <code>state: sent_email</code>)</td><td>Not an error: step 1 accepted (message id 1010014).</td></tr><tr><td><strong>400</strong></td><td><code>(flow JSON with error messages)</code></td><td>Wrong/used code (4010008); unknown or malformed identifier (4000035 "This account does not exist or has not setup sign in with code.", the same text for a garbage string); flow already consumed (4010002); wrong authenticator code (4000008).</td></tr><tr><td><strong>404</strong></td><td><code>(Kratos error JSON)</code></td><td>Unknown or wrong flow id (<code>{"error":{"code":404,"status":"Not Found","message":"Unable to locate the resource"}}</code>).</td></tr><tr><td><strong>410</strong></td><td><code>self_service_flow_expired</code></td><td>The flow is older than its lifetime (10 minutes for registration and login); start a new flow. Per the Kratos spec; not reproduced here (would need a 10-minute wait).</td></tr><tr><td><strong>429</strong></td><td><code>(HTML page)</code></td><td>Gateway rate limit (see Rate limit above). The body is APISIX's HTML page.</td></tr></tbody></table></div>
-<h4>How to use it</h4><ul><li><strong>Account enumeration:</strong> an unknown identifier is answered with 4000035 while a known one gets "code sent". The plan (SETUP section 12) is a single "continue" endpoint of ours that always answers "code sent"; it is not built yet.</li><li>If the per-recipient SMS cap of notification-service is hit, the flow still says "code sent" but nothing arrives (only a warning in the service log). Since 2026-10-26 a client can ask first: <code>POST /public/v1/login-codes/check</code> with <code>{"identifier": "..."}</code> answers 200 with the remaining allowance, or 429 <code>too_many_codes</code> with <code>retryAfterSeconds</code> (see the app-account guide, "Pre-flight check"); it counts every address alike, so it does not reveal which accounts exist. The check is advisory (a direct Kratos call skips it).</li><li>After <code>aal2</code> the session token stays the same value; the session's <code>authentication_methods</code> now lists <code>code</code> then <code>totp</code>.</li></ul>
+}</code></pre><p>The error body says <code>"code": 400</code> but the HTTP status of the response is <strong>403</strong> (checked live): rely on <code>error.id</code>.</p><h4>Example: wrong code</h4><pre><code>curl -s -X POST &quot;$GATEWAY/kratos/self-service/verification?flow=4fa6a848-...&quot; \
+  -H &quot;Content-Type: application/json&quot; -d &#x27;{&quot;method&quot;:&quot;code&quot;,&quot;code&quot;:&quot;000000&quot;}&#x27;</code></pre><pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json; charset=utf-8
+
+{
+  &quot;id&quot;: &quot;4fa6a848-0ed6-44b2-b615-116f66406050&quot;,
+  &quot;type&quot;: &quot;api&quot;,
+  &quot;expires_at&quot;: &quot;2026-10-26T21:51:28.207198Z&quot;,
+  &quot;issued_at&quot;: &quot;2026-10-26T21:41:28.207198Z&quot;,
+  &quot;request_url&quot;: &quot;http://127.0.0.1:9080/self-service/login/api&quot;,
+  &quot;active&quot;: &quot;code&quot;,
+  &quot;ui&quot;: {
+    &quot;action&quot;: &quot;http://127.0.0.1:9080/kratos/self-service/verification?flow=4fa6a848-0ed6-44b2-b615-116f66406050&quot;,
+    &quot;method&quot;: &quot;POST&quot;,
+    &quot;nodes&quot;: [
+      &quot;code: method (hidden)&quot;,
+      &quot;code: code (text)&quot;,
+      &quot;code: method (submit)&quot;,
+      &quot;code: sms (submit)&quot;
+    ],
+    &quot;messages&quot;: [
+      {
+        &quot;id&quot;: 4070006,
+        &quot;text&quot;: &quot;The verification code is invalid or has already been used. Please try again.&quot;,
+        &quot;type&quot;: &quot;error&quot;
+      }
+    ]
+  },
+  &quot;state&quot;: &quot;sent_email&quot;
+}</code></pre><h4>Example: right code</h4><pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json; charset=utf-8
+
+{
+  &quot;id&quot;: &quot;4fa6a848-0ed6-44b2-b615-116f66406050&quot;,
+  &quot;type&quot;: &quot;api&quot;,
+  &quot;expires_at&quot;: &quot;2026-10-26T21:51:28.207198Z&quot;,
+  &quot;issued_at&quot;: &quot;2026-10-26T21:41:28.207198Z&quot;,
+  &quot;request_url&quot;: &quot;http://127.0.0.1:9080/self-service/login/api&quot;,
+  &quot;active&quot;: &quot;code&quot;,
+  &quot;ui&quot;: {
+    &quot;action&quot;: &quot;http://localhost:3000/&quot;,
+    &quot;method&quot;: &quot;GET&quot;,
+    &quot;nodes&quot;: [
+      &quot;default: csrf_token (hidden)&quot;
+    ],
+    &quot;messages&quot;: [
+      {
+        &quot;id&quot;: 1080002,
+        &quot;text&quot;: &quot;You successfully verified your email address.&quot;,
+        &quot;type&quot;: &quot;success&quot;
+      }
+    ]
+  },
+  &quot;state&quot;: &quot;passed_challenge&quot;
+}</code></pre><p>The SMS the user receives in dev (read from <code>GET :8085/dev/messages?to=...</code>): <code>Adera: your verification code is 563901. Do not share it with anyone. It expires in 10 minutes.</code> Check the pre-flight endpoint below before asking for a resend.</p><h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th>Error</th><th>When it happens</th></tr></thead><tbody><tr><td><strong>200</strong></td><td>state <code>sent_email</code> + message <code>4070006</code></td><td>wrong / used code (a wrong code is a 200 here, not an error status; check <code>state</code>)</td></tr><tr><td><strong>200</strong></td><td>state <code>passed_challenge</code></td><td>verified</td></tr></tbody></table></div>
+</div></details>
+<details class="endpoint" id="ep-kratos-get-login-api">
+<summary><span class="method m-get">GET</span><span class="path">/kratos/self-service/login/api</span><span class="sum">Start a login flow (native app)</span></summary>
+<div class="body"><dl class="meta">
+<dt>Audience</dt><dd>end user (the super app). Staff use their own sign-in (<a href="08b-staff-api.html">8b</a>). Staff use the same endpoint with <code>?aal=aal2</code> for the authenticator step.</dd>
+<dt>Client path</dt><dd><code>/kratos/self-service/login/api</code> (through the gateway, base <code>$GATEWAY</code>)</dd>
+<dt>Internal path</dt><dd><code>/self-service/login/api</code> on Kratos public API <code>kratos:4433</code> (the gateway strips <code>/kratos</code>, and removes <code>Origin</code> and <code>Cookie</code> from the request: native flows carry neither)</dd>
+<dt>Auth</dt><dd>none</dd>
+<dt>Rate limit</dt><dd>120 per 60 s per IP (<code>kratos-public</code>)</dd>
+<dt>Implemented in</dt><dd>Ory Kratos v26.2.0 (no code of ours); config <code>infra/kratos/kratos.yml</code>, identity schema <code>infra/kratos/identity.user.schema.json</code>, routes in <code>infra/apisix/apisix.yaml</code></dd>
+</dl><h4>Purpose</h4><p>Creates a login flow. The form offers the password method for app users. (The <code>code</code> method is also listed because staff use it; for an app user it fails with message <code>4000035</code> "This account does not exist or has not setup sign in with code": app users have no code credential, so <strong>nobody can sign in with a one-time code any more</strong>.)</p><pre><code>curl -s &quot;$GATEWAY/kratos/self-service/login/api&quot;</code></pre><h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th>Error</th><th>When it happens</th></tr></thead><tbody><tr><td><strong>429</strong></td><td></td><td>gateway limit</td></tr></tbody></table></div>
+</div></details>
+<details class="endpoint" id="ep-kratos-post-login">
+<summary><span class="method m-post">POST</span><span class="path">/kratos/self-service/login?flow={id}</span><span class="sum">Sign in with phone or email and password</span></summary>
+<div class="body"><dl class="meta">
+<dt>Audience</dt><dd>end user (the super app). Staff use their own sign-in (<a href="08b-staff-api.html">8b</a>). Staff: emailed code, then authenticator code (<a href="08b-staff-api.html">8b</a>).</dd>
+<dt>Client path</dt><dd><code>/kratos/self-service/login?flow={id}</code> (through the gateway, base <code>$GATEWAY</code>)</dd>
+<dt>Internal path</dt><dd><code>/self-service/login?flow={id}</code> on Kratos public API <code>kratos:4433</code> (the gateway strips <code>/kratos</code>, and removes <code>Origin</code> and <code>Cookie</code> from the request: native flows carry neither)</dd>
+<dt>Auth</dt><dd>none</dd>
+<dt>Rate limit</dt><dd><strong>10 per 60 s per IP and 10 per 15 min per identifier</strong> (gateway route <code>kratos-login-submit</code>; the identifier is read from the JSON body)</dd>
+<dt>Implemented in</dt><dd>Ory Kratos v26.2.0 (no code of ours); config <code>infra/kratos/kratos.yml</code>, identity schema <code>infra/kratos/identity.user.schema.json</code>, routes in <code>infra/apisix/apisix.yaml</code></dd>
+</dl><h4>Purpose</h4><p>Password sign-in. A good password with a verified address gives <code>200</code> with <code>session_token</code> (30 days). The hook <code>require_verified_address</code> runs on the password method only.</p><h4>Request parameters</h4><div class="table-wrap"><table><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th><th>Why</th></tr></thead><tbody><tr><td><code>method</code></td><td>body</td><td>string</td><td>yes</td><td><code>password</code></td></tr><tr><td><code>identifier</code></td><td>body</td><td>string</td><td>yes</td><td>the phone (E.164) or email used at registration</td></tr><tr><td><code>password</code></td><td>body</td><td>string</td><td>yes</td><td>the password</td></tr></tbody></table></div><h4>Example: success</h4><pre><code>curl -s -X POST &quot;$GATEWAY/kratos/self-service/login?flow=$FLOW&quot; \
+  -H &quot;Content-Type: application/json&quot; \
+  -d &#x27;{&quot;method&quot;:&quot;password&quot;,&quot;identifier&quot;:&quot;+251903050827&quot;,&quot;password&quot;:&quot;tadesse&quot;}&#x27;</code></pre><pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json; charset=utf-8
+
+{
+  &quot;session_token&quot;: &quot;ory_st_xxxxxxxx&quot;,
+  &quot;session&quot;: {
+    &quot;id&quot;: &quot;d024e81a-2dbc-4928-bea6-f5bf649311d5&quot;,
+    &quot;active&quot;: true,
+    &quot;expires_at&quot;: &quot;2026-11-25T21:41:30.538759894Z&quot;,
+    &quot;authenticated_at&quot;: &quot;2026-10-26T21:41:30.538759894Z&quot;,
+    &quot;authenticator_assurance_level&quot;: &quot;aal1&quot;,
+    &quot;authentication_methods&quot;: [
+      {
+        &quot;method&quot;: &quot;password&quot;,
+        &quot;aal&quot;: &quot;aal1&quot;,
+        &quot;completed_at&quot;: &quot;2026-10-26T21:41:30.538644112Z&quot;
+      }
+    ]
+  },
+  &quot;continue_with&quot;: null
+}</code></pre><h4>Example: wrong password (and unknown account: identical)</h4><p>Wrong password and unknown identifier return the same status, the same message <code>4000006</code> and the same flow shape (captured for both on 2026-10-26), so the login screen cannot be used to find out who has an account.</p><pre class="out"><code>HTTP/1.1 400 Bad Request
+Content-Type: application/json; charset=utf-8
+
+{
+  &quot;id&quot;: &quot;004d1c29-c35e-453a-9854-a41e95359892&quot;,
+  &quot;type&quot;: &quot;api&quot;,
+  &quot;expires_at&quot;: &quot;2026-10-26T21:51:30.543147Z&quot;,
+  &quot;issued_at&quot;: &quot;2026-10-26T21:41:30.543147Z&quot;,
+  &quot;request_url&quot;: &quot;http://127.0.0.1:9080/self-service/login/api&quot;,
+  &quot;ui&quot;: {
+    &quot;action&quot;: &quot;http://127.0.0.1:9080/kratos/self-service/login?flow=004d1c29-c35e-453a-9854-a41e95359892&quot;,
+    &quot;method&quot;: &quot;POST&quot;,
+    &quot;nodes&quot;: [
+      &quot;default: csrf_token (hidden)&quot;,
+      &quot;default: identifier (text)&quot;,
+      &quot;code: method (submit)&quot;,
+      &quot;password: password (password)&quot;,
+      &quot;password: method (submit)&quot;
+    ],
+    &quot;messages&quot;: [
+      {
+        &quot;id&quot;: 4000006,
+        &quot;text&quot;: &quot;The provided credentials are invalid, check for spelling mistakes in your password or username, email address, or phone number.&quot;,
+        &quot;type&quot;: &quot;error&quot;
+      }
+    ]
+  },
+  &quot;refresh&quot;: false,
+  &quot;requested_aal&quot;: &quot;aal1&quot;,
+  &quot;state&quot;: &quot;choose_method&quot;
+}</code></pre><h4>Example: not verified yet</h4><p>See the verification page above: <code>error.id = session_verified_address_required</code> (HTTP 403) with a verification flow in <code>details.continue_with</code>.</p><h4>Brute-force protection (honest)</h4><p>Kratos has <strong>no account lockout</strong>. The only guards are the gateway limits (10 tries a minute per IP, 10 tries per 15 minutes per identifier, so rotating IPs does not help against one account, but an attacker can still lock a victim out of login attempts for up to 15 minutes by burning the per-identifier budget) and the 6-character minimum. IP limits use the client address seen by the gateway; behind a proxy they need a real-IP setting (deferred production work).</p><h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th>Error</th><th>When it happens</th></tr></thead><tbody><tr><td><strong>400</strong></td><td>message <code>4000006</code></td><td>wrong password or unknown identifier</td></tr><tr><td><strong>403</strong></td><td><code>session_verified_address_required</code></td><td>sign-in address not verified</td></tr><tr><td><strong>400</strong></td><td>message <code>4000035</code></td><td>method <code>code</code> tried by an app user</td></tr><tr><td><strong>429</strong></td><td></td><td>gateway limit (per IP or per identifier)</td></tr></tbody></table></div>
+</div></details>
+<details class="endpoint" id="ep-kratos-get-recovery-api">
+<summary><span class="method m-get">GET</span><span class="path">/kratos/self-service/recovery/api</span><span class="sum">Start a password-recovery flow (email)</span></summary>
+<div class="body"><dl class="meta">
+<dt>Audience</dt><dd>end user (the super app). Staff use their own sign-in (<a href="08b-staff-api.html">8b</a>)</dd>
+<dt>Client path</dt><dd><code>/kratos/self-service/recovery/api</code> (through the gateway, base <code>$GATEWAY</code>)</dd>
+<dt>Internal path</dt><dd><code>/self-service/recovery/api</code> on Kratos public API <code>kratos:4433</code> (the gateway strips <code>/kratos</code>, and removes <code>Origin</code> and <code>Cookie</code> from the request: native flows carry neither)</dd>
+<dt>Auth</dt><dd>none</dd>
+<dt>Rate limit</dt><dd>120 per 60 s per IP (<code>kratos-public</code>)</dd>
+<dt>Implemented in</dt><dd>Ory Kratos v26.2.0 (no code of ours); config <code>infra/kratos/kratos.yml</code>, identity schema <code>infra/kratos/identity.user.schema.json</code>, routes in <code>infra/apisix/apisix.yaml</code></dd>
+</dl><h4>Purpose</h4><p>Forgot password for an account with an <strong>email</strong>. The flow asks for an <code>email</code> field only: Kratos validates it as an email address, so <strong>a phone number cannot be typed here</strong> (see the captured 400 below). For phones use the password-reset endpoints further down.</p><pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json; charset=utf-8
+
+{
+  &quot;id&quot;: &quot;b0c9ebf4-44e5-4feb-aa99-78eff375efb0&quot;,
+  &quot;type&quot;: &quot;api&quot;,
+  &quot;expires_at&quot;: &quot;2026-10-26T21:51:32.957940275Z&quot;,
+  &quot;issued_at&quot;: &quot;2026-10-26T21:41:32.957940275Z&quot;,
+  &quot;request_url&quot;: &quot;http://127.0.0.1:9080/self-service/recovery/api&quot;,
+  &quot;active&quot;: &quot;code&quot;,
+  &quot;ui&quot;: {
+    &quot;action&quot;: &quot;http://127.0.0.1:9080/kratos/self-service/recovery?flow=b0c9ebf4-44e5-4feb-aa99-78eff375efb0&quot;,
+    &quot;method&quot;: &quot;POST&quot;,
+    &quot;nodes&quot;: [
+      &quot;default: csrf_token (hidden)&quot;,
+      &quot;code: email (email)&quot;,
+      &quot;code: method (submit)&quot;
+    ],
+    &quot;messages&quot;: null
+  },
+  &quot;state&quot;: &quot;choose_method&quot;
+}</code></pre><h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th>Error</th><th>When it happens</th></tr></thead><tbody><tr><td><strong>429</strong></td><td></td><td>gateway limit</td></tr></tbody></table></div>
+</div></details>
+<details class="endpoint" id="ep-kratos-post-recovery">
+<summary><span class="method m-post">POST</span><span class="path">/kratos/self-service/recovery?flow={id}</span><span class="sum">Send a recovery code, then submit it</span></summary>
+<div class="body"><dl class="meta">
+<dt>Audience</dt><dd>end user (the super app). Staff use their own sign-in (<a href="08b-staff-api.html">8b</a>)</dd>
+<dt>Client path</dt><dd><code>/kratos/self-service/recovery?flow={id}</code> (through the gateway, base <code>$GATEWAY</code>)</dd>
+<dt>Internal path</dt><dd><code>/self-service/recovery?flow={id}</code> on Kratos public API <code>kratos:4433</code> (the gateway strips <code>/kratos</code>, and removes <code>Origin</code> and <code>Cookie</code> from the request: native flows carry neither)</dd>
+<dt>Auth</dt><dd>none</dd>
+<dt>Rate limit</dt><dd><strong>5 per 60 s per IP and 5 per 15 min per email</strong> (<code>kratos-recovery-submit</code>)</dd>
+<dt>Implemented in</dt><dd>Ory Kratos v26.2.0 (no code of ours); config <code>infra/kratos/kratos.yml</code>, identity schema <code>infra/kratos/identity.user.schema.json</code>, routes in <code>infra/apisix/apisix.yaml</code></dd>
+</dl><h4>Purpose</h4><p>Step 1: <code>{"method":"code","email":"..."}</code>. Kratos answers <code>200</code>, <code>state: sent_email</code> and the same info message whether or not the email has an account (<code>notify_unknown_recipients: false</code>: for an unknown address nothing is sent). Step 2: <code>{"method":"code","code":"123456"}</code> on the same flow. A right code gives <code>200</code>, <code>state: passed_challenge</code> and <code>continue_with</code> with (a) <code>set_ory_session_token</code>: a <strong>privileged short session</strong> token and (b) <code>show_settings_ui</code>: a settings flow id, in which the user sets the new password. This needs <code>feature_flags.use_continue_with_transitions: true</code>.</p><h4>Which address does the code go to? (honest)</h4><p>To exactly the address typed, which must be an email (Kratos recovery cannot take a phone). Kratos has no setting to "prefer the phone": for an account with both phone and email, typing the email sends to the email. <strong>The phone preference is not enforced by the server.</strong> It is a client rule: the app asks for the phone first and calls <code>/public/v1/password-reset/start</code> for a phone; it uses this email flow only when the user has just an email (or chooses email). Accounts with only an email are fully served by this flow.</p><h4>Example: send the code</h4><pre><code>curl -s -X POST &quot;$GATEWAY/kratos/self-service/recovery?flow=$RID&quot; \
+  -H &quot;Content-Type: application/json&quot; -d &#x27;{&quot;method&quot;:&quot;code&quot;,&quot;email&quot;:&quot;doc2-339b39@example.com&quot;}&#x27;</code></pre><pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json; charset=utf-8
+
+{
+  &quot;id&quot;: &quot;4b8d7771-a342-42bc-85f2-bcbf53ccc2a7&quot;,
+  &quot;type&quot;: &quot;api&quot;,
+  &quot;expires_at&quot;: &quot;2026-10-26T21:51:32.954918Z&quot;,
+  &quot;issued_at&quot;: &quot;2026-10-26T21:41:32.954918Z&quot;,
+  &quot;request_url&quot;: &quot;http://127.0.0.1:9080/self-service/recovery/api&quot;,
+  &quot;active&quot;: &quot;code&quot;,
+  &quot;ui&quot;: {
+    &quot;action&quot;: &quot;http://127.0.0.1:9080/kratos/self-service/recovery?flow=4b8d7771-a342-42bc-85f2-bcbf53ccc2a7&quot;,
+    &quot;method&quot;: &quot;POST&quot;,
+    &quot;nodes&quot;: [
+      &quot;default: csrf_token (hidden)&quot;,
+      &quot;code: code (text)&quot;,
+      &quot;code: method (hidden)&quot;,
+      &quot;code: method (submit)&quot;,
+      &quot;code: email (submit)&quot;
+    ],
+    &quot;messages&quot;: [
+      {
+        &quot;id&quot;: 1060003,
+        &quot;text&quot;: &quot;An email containing a recovery code has been sent to the email address you provided. If you have not received an email, check the spelling of the address and make sure to use the address you registered with.&quot;,
+        &quot;type&quot;: &quot;info&quot;
+      }
+    ]
+  },
+  &quot;state&quot;: &quot;sent_email&quot;
+}</code></pre><h4>Unknown email: identical answer, nothing sent</h4><pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json; charset=utf-8
+
+{
+  &quot;id&quot;: &quot;868b6104-9aad-44fa-9683-e494c22d00df&quot;,
+  &quot;type&quot;: &quot;api&quot;,
+  &quot;expires_at&quot;: &quot;2026-10-26T21:51:32.969988Z&quot;,
+  &quot;issued_at&quot;: &quot;2026-10-26T21:41:32.969988Z&quot;,
+  &quot;request_url&quot;: &quot;http://127.0.0.1:9080/self-service/recovery/api&quot;,
+  &quot;active&quot;: &quot;code&quot;,
+  &quot;ui&quot;: {
+    &quot;action&quot;: &quot;http://127.0.0.1:9080/kratos/self-service/recovery?flow=868b6104-9aad-44fa-9683-e494c22d00df&quot;,
+    &quot;method&quot;: &quot;POST&quot;,
+    &quot;nodes&quot;: [
+      &quot;default: csrf_token (hidden)&quot;,
+      &quot;code: code (text)&quot;,
+      &quot;code: method (hidden)&quot;,
+      &quot;code: method (submit)&quot;,
+      &quot;code: email (submit)&quot;
+    ],
+    &quot;messages&quot;: [
+      {
+        &quot;id&quot;: 1060003,
+        &quot;text&quot;: &quot;An email containing a recovery code has been sent to the email address you provided. If you have not received an email, check the spelling of the address and make sure to use the address you registered with.&quot;,
+        &quot;type&quot;: &quot;info&quot;
+      }
+    ]
+  },
+  &quot;state&quot;: &quot;sent_email&quot;
+}</code></pre><h4>A phone number typed into the email field</h4><pre class="out"><code>HTTP/1.1 400 Bad Request
+Content-Type: application/json; charset=utf-8
+
+{
+  &quot;id&quot;: &quot;d50d378a-734f-4dc7-aebb-836c6ad66dfe&quot;,
+  &quot;type&quot;: &quot;api&quot;,
+  &quot;expires_at&quot;: &quot;2026-10-26T21:51:32.977162Z&quot;,
+  &quot;issued_at&quot;: &quot;2026-10-26T21:41:32.977162Z&quot;,
+  &quot;request_url&quot;: &quot;http://127.0.0.1:9080/self-service/recovery/api&quot;,
+  &quot;active&quot;: &quot;code&quot;,
+  &quot;ui&quot;: {
+    &quot;action&quot;: &quot;http://127.0.0.1:9080/kratos/self-service/recovery?flow=d50d378a-734f-4dc7-aebb-836c6ad66dfe&quot;,
+    &quot;method&quot;: &quot;POST&quot;,
+    &quot;nodes&quot;: [
+      &quot;default: csrf_token (hidden)&quot;,
+      &quot;code: email (email) messages=[{\&quot;id\&quot;: 4000040, \&quot;text\&quot;: \&quot;Enter a valid email address\&quot;}]&quot;,
+      &quot;code: method (submit)&quot;
+    ],
+    &quot;messages&quot;: null
+  },
+  &quot;state&quot;: &quot;choose_method&quot;
+}</code></pre><h4>Wrong code</h4><pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json; charset=utf-8
+
+{
+  &quot;id&quot;: &quot;4b8d7771-a342-42bc-85f2-bcbf53ccc2a7&quot;,
+  &quot;type&quot;: &quot;api&quot;,
+  &quot;expires_at&quot;: &quot;2026-10-26T21:51:32.954918Z&quot;,
+  &quot;issued_at&quot;: &quot;2026-10-26T21:41:32.954918Z&quot;,
+  &quot;request_url&quot;: &quot;http://127.0.0.1:9080/self-service/recovery/api&quot;,
+  &quot;active&quot;: &quot;code&quot;,
+  &quot;ui&quot;: {
+    &quot;action&quot;: &quot;http://127.0.0.1:9080/kratos/self-service/recovery?flow=4b8d7771-a342-42bc-85f2-bcbf53ccc2a7&quot;,
+    &quot;method&quot;: &quot;POST&quot;,
+    &quot;nodes&quot;: [
+      &quot;default: csrf_token (hidden)&quot;,
+      &quot;code: code (text)&quot;,
+      &quot;code: method (hidden)&quot;,
+      &quot;code: method (submit)&quot;,
+      &quot;code: email (submit)&quot;
+    ],
+    &quot;messages&quot;: [
+      {
+        &quot;id&quot;: 4060006,
+        &quot;text&quot;: &quot;The recovery code is invalid or has already been used. Please try again.&quot;,
+        &quot;type&quot;: &quot;error&quot;
+      }
+    ]
+  },
+  &quot;state&quot;: &quot;sent_email&quot;
+}</code></pre><h4>Right code</h4><pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json; charset=utf-8
+
+{
+  &quot;id&quot;: &quot;4b8d7771-a342-42bc-85f2-bcbf53ccc2a7&quot;,
+  &quot;type&quot;: &quot;api&quot;,
+  &quot;expires_at&quot;: &quot;2026-10-26T21:51:32.954918Z&quot;,
+  &quot;issued_at&quot;: &quot;2026-10-26T21:41:32.954918Z&quot;,
+  &quot;request_url&quot;: &quot;http://127.0.0.1:9080/self-service/recovery/api&quot;,
+  &quot;active&quot;: &quot;code&quot;,
+  &quot;state&quot;: &quot;passed_challenge&quot;,
+  &quot;continue_with&quot;: [
+    {
+      &quot;action&quot;: &quot;set_ory_session_token&quot;,
+      &quot;ory_session_token&quot;: &quot;ory_st_xxxxxxxx&quot;
+    },
+    {
+      &quot;action&quot;: &quot;show_settings_ui&quot;,
+      &quot;flow&quot;: {
+        &quot;id&quot;: &quot;9256e3e5-64f9-4278-b958-34ae3360dea0&quot;,
+        &quot;url&quot;: &quot;http://localhost:3000/settings?flow=9256e3e5-64f9-4278-b958-34ae3360dea0&quot;
+      }
+    }
+  ],
+  &quot;transient_payload&quot;: {}
+}</code></pre><p>The email (dev: Mailpit / <code>/dev/messages</code>): subject <code>Your Adera password reset code: 925601</code>, text "Enter it in the app to choose a new password. It expires in 10 minutes." Templates: <code>infra/kratos/courier-templates/recovery-code.*</code>. Next, use the settings flow with the privileged token in <code>X-Session-Token</code> (below).</p><h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th>Error</th><th>When it happens</th></tr></thead><tbody><tr><td><strong>200</strong></td><td>state <code>sent_email</code> + message <code>4060006</code></td><td>wrong or used code</td></tr><tr><td><strong>400</strong></td><td>message <code>4000040</code></td><td>not a valid email</td></tr><tr><td><strong>429</strong></td><td></td><td>gateway limit</td></tr></tbody></table></div>
+</div></details>
+<details class="endpoint" id="ep-kratos-get-settings-api">
+<summary><span class="method m-get">GET</span><span class="path">/kratos/self-service/settings/api</span><span class="sum">Start a settings flow (change password)</span></summary>
+<div class="body"><dl class="meta">
+<dt>Audience</dt><dd>signed-in end user (also staff, for the authenticator-app enrolment)</dd>
+<dt>Client path</dt><dd><code>/kratos/self-service/settings/api</code> (through the gateway, base <code>$GATEWAY</code>)</dd>
+<dt>Internal path</dt><dd><code>/self-service/settings/api</code> on Kratos public API <code>kratos:4433</code> (the gateway strips <code>/kratos</code>, and removes <code>Origin</code> and <code>Cookie</code> from the request: native flows carry neither)</dd>
+<dt>Auth</dt><dd><code>X-Session-Token: $TOKEN</code> (or <code>Authorization: Bearer</code>). The session must be recent (<code>privileged_session_max_age: 15m</code>): a session from a login or a recovery in the last 15 minutes qualifies, an older one gets a re-authentication error and must sign in again.</dd>
+<dt>Rate limit</dt><dd>120 per 60 s per IP (<code>kratos-public</code>)</dd>
+<dt>Implemented in</dt><dd>Ory Kratos v26.2.0 (no code of ours); config <code>infra/kratos/kratos.yml</code>, identity schema <code>infra/kratos/identity.user.schema.json</code>, routes in <code>infra/apisix/apisix.yaml</code></dd>
+</dl><h4>Purpose</h4><p>Settings for app users contain only the <strong>password</strong> method (new password field). The <code>profile</code> method is disabled on purpose (it would let a user change their phone or email without verification and user-service would keep the old one). The <code>totp</code> nodes in the answer exist for staff authenticator enrolment; the super app ignores them.</p><pre><code>curl -s &quot;$GATEWAY/kratos/self-service/settings/api&quot; -H &quot;X-Session-Token: $TOKEN&quot;</code></pre><pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json; charset=utf-8
+
+{
+  &quot;id&quot;: &quot;cd8d4fcb-6e5b-46e2-bcd2-fd8a2872a2fe&quot;,
+  &quot;type&quot;: &quot;api&quot;,
+  &quot;expires_at&quot;: &quot;2026-10-26T22:42:34.934342105Z&quot;,
+  &quot;issued_at&quot;: &quot;2026-10-26T21:42:34.934342105Z&quot;,
+  &quot;request_url&quot;: &quot;http://127.0.0.1:9080/self-service/settings/api&quot;,
+  &quot;ui&quot;: {
+    &quot;action&quot;: &quot;http://127.0.0.1:9080/kratos/self-service/settings?flow=cd8d4fcb-6e5b-46e2-bcd2-fd8a2872a2fe&quot;,
+    &quot;method&quot;: &quot;POST&quot;,
+    &quot;nodes&quot;: [
+      &quot;default: csrf_token (hidden)&quot;,
+      &quot;password: password (password)&quot;,
+      &quot;password: method (submit)&quot;,
+      &quot;totp: totp_code (text)&quot;,
+      &quot;totp: method (submit)&quot;
+    ],
+    &quot;messages&quot;: null
+  },
+  &quot;state&quot;: &quot;show_form&quot;
+}</code></pre><h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th>Error</th><th>When it happens</th></tr></thead><tbody><tr><td><strong>401</strong></td><td><code>session_inactive</code></td><td>no or dead token</td></tr><tr><td><strong>403</strong></td><td>re-authentication required (not exercised here)</td><td>session older than 15 minutes: sign in again</td></tr><tr><td><strong>429</strong></td><td></td><td>gateway limit</td></tr></tbody></table></div>
+</div></details>
+<details class="endpoint" id="ep-kratos-post-settings">
+<summary><span class="method m-post">POST</span><span class="path">/kratos/self-service/settings?flow={id}</span><span class="sum">Set or change the password (and confirm TOTP for staff)</span></summary>
+<div class="body"><dl class="meta">
+<dt>Audience</dt><dd>signed-in end user (privileged session after recovery, or a recent login)</dd>
+<dt>Client path</dt><dd><code>/kratos/self-service/settings?flow={id}</code> (through the gateway, base <code>$GATEWAY</code>)</dd>
+<dt>Internal path</dt><dd><code>/self-service/settings?flow={id}</code> on Kratos public API <code>kratos:4433</code> (the gateway strips <code>/kratos</code>, and removes <code>Origin</code> and <code>Cookie</code> from the request: native flows carry neither)</dd>
+<dt>Auth</dt><dd><code>X-Session-Token: $TOKEN</code> (the same token the flow was created with)</dd>
+<dt>Rate limit</dt><dd><strong>10 per 60 s per IP</strong> (<code>kratos-settings-submit</code>)</dd>
+<dt>Implemented in</dt><dd>Ory Kratos v26.2.0 (no code of ours); config <code>infra/kratos/kratos.yml</code>, identity schema <code>infra/kratos/identity.user.schema.json</code>, routes in <code>infra/apisix/apisix.yaml</code></dd>
+</dl><h4>Purpose</h4><p>Two uses. <strong>After recovery:</strong> use the <code>set_ory_session_token</code> as <code>X-Session-Token</code> and the settings flow id from <code>show_settings_ui</code>. <strong>Change password later:</strong> create a settings flow with the current session. After a successful password change the hook <code>revoke_active_sessions</code> signs out <em>other</em> sessions of the account. (The e2e journey checks that the old session token is rejected after a recovery.) Staff use the same endpoint with <code>{"method":"totp","totp_code":"..."}</code> to enrol an authenticator app.</p><h4>Request parameters</h4><div class="table-wrap"><table><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th><th>Constraints</th></tr></thead><tbody><tr><td><code>method</code></td><td>body</td><td>string</td><td>yes</td><td><code>password</code> (app users) or <code>totp</code> (staff)</td></tr><tr><td><code>password</code></td><td>body</td><td>string</td><td>yes for password</td><td>at least 6 characters</td></tr></tbody></table></div><h4>Example: too short</h4><pre class="out"><code>HTTP/1.1 400 Bad Request
+Content-Type: application/json; charset=utf-8
+
+{
+  &quot;id&quot;: &quot;9256e3e5-64f9-4278-b958-34ae3360dea0&quot;,
+  &quot;type&quot;: &quot;api&quot;,
+  &quot;expires_at&quot;: &quot;2026-10-26T22:42:33.992921Z&quot;,
+  &quot;issued_at&quot;: &quot;2026-10-26T21:42:33.992921Z&quot;,
+  &quot;request_url&quot;: &quot;http://127.0.0.1:9080/self-service/recovery?flow=4b8d7771-a342-42bc-85f2-bcbf53ccc2a7&quot;,
+  &quot;ui&quot;: {
+    &quot;action&quot;: &quot;http://127.0.0.1:9080/kratos/self-service/settings?flow=9256e3e5-64f9-4278-b958-34ae3360dea0&quot;,
+    &quot;method&quot;: &quot;POST&quot;,
+    &quot;nodes&quot;: [
+      &quot;default: csrf_token (hidden)&quot;,
+      &quot;password: password (password) messages=[{\&quot;id\&quot;: 4000032, \&quot;text\&quot;: \&quot;The password must be at least 6 characters long, but got 3.\&quot;}]&quot;,
+      &quot;password: method (submit)&quot;,
+      &quot;totp: totp_code (text)&quot;,
+      &quot;totp: method (submit)&quot;
+    ],
+    &quot;messages&quot;: null
+  },
+  &quot;state&quot;: &quot;show_form&quot;
+}</code></pre><h4>Example: success</h4><pre><code>curl -s -X POST &quot;$GATEWAY/kratos/self-service/settings?flow=$SID&quot; \
+  -H &quot;X-Session-Token: $TOKEN&quot; -H &quot;Content-Type: application/json&quot; \
+  -d &#x27;{&quot;method&quot;:&quot;password&quot;,&quot;password&quot;:&quot;newsecret&quot;}&#x27;</code></pre><pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json; charset=utf-8
+
+{
+  &quot;id&quot;: &quot;9256e3e5-64f9-4278-b958-34ae3360dea0&quot;,
+  &quot;state&quot;: &quot;success&quot;
+}</code></pre><h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th>Error</th><th>When it happens</th></tr></thead><tbody><tr><td><strong>400</strong></td><td>message <code>4000032</code></td><td>password shorter than 6</td></tr><tr><td><strong>403</strong></td><td>re-authentication required (not exercised here)</td><td>session not recent enough</td></tr><tr><td><strong>429</strong></td><td></td><td>gateway limit</td></tr></tbody></table></div>
+</div></details>
+<details class="endpoint" id="ep-password-reset-start">
+<summary><span class="method m-post">POST</span><span class="path">/public/v1/password-reset/start</span><span class="sum">Forgot password by phone: send the SMS code</span></summary>
+<div class="body"><dl class="meta">
+<dt>Audience</dt><dd>end user (the super app), no session</dd>
+<dt>Client path</dt><dd><code>/public/v1/password-reset/start</code> (through the gateway, base <code>$GATEWAY</code>)</dd>
+<dt>Internal path</dt><dd><code>/public/v1/password-reset/start</code> on notification-service <code>:8080</code> (no rewrite)</dd>
+<dt>Auth</dt><dd>none (public)</dd>
+<dt>Rate limit</dt><dd><strong>5 per 60 s per IP and 5 per 15 min per phone</strong>; plus the shared per-phone code limit (SMS 5/hour, 10/day) via the same gate as the pre-flight check</dd>
+<dt>Implemented in</dt><dd>notification-service <code>app.adera.notification.reset.PasswordResetService</code> (table <code>password_reset</code>, migration V5); gateway routes <code>password-reset-start</code>, <code>password-reset-finish</code></dd>
+</dl><h4>Purpose</h4><p>Kratos' recovery flow cannot take a phone, so phone accounts recover through our own two calls. <code>start</code> sends an SMS code <em>only if</em> the phone belongs to an active <em>app-user</em> account; staff accounts and suspended accounts get nothing. The answer is the same <code>202</code> for every well-formed phone, so it does not reveal whether the phone is registered. The code is 6 digits, stored only as a salted hash, valid 10 minutes, five wrong tries, single use.</p><h4>Request</h4><div class="table-wrap"><table><thead><tr><th>Name</th><th>Type</th><th>Required</th><th>Constraints</th></tr></thead><tbody><tr><td><code>identifier</code></td><td>string</td><td>yes</td><td>a phone like <code>+251911234567</code> (spaces, dashes, brackets tolerated); an email gives 400</td></tr></tbody></table></div><pre><code>curl -s -X POST &quot;$GATEWAY/public/v1/password-reset/start&quot; -H &quot;Content-Type: application/json&quot; -d &#x27;{&quot;identifier&quot;:&quot;+251903050827&quot;}&#x27;</code></pre><pre class="out"><code>HTTP/1.1 202 Accepted
+Content-Type: application/json; charset=utf-8
+
+{
+  &quot;expiresInSeconds&quot;: 600,
+  &quot;status&quot;: &quot;sent&quot;
+}</code></pre><h4>Unknown phone: identical</h4><pre class="out"><code>HTTP/1.1 202 Accepted
+Content-Type: application/json; charset=utf-8
+
+{
+  &quot;expiresInSeconds&quot;: 600,
+  &quot;status&quot;: &quot;sent&quot;
+}</code></pre><h4>An email address</h4><pre class="out"><code>HTTP/1.1 400 Bad Request
+Content-Type: application/json; charset=utf-8
+
+{
+  &quot;error&quot;: &quot;validation_failed&quot;,
+  &quot;fields&quot;: {
+    &quot;identifier&quot;: &quot;a phone number like +251911234567; for an email address use Kratos&#x27; recovery flow&quot;
+  }
+}</code></pre><p>SMS (dev): <code>Adera: your password reset code is 914548. Do not share it with anyone. It expires in 10 minutes. If you did not ask for it, ignore this message.</code></p><h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th>Error</th><th>When it happens</th></tr></thead><tbody><tr><td><strong>400</strong></td><td><code>validation_failed</code></td><td>not a phone number</td></tr><tr><td><strong>429</strong></td><td><code>too_many_codes</code> + <code>retryAfterSeconds</code></td><td>the per-phone code limit is reached</td></tr><tr><td><strong>429</strong></td><td>gateway</td><td>per-IP / per-phone request limit</td></tr></tbody></table></div>
+</div></details>
+<details class="endpoint" id="ep-password-reset-finish">
+<summary><span class="method m-post">POST</span><span class="path">/public/v1/password-reset/finish</span><span class="sum">Forgot password by phone: check the code and set the new password</span></summary>
+<div class="body"><dl class="meta">
+<dt>Audience</dt><dd>end user (the super app), no session</dd>
+<dt>Client path</dt><dd><code>/public/v1/password-reset/finish</code> (through the gateway, base <code>$GATEWAY</code>)</dd>
+<dt>Internal path</dt><dd><code>/public/v1/password-reset/finish</code> on notification-service</dd>
+<dt>Auth</dt><dd>none (public)</dd>
+<dt>Rate limit</dt><dd><strong>10 per 60 s per IP and 10 per 15 min per phone</strong>; the code allows 5 wrong tries</dd>
+<dt>Implemented in</dt><dd>notification-service <code>app.adera.notification.reset.PasswordResetService</code> (table <code>password_reset</code>, migration V5); gateway routes <code>password-reset-start</code>, <code>password-reset-finish</code></dd>
+</dl><h4>Purpose</h4><p>Checks the code, then sets the new password through the Kratos admin API (traits and verified flags untouched) and <strong>signs the account out on every device</strong>. Unlike Kratos' recovery flow it returns no session: the user signs in with the new password.</p><h4>Request</h4><div class="table-wrap"><table><thead><tr><th>Name</th><th>Type</th><th>Required</th><th>Constraints</th></tr></thead><tbody><tr><td><code>identifier</code></td><td>string</td><td>yes</td><td>the phone</td></tr><tr><td><code>code</code></td><td>string</td><td>yes</td><td>the 6 digits</td></tr><tr><td><code>password</code></td><td>string</td><td>yes</td><td>at least 6 characters (checked before the code is touched)</td></tr></tbody></table></div><h4>Wrong code</h4><pre class="out"><code>HTTP/1.1 400 Bad Request
+Content-Type: application/json; charset=utf-8
+
+{
+  &quot;error&quot;: &quot;invalid_code&quot;
+}</code></pre><h4>Too short (the code is not used up)</h4><pre class="out"><code>HTTP/1.1 400 Bad Request
+Content-Type: application/json; charset=utf-8
+
+{
+  &quot;error&quot;: &quot;validation_failed&quot;,
+  &quot;fields&quot;: {
+    &quot;password&quot;: &quot;must be at least 6 characters&quot;
+  }
+}</code></pre><h4>Right code</h4><pre><code>curl -s -X POST &quot;$GATEWAY/public/v1/password-reset/finish&quot; -H &quot;Content-Type: application/json&quot; \
+  -d &#x27;{&quot;identifier&quot;:&quot;+251903050827&quot;,&quot;code&quot;:&quot;914548&quot;,&quot;password&quot;:&quot;phonepass1&quot;}&#x27;</code></pre><pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json; charset=utf-8
+
+{
+  &quot;status&quot;: &quot;password_changed&quot;
+}</code></pre><p>Using the same code again, an expired code, five wrong tries, or an unknown phone all answer <code>400 {"error":"invalid_code"}</code> (identical, by design).</p><h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th>Error</th><th>When it happens</th></tr></thead><tbody><tr><td><strong>400</strong></td><td><code>invalid_code</code></td><td>wrong, expired, used, too many tries, or no such phone</td></tr><tr><td><strong>400</strong></td><td><code>validation_failed</code></td><td>short password / bad phone</td></tr><tr><td><strong>503</strong></td><td><code>service_unavailable</code></td><td>Kratos unreachable</td></tr></tbody></table></div>
+</div></details>
+<details class="endpoint" id="ep-login-codes-check">
+<summary><span class="method m-post">POST</span><span class="path">/public/v1/login-codes/check</span><span class="sum">Pre-flight: may I ask for a code for this address?</span></summary>
+<div class="body"><dl class="meta">
+<dt>Audience</dt><dd>end user (any screen about to trigger a code SMS or email), no session</dd>
+<dt>Client path</dt><dd><code>/public/v1/login-codes/check</code> (through the gateway, base <code>$GATEWAY</code>)</dd>
+<dt>Internal path</dt><dd><code>/public/v1/login-codes/check</code> on notification-service</dd>
+<dt>Auth</dt><dd>none (public)</dd>
+<dt>Rate limit</dt><dd>10 per 60 s per IP (route <code>login-code-check</code>)</dd>
+<dt>Implemented in</dt><dd>notification-service <code>app.adera.notification.gate.LoginCodeGate</code></dd>
+</dl><h4>Purpose</h4><p>Kratos' API cannot tell the client that a code was dropped by the per-recipient limit (SMS 5/hour, 10/day; email 10/hour, 20/day), so a screen would say "we sent a code" although nothing was delivered. Call this <strong>before</strong> registration, before a resend (sign-in that is refused as unverified), and before starting recovery by email. It counts the request for ANY address the same way, so the answer does not depend on whether an account exists. Phone recovery (<code>password-reset/start</code>) runs the same gate itself. Advisory: a client that skips it still hits the silent limit. The path keeps the name <code>login-codes</code> because the staff dashboard uses it for its emailed sign-in code.</p><h4>Request</h4><p><code>{"identifier":"+251903050827"}</code> (phone or email).</p><pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json; charset=utf-8
+
+{
+  &quot;allowed&quot;: true,
+  &quot;limitPerHour&quot;: 5,
+  &quot;limitPerDay&quot;: 10,
+  &quot;remainingThisHour&quot;: 4,
+  &quot;remainingToday&quot;: 9
+}</code></pre><p>When the limit is reached: <code>429</code> with <code>{"error":"too_many_codes","allowed":false,"retryAfterSeconds":N,...}</code> and a <code>Retry-After</code> header. Bad identifier: <code>400 validation_failed</code>.</p><h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th>Error</th><th>When it happens</th></tr></thead><tbody><tr><td><strong>400</strong></td><td><code>validation_failed</code></td><td>not an email or phone</td></tr><tr><td><strong>429</strong></td><td><code>too_many_codes</code></td><td>limit reached; wait <code>retryAfterSeconds</code></td></tr></tbody></table></div>
 </div></details>
 <details class="endpoint" id="ep-kratos-get-whoami">
 <summary><span class="method m-get">GET</span><span class="path">/kratos/sessions/whoami</span><span class="sum">Who am I (validate a session token)</span></summary>
@@ -745,193 +999,16 @@ Content-Type: application/json
 }</code></pre>
 <h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th>Error code</th><th>When it happens</th></tr></thead><tbody><tr><td><strong>429</strong></td><td><code>(HTML page)</code></td><td>Gateway rate limit (see Rate limit above). The body is APISIX's HTML page.</td></tr><tr><td><strong>400</strong></td><td><code>(Kratos error JSON)</code></td><td>Body missing or not JSON (not captured).</td></tr></tbody></table></div>
 </div></details>
-<details class="endpoint" id="ep-kratos-get-settings-api">
-<summary><span class="method m-get">GET</span><span class="path">/kratos/self-service/settings/api</span><span class="sum">Start a settings flow (authenticator-app enrolment)</span></summary>
-<div class="body"><dl class="meta">
-<dt>Audience</dt><dd>signed-out or signed-in end user (the Flutter app); staff use the same endpoints for their login (<a href="08b-staff-api.html">8b</a>)</dd>
-<dt>Client path</dt><dd><code>/kratos/self-service/settings/api</code> (through the gateway, base <code>$GATEWAY</code>)</dd>
-<dt>Internal path</dt><dd><code>/self-service/settings/api</code> on Kratos public API <code>kratos:4433</code> (the gateway strips the <code>/kratos</code> prefix with <code>proxy-rewrite</code>)</dd>
-<dt>Auth</dt><dd><code>Authorization: Bearer $TOKEN</code> (or <code>X-Session-Token: $TOKEN</code>), the <code>session_token</code> from sign-up or login. The session must be recent (<code>privileged_session_max_age: 15m</code>), otherwise Kratos asks for re-authentication</dd>
-<dt>Rate limit</dt><dd>120 per 60 s per client IP (gateway route <code>kratos-public</code>)</dd>
-<dt>Implemented in</dt><dd>Ory Kratos v26.2.0 (no code of ours); spec <code>docs/kratos-openapi-v26.2.0.json</code>, config <code>infra/kratos/kratos.yml</code>, routes in <code>infra/apisix/apisix.yaml</code></dd>
-</dl>
-<h4>Purpose</h4><p>Creates a settings flow for the signed-in identity. Its <code>totp</code> group contains a QR code image (<code>totp_qr</code>, a <code>data:image/png;base64</code> URI) and the <code>totp_secret_key</code> text to type into an authenticator app. Staff enrol this way; customers never do. Once TOTP is enrolled the flow shows <code>totp_unlink</code> instead.</p>
-<h4>Request parameters</h4><div class="table-wrap"><table><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why it exists</th></tr></thead><tbody><tr><td><code>Authorization</code></td><td>header</td><td>string</td><td>yes</td><td>bearer token</td><td>Whose settings.</td></tr></tbody></table></div>
-<h4>Example request</h4>
-<pre><code>curl -s "$GATEWAY/kratos/self-service/settings/api" \
-  -H "Authorization: Bearer $TOKEN"</code></pre>
-<pre class="out"><code>HTTP/1.1 200 OK
-Content-Type: application/json; charset=utf-8
-
-{
-  "id": "264d85cc-3603-4afb-ba48-fae44eef0c3e",
-  "type": "api",
-  "expires_at": "2026-10-25T06:34:21.218868112Z",
-  "issued_at": "2026-10-25T05:34:21.218868112Z",
-  "request_url": "http://127.0.0.1:9080/self-service/settings/api",
-  "ui": {
-    "action": "http://127.0.0.1:9080/kratos/self-service/settings?flow=264d85cc-3603-4afb-ba48-fae44eef0c3e",
-    "method": "POST",
-    "nodes": [
-      "default: csrf_token (hidden) = '&lt;csrf_token&gt;'",
-      "profile: traits.email (email)",
-      "profile: traits.phone_number (tel)",
-      "profile: method (submit)",
-      "totp: totp_qr (img)",
-      "totp: totp_secret_key (text)",
-      "totp: totp_code (text)",
-      "totp: method (submit)"
-    ]
-  },
-  "identity": {
-    "id": "68e52dd2-6b21-46e0-b39e-868691ea3c61",
-    "schema_id": "default",
-    "schema_url": "http://127.0.0.1:9080/kratos/schemas/ZGVmYXVsdA",
-    "state": "active",
-    "state_changed_at": "2026-10-25T05:30:55.24046Z",
-    "traits": {
-      "email": "a***@example.com"
-    },
-    "metadata_public": null,
-    "created_at": "2026-10-25T05:30:55.248057Z",
-    "updated_at": "2026-10-25T05:30:55.248057Z",
-    "organization_id": null
-  },
-  "state": "show_form"
-}</code></pre><p class="masked">Values masked: the TOTP secret and QR image are real per call and must never be shown or logged; the &lt;code&gt;ui.nodes&lt;/code&gt; are abridged to one line each.</p>
-<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th>Error code</th><th>When it happens</th></tr></thead><tbody><tr><td><strong>401</strong></td><td><code>(Kratos error JSON)</code></td><td>Invalid token.</td></tr><tr><td><strong>403</strong></td><td><code>session_refresh_required</code></td><td>The session is older than 15 minutes; log in again (Kratos standard behaviour; not reproduced here).</td></tr><tr><td><strong>429</strong></td><td><code>(HTML page)</code></td><td>Gateway rate limit (see Rate limit above). The body is APISIX's HTML page.</td></tr></tbody></table></div>
-<h4>How to use it</h4><ul><li>The <code>profile</code> group of the same flow lets the signed-in user change <code>traits.email</code>/<code>traits.phone_number</code> (Kratos' default profile method is on). Our user-service has no settings hook, so such a change would not be copied into <code>app_user</code> (observation from the flow nodes and config; the change itself was not tested).</li></ul>
-</div></details>
-<details class="endpoint" id="ep-kratos-post-settings">
-<summary><span class="method m-post">POST</span><span class="path">/kratos/self-service/settings?flow={id}</span><span class="sum">Confirm TOTP enrolment</span></summary>
-<div class="body"><dl class="meta">
-<dt>Audience</dt><dd>signed-out or signed-in end user (the Flutter app); staff use the same endpoints for their login (<a href="08b-staff-api.html">8b</a>)</dd>
-<dt>Client path</dt><dd><code>/kratos/self-service/settings?flow={id}</code> (through the gateway, base <code>$GATEWAY</code>)</dd>
-<dt>Internal path</dt><dd><code>/self-service/settings?flow={id}</code> on Kratos public API <code>kratos:4433</code> (the gateway strips the <code>/kratos</code> prefix with <code>proxy-rewrite</code>)</dd>
-<dt>Auth</dt><dd><code>Authorization: Bearer $TOKEN</code> (or <code>X-Session-Token: $TOKEN</code>), the <code>session_token</code> from sign-up or login</dd>
-<dt>Rate limit</dt><dd><strong>10 per 60 s per client IP</strong> (gateway route <code>kratos-self-service-submit</code>): this is the first line of SMS-cost protection. The 11th request in the window is a <code>429</code> with an HTML body</dd>
-<dt>Implemented in</dt><dd>Ory Kratos v26.2.0 (no code of ours); spec <code>docs/kratos-openapi-v26.2.0.json</code>, config <code>infra/kratos/kratos.yml</code>, routes in <code>infra/apisix/apisix.yaml</code></dd>
-</dl>
-<h4>Purpose</h4><p>Verifies the first code from the authenticator app and stores the TOTP credential. Our test showed that enrolling immediately raises <em>this</em> session to <code>aal2</code> (<code>authentication_methods</code> gains <code>totp</code>); only later logins start at <code>aal1</code> and need the upgrade flow.</p>
-<h4>Request parameters</h4><div class="table-wrap"><table><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why it exists</th></tr></thead><tbody><tr><td><code>method</code></td><td>body</td><td>string</td><td>yes</td><td><code>totp</code></td><td>Selects the TOTP strategy (<code>profile</code> would save trait changes).</td></tr><tr><td><code>totp_code</code></td><td>body</td><td>string</td><td>yes</td><td>6 digits for the current 30-second window</td><td>Proves the app has the secret.</td></tr><tr><td><code>flow</code></td><td>query</td><td>UUID</td><td>yes</td><td>id from the settings create call</td><td></td></tr></tbody></table></div>
-<h4>Wrong code</h4>
-<pre><code>curl -s -X POST "$GATEWAY/kratos/self-service/settings?flow=264d85cc-3603-4afb-ba48-fae44eef0c3e" \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"method": "totp", "totp_code": "123456"}'</code></pre>
-<pre class="out"><code>HTTP/1.1 400 Bad Request
-Content-Type: application/json; charset=utf-8
-
-{
-  "state": "show_form",
-  "messages": [
-    {
-      "id": 4000008,
-      "text": "The provided authentication code is invalid, please try again.",
-      "type": "error"
-    }
-  ]
-}</code></pre>
-<h4>Success</h4>
-<pre><code>curl -s -X POST "$GATEWAY/kratos/self-service/settings?flow=264d85cc-3603-4afb-ba48-fae44eef0c3e" \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"method": "totp", "totp_code": "123456"}'</code></pre>
-<pre class="out"><code>HTTP/1.1 200 OK
-Content-Type: application/json; charset=utf-8
-
-{
-  "id": "264d85cc-3603-4afb-ba48-fae44eef0c3e",
-  "type": "api",
-  "expires_at": "2026-10-25T06:34:21.218868Z",
-  "issued_at": "2026-10-25T05:34:21.218868Z",
-  "request_url": "http://127.0.0.1:9080/self-service/settings/api",
-  "ui": {
-    "action": "http://127.0.0.1:9080/kratos/self-service/settings?flow=c275e78f-4734-4c56-b314-0a6f4a6de86c",
-    "method": "POST",
-    "nodes": [
-      "default: csrf_token (hidden) = '&lt;csrf_token&gt;'",
-      "profile: traits.email (email)",
-      "profile: traits.phone_number (tel)",
-      "profile: method (submit)",
-      "totp: totp_unlink (submit)"
-    ],
-    "messages": [
-      {
-        "id": 1050001,
-        "text": "Your changes have been saved!",
-        "type": "success"
-      }
-    ]
-  },
-  "identity": {
-    "id": "68e52dd2-6b21-46e0-b39e-868691ea3c61",
-    "schema_id": "default",
-    "schema_url": "http://127.0.0.1:9080/kratos/schemas/ZGVmYXVsdA",
-    "state": "active",
-    "state_changed_at": "2026-10-25T05:30:55.24046Z",
-    "traits": {
-      "email": "a***@example.com"
-    },
-    "metadata_public": null,
-    "created_at": "2026-10-25T05:30:55.248057Z",
-    "updated_at": "2026-10-25T05:34:21.797919Z",
-    "organization_id": null
-  },
-  "state": "success"
-}</code></pre>
-<h4>whoami right after enrolling</h4>
-<pre class="out"><code>HTTP/1.1 200 OK
-Content-Type: application/json; charset=utf-8
-
-{
-  "authenticator_assurance_level": "aal2",
-  "authentication_methods": [
-    {
-      "method": "code",
-      "aal": "aal1",
-      "completed_at": "2026-10-25T05:30:55.256739507Z"
-    },
-    {
-      "method": "totp",
-      "aal": "aal2",
-      "completed_at": "2026-10-25T05:34:21.724598305Z"
-    }
-  ]
-}</code></pre><p class="masked">Named "aal1" in the capture label only because it was taken before the result was known; the session is aal2.</p>
-<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th>Error code</th><th>When it happens</th></tr></thead><tbody><tr><td><strong>400</strong></td><td><code>(flow JSON with error message 4000008)</code></td><td>Wrong authenticator code.</td></tr><tr><td><strong>401</strong></td><td><code>(Kratos error JSON)</code></td><td>Invalid token.</td></tr><tr><td><strong>403</strong></td><td><code>session_refresh_required</code></td><td>Session too old (15 minutes).</td></tr><tr><td><strong>404</strong></td><td><code>(Kratos error JSON)</code></td><td>Unknown or wrong flow id (<code>{"error":{"code":404,"status":"Not Found","message":"Unable to locate the resource"}}</code>).</td></tr><tr><td><strong>429</strong></td><td><code>(HTML page)</code></td><td>Gateway rate limit (see Rate limit above). The body is APISIX's HTML page.</td></tr></tbody></table></div>
-<h4>How to use it</h4><ul><li>Kratos does not accept the same TOTP code twice, so scripts must wait for the next 30-second window between enrolment and the next code (<code>tests/e2e/staff.py</code> does).</li><li>The role of a staff member is not part of this flow: it is <code>metadata_public.role</code> set by registry-service.</li></ul>
-</div></details>
 <details class="endpoint" id="ep-kratos-get-schema">
 <summary><span class="method m-get">GET</span><span class="path">/kratos/schemas/{id}</span><span class="sum">Read the identity schema</span></summary>
 <div class="body"><dl class="meta">
-<dt>Audience</dt><dd>signed-out or signed-in end user (the Flutter app); staff use the same endpoints for their login (<a href="08b-staff-api.html">8b</a>)</dd>
+<dt>Audience</dt><dd>end user (the super app). Staff use their own sign-in (<a href="08b-staff-api.html">8b</a>)</dd>
 <dt>Client path</dt><dd><code>/kratos/schemas/{id}</code> (through the gateway, base <code>$GATEWAY</code>)</dd>
-<dt>Internal path</dt><dd><code>/schemas/{id}</code> on Kratos public API <code>kratos:4433</code> (the gateway strips the <code>/kratos</code> prefix with <code>proxy-rewrite</code>)</dd>
-<dt>Auth</dt><dd>none: the caller is not signed in yet</dd>
-<dt>Rate limit</dt><dd>120 per 60 s per client IP (gateway route <code>kratos-public</code>)</dd>
-<dt>Implemented in</dt><dd>Ory Kratos v26.2.0 (no code of ours); spec <code>docs/kratos-openapi-v26.2.0.json</code>, config <code>infra/kratos/kratos.yml</code>, routes in <code>infra/apisix/apisix.yaml</code></dd>
-</dl>
-<h4>Purpose</h4><p>Returns the JSON schema of identity traits (<code>infra/kratos/identity.schema.json</code>); <code>id</code> is the base64url of the schema id (<code>ZGVmYXVsdA</code> = <code>default</code>, the value in <code>identity.schema_url</code>). Informational: shows that <code>email</code> and <code>phone_number</code> are the only traits and at least one is required (<code>anyOf</code>), <code>additionalProperties: false</code>.</p>
-<h4>Request parameters</h4><div class="table-wrap"><table><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why it exists</th></tr></thead><tbody><tr><td><code>id</code></td><td>path</td><td>string</td><td>yes</td><td><code>ZGVmYXVsdA</code></td><td>Schema id.</td></tr></tbody></table></div>
-<h4>Example request</h4>
-<pre><code>curl -s "$GATEWAY/kratos/schemas/ZGVmYXVsdA"</code></pre>
-<pre class="out"><code>HTTP/1.1 200 OK
-Content-Type: application/json; charset=utf-8
-
-{
-  "$id": "https://adera.app/schemas/user.json",
-  "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "Adera user",
-  "type": "object",
-  "properties": {
-    "traits": {
-      "type": "object",
-      "properties": {
-        "email": {
-          "type": "string",
-  ... (abridged)</code></pre>
-<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th>Error code</th><th>When it happens</th></tr></thead><tbody><tr><td><strong>429</strong></td><td><code>(HTML page)</code></td><td>Gateway rate limit (see Rate limit above). The body is APISIX's HTML page.</td></tr></tbody></table></div>
+<dt>Internal path</dt><dd><code>/schemas/{id}</code> on Kratos public API <code>kratos:4433</code> (the gateway strips <code>/kratos</code>, and removes <code>Origin</code> and <code>Cookie</code> from the request: native flows carry neither)</dd>
+<dt>Auth</dt><dd>none</dd>
+<dt>Rate limit</dt><dd>120 per 60 s per IP (<code>kratos-public</code>)</dd>
+<dt>Implemented in</dt><dd>Ory Kratos v26.2.0 (no code of ours); config <code>infra/kratos/kratos.yml</code>, identity schema <code>infra/kratos/identity.user.schema.json</code>, routes in <code>infra/apisix/apisix.yaml</code></dd>
+</dl><h4>Purpose</h4><p>Returns the JSON schema. <code>id</code> is the base64url of the schema id: <code>dXNlcg</code> = <code>user</code> (app users, <code>infra/kratos/identity.user.schema.json</code>), <code>ZGVmYXVsdA</code> = <code>default</code> (dashboard staff, <code>infra/kratos/identity.schema.json</code>). The user schema: traits <code>phone_number</code> (password identifier, verification via sms, recovery via sms) and <code>email</code> (password identifier, verification via email, recovery via email); at least one is required; no other traits.</p><pre><code>curl -s &quot;$GATEWAY/kratos/schemas/dXNlcg&quot;</code></pre><h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th>Error</th><th>When it happens</th></tr></thead><tbody><tr><td><strong>429</strong></td><td></td><td>gateway limit</td></tr></tbody></table></div>
 </div></details>
 <details class="endpoint" id="ep-kratos-any-admin">
 <summary><span class="method m-delete">ANY</span><span class="path">/kratos/admin/*</span><span class="sum">Blocked: Kratos admin API</span></summary>

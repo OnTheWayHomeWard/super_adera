@@ -35,7 +35,7 @@
 <li><a href="08-endpoints.html">8. Endpoint reference</a>
 </li>
 <li><a href="09-guides.html" class=current>9. Guides</a>
-<ul><li><a href="#prep">Before you start</a></li><li><a href="#user-signup">1. Sign up and log in as a user</a></li><li><a href="#staff-login">2. Log in as staff (email code and authenticator app)</a></li><li><a href="#first-super-admin">Where the first super admin comes from, and how to change it</a></li><li><a href="#register-app">4. Register a mini app end to end</a></li><li><a href="#send-notification">5. Send a notification as a partner and read the callback</a></li><li><a href="#read-inbox">6. Read the inbox (the bell menu)</a></li><li><a href="#mute-app">7. Mute an app</a></li><li><a href="#revoke-key">8. Revoke a key</a></li><li><a href="#quotas-log">9. Quotas, usage and &quot;why did it not arrive?&quot;</a></li><li><a href="#observability">Read logs, traces and metrics in Grafana</a></li><li><a href="#infisical-secrets">Infisical: where each secret is, and how to add or rotate one</a></li><li><a href="#go-real">Switch to real SMS, email and push safely</a></li></ul>
+<ul><li><a href="#prep">Before you start</a></li><li><a href="#user-signup">1. Sign up, verify and log in as a user</a></li><li><a href="#staff-login">2. Log in as staff (email code and authenticator app)</a></li><li><a href="#first-super-admin">Where the first super admin comes from, and how to change it</a></li><li><a href="#register-app">4. Register a mini app end to end</a></li><li><a href="#send-notification">5. Send a notification as a partner and read the callback</a></li><li><a href="#read-inbox">6. Read the inbox (the bell menu)</a></li><li><a href="#mute-app">7. Mute an app</a></li><li><a href="#revoke-key">8. Revoke a key</a></li><li><a href="#quotas-log">9. Quotas, usage and &quot;why did it not arrive?&quot;</a></li><li><a href="#observability">Read logs, traces and metrics in Grafana</a></li><li><a href="#infisical-secrets">Infisical: where each secret is, and how to add or rotate one</a></li><li><a href="#go-real">Switch to real SMS, email and push safely</a></li></ul>
 </li>
 <li><a href="10-reference.html">10. Reference</a>
 </li>
@@ -68,114 +68,100 @@
 <pre><code>cd /path/to/adera
 docker compose ps                                  # everything Up
 BASE=http://127.0.0.1:9080                         # the gateway
-DEV=http://127.0.0.1:8085                          # dev only: one-time codes
+DEV=http://127.0.0.1:8085                          # dev only: verification / reset codes
 which curl jq python3 openssl                      # tools used below</code></pre>
 <ul>
 <li><a href="#user-signup">1 Sign up and log in as a user</a></li><li><a href="#staff-login">2 Log in as staff</a></li><li><a href="#first-super-admin">3 First super admin, adding staff</a></li><li><a href="#register-app">4 Register a mini app</a></li><li><a href="#send-notification">5 Send a notification as a partner</a></li><li><a href="#read-inbox">6 Read the inbox</a></li><li><a href="#mute-app">7 Mute an app</a></li><li><a href="#revoke-key">8 Revoke a key</a></li><li><a href="#quotas-log">9 Quotas, usage and "why did it not arrive?"</a></li><li><a href="#observability">10 Logs, traces, metrics</a></li><li><a href="#infisical-secrets">11 Infisical secrets</a></li><li><a href="#go-real">12 Go real</a></li>
 </ul></section>
-<section><h2 id="user-signup">1. Sign up and log in as a user</h2>
-<p>There are no passwords. A phone number or an email gets a six-digit code; the code gives a <strong>session token</strong> that lasts 30 days. Sign-up and login are the same two steps against Kratos through the gateway. This script was run as written.</p>
+<section><h2 id="user-signup">1. Sign up, verify and log in as a user</h2>
+<p>A user registers with a phone (email optional) and a <strong>password of at least 6 characters</strong>, confirms the address with a six-digit code, then signs in with identifier and password. The sign-in gives a <strong>session token</strong> that lasts 30 days. Registration does <em>not</em> return a session: the account cannot sign in until the address is verified. Each step is a Kratos call through the gateway.</p>
 <pre><code>BASE=http://127.0.0.1:9080          # the gateway
-DEV=http://127.0.0.1:8085           # dev only: shows the one-time codes
+DEV=http://127.0.0.1:8085           # dev only: shows the codes
 PHONE=+251977123456                 # any valid E.164 number in dev mode
+H='Content-Type: application/json'
 
 curl -s -X DELETE $DEV/dev/messages        # dev only: clear old messages
 
-# 1. start a registration flow (native app flow)
+# 1. register: the answer carries the verification flow (a code was already sent)
 FLOW=$(curl -s $BASE/kratos/self-service/registration/api | jq -r .id)
+VFLOW=$(curl -s -X POST "$BASE/kratos/self-service/registration?flow=$FLOW" -H "$H" \
+  -d "{\"method\":\"password\",\"password\":\"tadesse\",\"traits.phone_number\":\"$PHONE\"}" \
+  | tee /dev/stderr | jq -r '.continue_with[0].flow.id')
 
-# 2. ask for a code
-curl -s -X POST "$BASE/kratos/self-service/registration?flow=$FLOW" \
-  -H 'Content-Type: application/json' -H 'Accept: application/json' \
-  -d "{\"method\":\"code\",\"traits.phone_number\":\"$PHONE\"}" | jq '{state, message: .ui.messages[0].text}'
-
-# 3. read the code (dev mode: the console SMS provider keeps it here; in real mode it arrives on the phone)
-for i in 1 2 3 4 5 6 7 8 9 10; do   # Kratos hands the message to the courier a moment later
-  CODE=$(curl -sG "$DEV/dev/messages" --data-urlencode "to=$PHONE" | jq -r '.[0].body // empty' | grep -oE '[0-9]{6}' | head -1)
-  [ -n "$CODE" ] &amp;&amp; break; sleep 1
-done
-echo "code: $CODE"
-
-# 4. send the code: the answer holds the session token
-RESP=$(curl -s -X POST "$BASE/kratos/self-service/registration?flow=$FLOW" \
-  -H 'Content-Type: application/json' -H 'Accept: application/json' \
-  -d "{\"method\":\"code\",\"traits.phone_number\":\"$PHONE\",\"code\":\"$CODE\"}")
-TOKEN=$(echo "$RESP" | jq -r .session_token)
-echo "$RESP" | jq '{session: {active: .session.active, aal: .session.authenticator_assurance_level}, user_id: .identity.id}'
-
-# 5. use it
-curl -s $BASE/api/v1/me -H "Authorization: Bearer $TOKEN" | jq '{id, phone, status, language}'
-</code></pre>
-<pre class="out"><code>{
-  "state": "sent_email",
-  "message": "A code has been sent to the address(es) you provided. If you have not received a message, check the spelling of the address and retry the registration."
-}
-code: 899223
-{
-  "session": {
-    "active": true,
-    "aal": "aal1"
-  },
-  "user_id": "0e35641f-6a46-4128-90cd-607b185b52a8"
-}
-{
-  "id": "0e35641f-6a46-4128-90cd-607b185b52a8",
-  "phone": "+2519*****56",
-  "status": "ACTIVE",
-  "language": "en"
-}</code></pre><p class="masked">(The code, ids and phone number are from a throw-away test user; the phone is masked here. The state name <code>sent_email</code> is Kratos' wording even for SMS.)</p>
-<ul>
-<li>The <code>user_id</code> from Kratos <em>is</em> the user's id everywhere (profile, aliases, inbox).</li>
-<li>The profile row was created by the registration webhook before you called <code>/api/v1/me</code> (see <a href="05-communication.html#registration">the webhook path</a>).</li>
-<li>Unknown number at <em>login</em>: Kratos says the account does not exist (a known enumeration weakness). Wrong code: the flow shows an error and you may retry until it expires (5 minutes).</li>
-<li>Limit: 10 code requests or checks per minute per IP at the gateway; 5 SMS per hour and 10 per day per recipient. In real mode a rate-limited recipient silently receives nothing.</li>
-</ul>
-<h3 id="log-in-again-later">Log in again later</h3>
-<pre><code>BASE=http://127.0.0.1:9080
-DEV=http://127.0.0.1:8085
-PHONE=+251977123456
-
-curl -s -X DELETE $DEV/dev/messages
-FLOW=$(curl -s $BASE/kratos/self-service/login/api | jq -r .id)
-
-# ask for a code (the identifier is the phone or the email)
-curl -s -X POST "$BASE/kratos/self-service/login?flow=$FLOW" \
-  -H 'Content-Type: application/json' -H 'Accept: application/json' \
-  -d "{\"method\":\"code\",\"identifier\":\"$PHONE\"}" | jq '{state, message: .ui.messages[0].text}'
-
+# 2. read the code (dev mode: the console SMS provider keeps it here; in real mode it arrives on the phone)
 for i in 1 2 3 4 5 6 7 8 9 10; do
   CODE=$(curl -sG "$DEV/dev/messages" --data-urlencode "to=$PHONE" | jq -r '.[0].body // empty' | grep -oE '[0-9]{6}' | head -1)
   [ -n "$CODE" ] &amp;&amp; break; sleep 1
 done
 
-RESP=$(curl -s -X POST "$BASE/kratos/self-service/login?flow=$FLOW" \
-  -H 'Content-Type: application/json' -H 'Accept: application/json' \
-  -d "{\"method\":\"code\",\"identifier\":\"$PHONE\",\"code\":\"$CODE\"}")
-TOKEN=$(echo "$RESP" | jq -r .session_token)
-echo "$RESP" | jq '{session_token: (.session_token | .[0:8] + "..."), expires_at: .session.expires_at, aal: .session.authenticator_assurance_level}'
+# 3. verify
+curl -s -X POST "$BASE/kratos/self-service/verification?flow=$VFLOW" -H "$H" -d "{\"method\":\"code\",\"code\":\"$CODE\"}" | jq '{state}'
 
-curl -s $BASE/kratos/sessions/whoami -H "Authorization: Bearer $TOKEN" | jq '{active, aal: .authenticator_assurance_level, id: .identity.id}'
+# 4. sign in with the password
+LFLOW=$(curl -s $BASE/kratos/self-service/login/api | jq -r .id)
+RESP=$(curl -s -X POST "$BASE/kratos/self-service/login?flow=$LFLOW" -H "$H" \
+  -d "{\"method\":\"password\",\"identifier\":\"$PHONE\",\"password\":\"tadesse\"}")
+TOKEN=$(echo "$RESP" | jq -r .session_token)
+echo "$RESP" | jq '{session: {active: .session.active, aal: .session.authenticator_assurance_level, expires_at: .session.expires_at}}'
+
+# 5. use it
+curl -s $BASE/api/v1/me -H "Authorization: Bearer $TOKEN" | jq '{id, phone, status, language}'
+</code></pre>
+<pre class="out"><code>{ "identity": { "id": "bfa0c48c-f574-451f-936a-b02291f5a190", "schema_id": "user", "state": "active", "traits": { "phone_number": "+2519*****27" },
+  "verifiable_addresses": [ { "value": "+2519*****27", "verified": false, "via": "sms", "status": "sent" } ], ... },
+  "continue_with": [ { "action": "show_verification_ui", "flow": { "id": "44fa614f-a431-4863-b936-f4327804d214", "verifiable_address": "+2519*****27" } } ] }
+{
+  "state": "passed_challenge"
+}
+{
+  "session": {
+    "active": true,
+    "aal": "aal1",
+    "expires_at": "2026-11-25T21:41:30.538759894Z"
+  }
+}
+{
+  "id": "bfa0c48c-f574-451f-936a-b02291f5a190",
+  "phone": "+2519*****27",
+  "status": "ACTIVE",
+  "language": "en"
+}</code></pre><p class="masked">(Captured 2026-10-26 from a throw-away user, phone masked. The state name <code>sent_email</code> is Kratos' wording even for SMS.)</p>
+<ul>
+<li>The <code>identity.id</code> from Kratos <em>is</em> the user's id everywhere (profile, aliases, inbox).</li>
+<li>The profile row was created by the registration webhook before you called <code>/api/v1/me</code> (see <a href="05-communication.html#registration">the webhook path</a>).</li>
+<li>Signing in before verifying: HTTP 403, <code>error.id = session_verified_address_required</code>, plus a new verification flow and code. The address you sign in with must itself be verified; with a phone <em>and</em> an email Kratos sends the first code to one of them (see <code>verifiable_address</code>).</li>
+<li>Wrong password and unknown account give the same answer (message 4000006). Registration with an already used phone or email answers 4000007 (it does reveal that the account exists).</li>
+<li>Limits: registration 5 submits a minute per IP, sign-in 10 a minute per IP and 10 per 15 minutes per identifier, verification 10 a minute; 5 SMS per hour and 10 per day per recipient. Call <code>POST /public/v1/login-codes/check</code> before anything that sends a code: in real mode a rate-limited recipient silently receives nothing otherwise.</li>
+</ul>
+<h3 id="log-in-again-later">Log in again later</h3>
+<pre><code>FLOW=$(curl -s $BASE/kratos/self-service/login/api | jq -r .id)
+RESP=$(curl -s -X POST "$BASE/kratos/self-service/login?flow=$FLOW" -H "$H" \
+  -d "{\"method\":\"password\",\"identifier\":\"$PHONE\",\"password\":\"tadesse\"}")
+TOKEN=$(echo "$RESP" | jq -r .session_token)
+curl -s $BASE/kratos/sessions/whoami -H "Authorization: Bearer $TOKEN" | jq '{active, aal: .authenticator_assurance_level}'
 
 # log out: removes this phone's push token AND revokes the session
 curl -s -X POST $BASE/api/v1/me/logout -H "Authorization: Bearer $TOKEN" | jq .
 curl -s -o /dev/null -w 'after logout, whoami is HTTP %{http_code}\n' $BASE/kratos/sessions/whoami -H "Authorization: Bearer $TOKEN"
 </code></pre>
 <pre class="out"><code>{
-  "state": "sent_email",
-  "message": "A code was sent to the address you provided. If you didn't receive it, please check the spelling of the address and try again."
-}
-{
-  "session_token": "ory_st_r...",
-  "expires_at": "2026-11-24T06:09:56.273384706Z",
+  "active": true,
   "aal": "aal1"
 }
-{
-  "active": true,
-  "aal": "aal1",
-  "id": "0e35641f-6a46-4128-90cd-607b185b52a8"
-}
 after logout, whoami is HTTP 401</code></pre>
-<p>Logging out uses <code>POST /api/v1/me/logout</code> (HTTP 204, no body): it removes this phone's push token and revokes the session in one call. With email instead of a phone use the same flows with <code>traits.email</code> and <code>identifier</code>. Every field and error: <a href="08e-kratos-flows.html">Kratos flows</a> and <a href="08a-user-api.html">user API</a>. Clean up a test user: delete the identity with the Kratos admin API (<code>DELETE http://127.0.0.1:4434/admin/identities/&lt;id&gt;</code>) and its rows in <code>users</code>.</p></section>
+<h3 id="forgot-password">Forgot or change the password</h3>
+<p>By phone (our endpoints; Kratos recovery cannot take a phone) and by email (Kratos recovery flow). Details and captured answers: <a href="08e-kratos-flows.html#ep-password-reset-start">8e</a>.</p>
+<pre><code># phone: SMS code, then the new password (all sessions of the account are signed out)
+curl -s -X POST $BASE/public/v1/password-reset/start  -H "$H" -d "{\"identifier\":\"$PHONE\"}"        # 202 {"status":"sent","expiresInSeconds":600}
+curl -s -X POST $BASE/public/v1/password-reset/finish -H "$H" -d "{\"identifier\":\"$PHONE\",\"code\":\"$CODE\",\"password\":\"phonepass1\"}"   # 200 {"status":"password_changed"}
+
+# email: Kratos recovery -> privileged session token + settings flow -> new password
+RID=$(curl -s $BASE/kratos/self-service/recovery/api | jq -r .id)
+curl -s -X POST "$BASE/kratos/self-service/recovery?flow=$RID" -H "$H" -d '{"method":"code","email":"me@example.com"}' | jq '{state}'     # sent_email
+# ...read the code, then:
+curl -s -X POST "$BASE/kratos/self-service/recovery?flow=$RID" -H "$H" -d "{\"method\":\"code\",\"code\":\"$CODE\"}" | jq '.continue_with'
+# -&gt; set_ory_session_token + show_settings_ui(flow id); then POST /settings?flow=ID with X-Session-Token and {"method":"password","password":"..."}</code></pre>
+<p>Every field and error: <a href="08e-kratos-flows.html">Kratos flows</a> and <a href="08a-user-api.html">user API</a>. Clean up a test user: delete the identity with the Kratos admin API (<code>DELETE http://127.0.0.1:4434/admin/identities/&lt;id&gt;</code>) and its rows in <code>users</code>.</p></section>
 <section><h2 id="staff-login">2. Log in as staff (email code and authenticator app)</h2>
 <p>Staff need <strong>two proofs</strong> to reach the admin API: the emailed code (aal1) and an authenticator-app code (aal2). Until both are done, the admin API answers <code>403 mfa_required</code>.</p>
 <ol>
@@ -550,7 +536,7 @@ adm "$BASE/admin/api/v1/notification/notifications/$NOTIFICATION_ID" | jq .</cod
 <p>Codes sent by Kratos (login) are separate from partner messages. For them, look at <code>send_log</code>:</p>
 <pre><code>docker compose exec -T postgres psql -U adera_admin -d notification -c \
   "SELECT channel, recipient_masked, provider, status, error_code, created_at FROM send_log ORDER BY created_at DESC LIMIT 5"</code></pre>
-<p>Statuses there: <code>SENT</code>, <code>FAILED</code>, <code>SUPPRESSED</code> (<code>rate_limited</code>), <code>SKIPPED</code> (<code>not_allowlisted</code>). A user who asked for too many codes sees "code sent" yet receives nothing: that is <code>SUPPRESSED rate_limited</code>. Clients that call <code>POST /public/v1/login-codes/check</code> first (the backoffice login page does) get a 429 with the time to wait instead.</p></section>
+<p>Statuses there: <code>SENT</code>, <code>FAILED</code>, <code>SUPPRESSED</code> (<code>rate_limited</code>), <code>SKIPPED</code> (<code>not_allowlisted</code>). A user who asked for too many codes sees "code sent" yet receives nothing: that is <code>SUPPRESSED rate_limited</code>. Clients that call <code>POST /public/v1/login-codes/check</code> first (the backoffice login page does; the super app should do the same before registration, a resend and email recovery, and <code>password-reset/start</code> applies the same check itself) get a 429 with the time to wait instead.</p></section>
 <section>
 <h2 id="observability">Read logs, traces and metrics in Grafana</h2>
 <p>Open <a href="http://localhost:3001">http://localhost:3001</a> and sign in as <code>admin</code> with <code>GRAFANA_ADMIN_PASSWORD</code> from <code>.env</code>. Three data sources are pre-configured: Prometheus (default), Loki, Tempo. The queries below were run against the live stack (through Grafana's data-source proxy) and returned data.</p>

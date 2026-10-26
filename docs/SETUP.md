@@ -1,7 +1,7 @@
 # Adera: local platform setup
 
 State of the platform: infrastructure (steps 1–8), file storage (RustFS), and three application services:
-**`notification-service`** (OTP delivery and the partner notification platform), **`user-service`** (profiles, avatars, devices/FCM tokens, Kratos link) and **`registry-service`** (mini apps, staff, audit), plus the staff dashboard in `backoffice/`.
+**`notification-service`** (code delivery for Kratos, phone password reset, and the partner notification platform), **`user-service`** (profiles, avatars, devices/FCM tokens, Kratos link) and **`registry-service`** (mini apps, staff, audit), plus the staff dashboard in `backoffice/`.
 All three are Spring Boot 4.1, Java 21, Maven; each microservice is its own independent Maven project under `services/`.
 
 This file contains **no secret values**. Secrets live in `.env` (container secrets) and Infisical (API keys).
@@ -11,7 +11,7 @@ This file contains **no secret values**. Secrets live in `.env` (container secre
 ## 1. What this is
 
 The backend foundation for the Adera super app (design docs: <http://165.22.183.71:3039/>).
-Goal for this phase: email-or-phone login with one-time codes, sessions, logout, and FCM token tracking.
+Goal for this phase: phone-or-email sign-in with a password (address verified by a code, forgot-password by code), sessions, logout, and FCM token tracking. Dashboard staff sign in with an emailed code plus authenticator app.
 
 Approach: use proven open-source tools wherever possible; write code only where the product logic is ours.
 Nothing is on Kubernetes; everything runs in one `docker-compose.yml`, bound to `127.0.0.1`.
@@ -23,7 +23,7 @@ Flutter app
     │
     ▼
 APISIX gateway :9080   (rate limits, CORS, request-id, session check, tracing)
-    ├──► /kratos/*        ──► Kratos :4433   (identity, one-time-code login, sessions)
+    ├──► /kratos/*        ──► Kratos :4433   (identity, password login, code verification/recovery, sessions)
     ├──► /kratos/admin/*  ──► 403 (blocked)
     └──► /api/v1/me/**    ──► forward-auth ──► user-service /internal/auth/verify ──► Kratos whoami
                               (sets X-User-Id + X-Gateway-Secret)  ──► user-service :8086 (Spring)
@@ -67,7 +67,7 @@ All host ports are bound to `127.0.0.1` only.
 | (one-shot) | `curlimages/curl:8.10.1` | – | `rabbitmq-setup`: creates vhost/users |
 | (one-shot) | `oryd/kratos:v26.2.0` | – | `kratos-migrate`: applies DB migrations |
 
-Chosen against alternatives: Kratos over Keycloak/SuperTokens (headless, API-first, passwordless code flow);
+Chosen against alternatives: Kratos over Keycloak/SuperTokens (headless, API-first, password + code flows);
 APISIX standalone over Kong (config in git, no etcd); RabbitMQ over NATS/Kafka (Spring support, scale);
 Alloy over Promtail (Promtail is being retired).
 
@@ -121,7 +121,7 @@ APISIX `apisix.yaml` route changes hot-reload within about a second.
 | Grafana (user `admin`, password `GRAFANA_ADMIN_PASSWORD`) | <http://localhost:3001> |
 | Infisical | <http://localhost:8080> |
 | Mailpit inbox | <http://localhost:8025> |
-| notification-service dev messages (OTP codes, dev mode only) | <http://localhost:8085/dev/messages> |
+| notification-service dev messages (verification / reset / staff codes, dev mode only) | <http://localhost:8085/dev/messages> |
 | RustFS console (`RUSTFS_ACCESS_KEY` / `RUSTFS_SECRET_KEY`) | <http://localhost:9001> |
 | user-service direct (dev only; needs the gateway secret, so use the gateway) | <http://localhost:8086> |
 | RabbitMQ UI (`RABBITMQ_ADMIN_USER`) | <http://localhost:15672> |
@@ -245,34 +245,47 @@ Errors are `{"error":"<code>","fields":{…}}`: 400 validation, 401 no/invalid s
 * Push: `FCM_PROVIDER=fake` until a Firebase service account for Adera exists (`FIREBASE_SERVICE_ACCOUNT_B64` in Infisical `/notification`, then `FCM_PROVIDER=firebase`).
 * Our response/callback signing key: `PARTNER_SIGNING_KEY_ID` / `PARTNER_SIGNING_PRIVATE_KEY_B64` in Infisical `/notification`; without it an ephemeral key is used (dev only, refused with real providers).
 * `PARTNER_ALLOW_PRIVATE_CALLBACKS=true` is for the local e2e test only; the service refuses to start with it while a real provider is on.
-* Tests: `tests/e2e/partner.py` (through the gateway), `tests/e2e/journey.py` (29), `tests/e2e/staff.py`; scripts that need staff (`partner.py`, `admin_users.py`, `seed_demo.py`) never use the bootstrap account (a person's authenticator app is enrolled on it): `tests/e2e/tempstaff.py` creates a temporary staff account (`tempstaff-xxxx@adera.local`, role ADMIN) in the dev stack and removes it afterwards (identity, staff row, secret file, send_log rows); `ADERA_STAFF_EMAIL` uses a real account instead (code from `ADERA_TOTP` or a prompt); it refuses to run unless the dev endpoint answers; unit/integration: notification-service 50, registry-service 56, user-service 65; backoffice (`backoffice/`, React dashboard at /backoffice/): 65 unit tests, a live smoke test and a Playwright walk-through, see `backoffice/README.md` and docs section 11; `tests/e2e/admin_users.py` (13 checks).
+* Tests: `tests/e2e/partner.py` (through the gateway), `tests/e2e/journey.py` (63), `tests/e2e/staff.py`; scripts that need staff (`partner.py`, `admin_users.py`, `seed_demo.py`) never use the bootstrap account (a person's authenticator app is enrolled on it): `tests/e2e/tempstaff.py` creates a temporary staff account (`tempstaff-xxxx@adera.local`, role ADMIN) in the dev stack and removes it afterwards (identity, staff row, secret file, send_log rows); `ADERA_STAFF_EMAIL` uses a real account instead (code from `ADERA_TOTP` or a prompt); it refuses to run unless the dev endpoint answers; unit/integration: notification-service 113, registry-service 93, user-service 79; backoffice (`backoffice/`, React dashboard at /backoffice/): 65 unit tests, a live smoke test and a Playwright walk-through, see `backoffice/README.md` and docs section 11; `tests/e2e/admin_users.py` (13 checks), `tests/e2e/partner.py` (59), `tests/e2e/userauth.py` (helper: register, verify, login, recovery for the scripts).
 * Not built yet: frontend bridge/user consent, payments, real Firebase. (The React dashboard is built: `backoffice/`, docs section 11 and the operator's manual, section 12.)
 
-## 8. Login: how it works
+## 8. Sign-in: how it works
 
-Identity schema (`infra/kratos/identity.schema.json`): traits `email` and `phone_number`, each a one-time-code login identifier;
-at least one is required (`anyOf`); no other traits (`additionalProperties: false`).
-Sessions last 30 days; codes expire after 5 minutes; no passwords.
-Profile data (name, gender, location, avatar, free-form JSON, devices) lives in `user-service`, keyed by the Kratos identity id (see §7b).
+**Two kinds of people, two Kratos identity schemas.**
+- `user` (the default for registration; `infra/kratos/identity.user.schema.json`): app users. Traits `phone_number` and/or `email` (at least one), each a **password identifier**; the phone is verified by an SMS code (`verification via sms`), the email by an email code; recovery addresses likewise.
+- `default` (`infra/kratos/identity.schema.json`): dashboard staff, created through the Kratos admin API by registry-service. Email only; they sign in with an emailed code and then an authenticator app (unchanged). The gateway refuses self-registration with `?identity_schema=default`.
+
+**Password rules** (`selfservice.methods.password.config`): at least 6 characters; haveibeenpwned off; identifier-similarity check off; no digit/symbol rules. Sessions last 30 days. Codes (verification, recovery) live 10 minutes.
+
+**Hooks.** Registration (password method): web_hook to user-service `/internal/kratos/after-registration` (non-blocking), then `show_verification_ui`; **no session until the address is verified**. Login (password method): `require_verified_address` (the address you sign in with must itself be verified; with a phone and an email on the account each must be verified before it can be used to sign in). Settings (password): `revoke_active_sessions` after a password change. The `profile` settings method stays disabled. `feature_flags.use_continue_with_transitions: true` makes native flows return `continue_with` (session token, next flow).
+
+Profile data (name, gender, location, avatar, free-form JSON, devices) lives in `user-service`, keyed by the Kratos identity id (see section 7b).
 
 Native-app flow through the gateway (base `http://127.0.0.1:9080/kratos`):
 
 | Step | Request |
 |---|---|
-| Sign up | `GET /self-service/registration/api`, then `POST /self-service/registration?flow=ID` with `{method:"code","traits.phone_number":"+251…"}` |
-| Verify | same `POST` plus `"code":"123456"` → returns `session_token` |
-| Log in | `GET /self-service/login/api`, then `POST /self-service/login?flow=ID` with `{method:"code",identifier:"+251…"}`, then again with `code` |
+| Sign up | `GET /self-service/registration/api`, then `POST /self-service/registration?flow=ID` with `{"method":"password","password":"...","traits.phone_number":"+251..."}` (optional `traits.email`). Answer: identity + `continue_with[0].flow` (verification flow, code already sent to `verifiable_address`). No session. |
+| Verify | `POST /self-service/verification?flow=VID` with `{"method":"code","code":"123456"}` until `state: passed_challenge` |
+| Log in | `GET /self-service/login/api`, then `POST /self-service/login?flow=ID` with `{"method":"password","identifier":"+251...","password":"..."}` -> `session_token`. Unverified address: 403 `session_verified_address_required` + a new verification flow and code. |
+| Forgot password (email) | `GET /self-service/recovery/api`, `POST .../recovery?flow=ID` with `{"method":"code","email":"..."}`, then `{"method":"code","code":"..."}` -> `continue_with`: `set_ory_session_token` (privileged short session) + `show_settings_ui` (settings flow) |
+| Forgot password (phone) | `POST /public/v1/password-reset/start {"identifier":"+251..."}`, then `/finish {"identifier","code","password"}` (our endpoints in notification-service; Kratos recovery only accepts an email address) |
+| Change / set password | `GET /self-service/settings/api` with `X-Session-Token`, `POST .../settings?flow=ID` with `{"method":"password","password":"..."}` (session must be less than 15 minutes old) |
+| Code pre-flight | `POST /public/v1/login-codes/check {"identifier"}` before any step that sends a code (path name kept; the dashboard uses it too) |
 | Who am I | `GET /sessions/whoami` with `Authorization: Bearer <session_token>` |
 | Log out | `DELETE /self-service/logout/api` with `{session_token}` |
 | Other sessions | `GET /sessions`, `DELETE /sessions` (all others), `DELETE /sessions/{id}` |
 
-Phone numbers must be valid E.164 (`+1 555…` is rejected). Spec: `docs/kratos-openapi-v26.2.0.json`.
+**Phone recovery preference (honest).** Kratos recovery sends the code to the address typed and accepts only an email address there; it cannot "prefer the phone" for an account that has both. So: the app asks for the phone first and uses `/public/v1/password-reset/*` (SMS); an account with only an email uses Kratos' recovery flow (email). Nothing on the server forces a user with both addresses to use the phone.
+
+**Wording of the codes** lives in `infra/kratos/courier-templates/` (verification code SMS + email, recovery code email); the phone reset SMS text is in `PasswordResetService`.
+
+Phone numbers must be valid E.164 (`+1 555...` is rejected). Spec: `docs/kratos-openapi-v26.2.0.json`. Full captured examples: docs section 8e. Seeded demo users with DEV-ONLY passwords: docs section 13.
 
 ## 9. Gateway (APISIX)
 
 - CORS (global rule in `infra/apisix/apisix.yaml`): allowed origin `http://localhost:3000` (dev; replace before production), exposed response headers `X-Request-Id` and `X-Total-Count` (so a browser app on another origin can read list totals).
 - Plugins enabled (list in `config.yaml` **replaces** the defaults; add a plugin there before using it): `request-id`, `cors`, `prometheus`, `opentelemetry`, `limit-count`, `forward-auth`, `proxy-rewrite`, `mocking`.
-- Routes (`apisix.yaml`): `/kratos/admin/*` → 403; `POST /kratos/self-service/*` → limited to 10/min per IP (OTP send/verify); other `/kratos/*` → 120/min; `/api/v1/me/avatar` → session required, 20/min; other `/api/v1/me/**` → session required, 300/min (the old temporary `/api/ping` is gone).
+- Routes (`apisix.yaml`): `/kratos/admin/*` → 403; `POST /kratos/self-service/{login,registration,recovery,verification,settings}` → limited per step (login 10/min per IP and 10 per 15 min per identifier, registration 5/min, recovery 5/min and 5 per 15 min per email, verification 10/min, settings 10/min), other self-service POST 10/min; `POST /public/v1/password-reset/start|finish` → 5/min and 10/min per IP plus per phone; `POST /public/v1/login-codes/check` → 10/min; other `/kratos/*` → 120/min; `/api/v1/me/avatar` → session required, 20/min; other `/api/v1/me/**` → session required, 300/min (the old temporary `/api/ping` is gone).
 - `forward-auth` on the `/api/v1/me` routes calls `user-service` (`/internal/auth/verify`); on a Kratos outage it returns 503 (not 401). APISIX sends `X-Gateway-Secret` (from `USER_GATEWAY_SECRET`) both to the verify call and to the upstream.
 - APISIX's YAML parser: avoid YAML anchors/aliases in `apisix.yaml`; `${{ENV_VAR}}` substitution works but the variable must exist in the container (recreate it with `docker compose up -d apisix` after adding one; `restart` is not enough).
 - Rate-limit counters are shared through Redis (`429` when exceeded).
@@ -299,7 +312,7 @@ console SMS / Mailpit email), and the email really arrived in Mailpit. `notifica
 number), provider request formats (Twilio/Resend, mocked), failure → 502, and the Infisical loader.
 
 **user-service:** 47 automated tests at first (65 now; unit + 24 API integration tests against a real Postgres with `jsonb`, including a concurrent first-request race, plus gateway-secret tests).
-End to end through the gateway, `tests/e2e/journey.py` runs **29 checks, all passing**: sign-up, Kratos webhook creating the profile before any API call, profile PATCH, `extra` merge persisted as jsonb,
+End to end through the gateway, `tests/e2e/journey.py` runs **63 checks, all passing** (2026-10-26): password sign-up, verification, wrong password, recovery by email and phone, change password, then sign-up, Kratos webhook creating the profile before any API call, profile PATCH, `extra` merge persisted as jsonb,
 location, avatar upload → RustFS → signed URL serves a 512×512 JPEG (unsigned URL gets 403), replaced avatars leave no orphan objects, non-image/oversize rejected (7 MB → 413; ~2.4 MB passes the gateway),
 FCM token registration and rotation, forged `X-User-Id` overridden, bypassing the gateway rejected, logout (token removed, session revoked, other users unaffected), clean-up leaves no rows or objects.
 Zero errors in any service log; a single trace spans gateway → Kratos for sign-up.
@@ -307,7 +320,9 @@ Zero errors in any service log; a single trace spans gateway → Kratos for sign
 ## 12. Known limitations and open items
 
 **Security / behaviour**
-- **Account enumeration:** Kratos answers "account does not exist" for unknown identifiers at login but "code sent" for known ones. Plan: a single "continue" endpoint in our backend that always answers "code sent".
+- **Account enumeration at registration:** registering an existing phone/email answers message 4000007 (Kratos has no switch to hide it). Login, email recovery, phone reset and verification give identical answers for known and unknown addresses.
+- **No password lockout:** Kratos has none; protection is the gateway only (per IP and per identifier limits) and the 6-character minimum.
+- **Phone preference for recovery is client-side:** see section 8.
 - **Phone and email logins are separate identities.** Linking a second identifier (and merging two `app_user` rows) is a feature we must build.
 - `user-service`'s `/internal/kratos/after-registration` has no authentication (Kratos' hook config is static, so a secret would have to sit in `kratos.yml`); it is not routed by the gateway and only reachable inside the compose network (and localhost:8086 in dev). Worst case: someone inside the network creates an empty profile row for an id.
 - **Account deletion** (store requirement) is not implemented: it must delete the Kratos identity, soft-delete/anonymise the profile, remove avatar files and device tokens.
@@ -327,7 +342,7 @@ Copying the folder and running `docker compose up -d` starts the containers but 
 1. **Infisical starts empty** on a new server (its data is in the Postgres volume). Restore the `infisical` DB (works with the same `.env` keys) or recreate project + secrets + token by hand; then update `INFISICAL_TOKEN`/`INFISICAL_PROJECT_ID`.
 2. **Public HTTPS in front of the gateway only** (e.g. Caddy → `api.<domain>` → APISIX :9080). Everything else stays on `127.0.0.1` (use SSH tunnels).
 3. **Replace hardcoded localhost URLs:** Kratos `serve.public.base_url` (otherwise phones get `127.0.0.1` flow URLs), Infisical `SITE_URL`, APISIX CORS origin.
-4. **Real client IP in APISIX** behind the proxy, or the per-IP login limit (10/min) applies to all users combined.
+4. **Real client IP in APISIX** behind the proxy, or the per-IP sign-in/registration limits apply to all users combined.
 5. **Set the environment and delivery mode:** `ADERA_ENV=prod` (section 7aa), then `SMS_PROVIDER=twilio`, `EMAIL_PROVIDER=resend`, `NOTIFY_DEV_ENDPOINTS=false`, empty `NOTIFY_LIVE_ALLOWLIST`. Mailpit not needed.
 6. **Backups** of Postgres and an off-machine copy of `INFISICAL_ENCRYPTION_KEY` / `INFISICAL_AUTH_SECRET`.
 7. **Size:** ~2.3 GB RAM at rest, ~9 GB images + volumes → at least 8 GB RAM / 40 GB disk recommended.
@@ -358,7 +373,7 @@ Done so far: all tools; `notification-service`; `user-service` (profile, locatio
 ## 14. Lessons learned (things that cost time)
 
 - Config files bind-mounted into containers must be world-readable (644/755); containers run as other users.
-- Kratos 26: use `kratos migrate sql up -e --yes`; add `hook: session` under `registration.after.code` to get a `session_token` after sign-up.
+- Kratos 26: use `kratos migrate sql up -e --yes`; registration returns no session by design now (verify first, then log in); to get one right after sign-up add `hook: session` under `registration.after.password`.
 - Redis ACL files cannot contain comment lines.
 - APISIX: unknown plugin in a global rule drops the **whole** rule (request-id, CORS, metrics) silently; OpenTelemetry needs `plugin_metadata`.
 - Tempo single node: set `ingester.lifecycler.min_ready_duration: 0s` or `/ready` stays 503.
@@ -371,7 +386,7 @@ Done so far: all tools; `notification-service`; `user-service` (profile, locatio
 - This machine's default JDK is 26; build the services with `JAVA_HOME=/usr/lib/jvm/java-21-openjdk`.
 - Spring Boot 4: `MockMultipartHttpServletRequestBuilder` no longer extends `MockHttpServletRequestBuilder` (use `AbstractMockHttpServletRequestBuilder<T>`); `@MockitoBean` is in `org.springframework.test.context.bean.override.mockito`; Jackson is `tools.jackson.*` (v3).
 - AWS SDK v2 against an S3-compatible store: use path-style, `requestChecksumCalculation(WHEN_REQUIRED)`, and presign with the **public** endpoint (the host is part of the signature).
-- Kratos `web_hook` with `response.ignore: true` is non-blocking: a down service can never block sign-ups. Put the hook before `session` in `registration.after.code.hooks`.
+- Kratos `web_hook` with `response.ignore: true` is non-blocking: a down service can never block sign-ups. Put the hook before `show_verification_ui` in `registration.after.password.hooks`.
 - `docker compose restart` does not re-read compose `environment`; use `docker compose up -d <service>` after adding variables.
 - Python `urllib` raises `IncompleteRead` when a server (here the 413 for an oversized upload) closes the connection right after the status line; handle `e.partial`.
 

@@ -27,7 +27,7 @@
 <li><a href="04-services.html">4. Services</a>
 </li>
 <li><a href="05-communication.html" class=current>5. How it communicates</a>
-<ul><li><a href="#overview">Reading the diagrams</a></li><li><a href="#login">1. User login with a one-time code (email or phone)</a></li><li><a href="#registration">2. Registration webhook: the profile row</a></li><li><a href="#user-request">3. Authenticated user request (forward-auth, X-User-Id)</a></li><li><a href="#staff-request">4. Staff request (X-Staff-Id, X-Staff-Role, aal2)</a></li><li><a href="#partner-request">5. Partner notification request</a></li><li><a href="#inbox-push">6. Inbox and push</a></li><li><a href="#observability-flow">7. Observability flow (traces, metrics, logs)</a></li><li><a href="#trust-model">Trust model: who may call what</a></li></ul>
+<ul><li><a href="#overview">Reading the diagrams</a></li><li><a href="#login">1. Sign-up with a password and the verification code (email or phone)</a></li><li><a href="#registration">2. Registration webhook: the profile row</a></li><li><a href="#user-request">3. Authenticated user request (forward-auth, X-User-Id)</a></li><li><a href="#staff-request">4. Staff request (X-Staff-Id, X-Staff-Role, aal2)</a></li><li><a href="#partner-request">5. Partner notification request</a></li><li><a href="#inbox-push">6. Inbox and push</a></li><li><a href="#observability-flow">7. Observability flow (traces, metrics, logs)</a></li><li><a href="#trust-model">Trust model: who may call what</a></li></ul>
 </li>
 <li><a href="06-security.html">6. Security model</a>
 </li>
@@ -73,8 +73,8 @@
 </section>
 
 <section>
-<h2 id="login">1. User login with a one-time code (email or phone)</h2>
-<svg class="diagram" viewBox="0 0 1000 476" role="img" aria-label="Login with a one-time code: app, gateway, Kratos, notification-service, provider"><title>Login with a one-time code: app, gateway, Kratos, notification-service, provider</title>
+<h2 id="login">1. Sign-up with a password and the verification code (email or phone)</h2>
+<svg class="diagram" viewBox="0 0 1000 476" role="img" aria-label="Sign-up and verification code: app, gateway, Kratos, notification-service, provider"><title>Sign-up and verification code: app, gateway, Kratos, notification-service, provider</title>
 <defs><marker id="ah-login" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z"/></marker></defs>
 <line class="lane" x1="76" y1="60" x2="76" y2="468"/>
 <rect class="box client" x="1" y="14" width="150" height="46" rx="8"/>
@@ -98,16 +98,16 @@
 <text class="muted" x="924" y="50" text-anchor="middle">dev or real</text>
 <path class="edge" d="M79 94 L285 94" marker-end="url(#ah-login)"/>
 <circle class="stepdot" cx="92" cy="94" r="9"/><text class="step" x="92" y="98">1</text>
-<text x="190" y="86" text-anchor="middle">GET .../login/api</text>
+<text x="190" y="86" text-anchor="middle">GET .../registration/api</text>
 <path class="edge" d="M291 140 L497 140" marker-end="url(#ah-login)"/>
 <circle class="stepdot" cx="304" cy="140" r="9"/><text class="step" x="304" y="144">2</text>
 <text x="402" y="132" text-anchor="middle">forward (limit 120/min)</text>
 <path class="edge" d="M79 186 L285 186" marker-end="url(#ah-login)"/>
 <circle class="stepdot" cx="92" cy="186" r="9"/><text class="step" x="92" y="190">3</text>
-<text x="190" y="178" text-anchor="middle">POST login: identifier</text>
+<text x="190" y="178" text-anchor="middle">POST registration: id + password</text>
 <path class="edge" d="M291 232 L497 232" marker-end="url(#ah-login)"/>
 <circle class="stepdot" cx="304" cy="232" r="9"/><text class="step" x="304" y="236">4</text>
-<text x="402" y="224" text-anchor="middle">forward; Kratos makes code</text>
+<text x="402" y="224" text-anchor="middle">forward; Kratos creates account + code</text>
 <path class="edge hot" d="M503 278 L709 278" marker-end="url(#ah-login)"/>
 <circle class="stepdot" cx="516" cy="278" r="9"/><text class="step" x="516" y="282">5</text>
 <text x="614" y="270" text-anchor="middle">POST /internal/kratos/sms</text>
@@ -116,22 +116,22 @@
 <text x="826" y="316" text-anchor="middle">send (limits, allowlist)</text>
 <path class="edge" d="M79 370 L285 370" marker-end="url(#ah-login)"/>
 <circle class="stepdot" cx="92" cy="370" r="9"/><text class="step" x="92" y="374">7</text>
-<text x="190" y="362" text-anchor="middle">POST login: id + code</text>
+<text x="190" y="362" text-anchor="middle">POST verification: code</text>
 <path class="edge dash" d="M497 416 L291 416" marker-end="url(#ah-login)"/>
 <circle class="stepdot" cx="484" cy="416" r="9"/><text class="step" x="484" y="420">8</text>
-<text x="386" y="408" text-anchor="middle">200 session_token</text>
+<text x="386" y="408" text-anchor="middle">200 verified (no session yet)</text>
 </svg>
 <ol>
-<li>The app starts a <em>native</em> login flow: <code>GET /kratos/self-service/login/api</code>. The gateway strips <code>/kratos</code> and forwards to Kratos. Limit: 120 per minute per IP (route <code>kratos-public</code>). Kratos answers with a flow id and the form fields it expects.</li>
+<li>The app starts a <em>native</em> registration flow: <code>GET /kratos/self-service/registration/api</code>. The gateway strips <code>/kratos</code> (and removes <code>Origin</code> and <code>Cookie</code>) and forwards to Kratos. Limit: 120 per minute per IP (route <code>kratos-public</code>).</li>
 <li>Nothing else happens at the gateway for this step; it is a plain proxy with a rate limit, a request id and a trace span.</li>
-<li>The app posts <code>{"method":"code","identifier":"+2519..."}</code> to <code>/kratos/self-service/login?flow=ID</code>. This is a <code>POST</code> under <code>/kratos/self-service/*</code>, so the strict limit applies: <strong>10 per minute per IP</strong> (route <code>kratos-self-service-submit</code>; counters in Redis). That limit is the first line of protection against SMS-cost abuse.</li>
-<li>Kratos looks the identifier up. If an identity exists it creates a 6-digit code (valid 5 minutes, <code>selfservice.methods.code.config.lifespan</code>) and queues a courier message. <strong>If no identity exists, Kratos answers that the account does not exist</strong> (known account-enumeration weakness; see <a href="06-security.html#limitations">known limitations</a>).</li>
-<li>Kratos runs with <code>--watch-courier</code> and <code>courier.delivery_strategy: http</code>. It posts the message to <code>http://notification-service:8080/internal/kratos/sms</code> (phone) or <code>/internal/kratos/email</code> (email). The request body is built by a small Jsonnet snippet inside <code>kratos.yml</code> (decoded on the <a href="03-tools.html#kratos">Kratos page</a>).</li>
-<li><code>NotificationDispatcher</code> applies, in order: the per-recipient limit (5 per hour and 10 per day for SMS, 10 and 20 for email, counted from the send log by a SHA-256 hash of the recipient), then the live allowlist (real providers only), then the provider (console or Twilio for SMS, Mailpit or Resend for email), then writes a <code>send_log</code> row with a masked recipient and no code. A <em>rate-limited</em> or <em>allowlist-skipped</em> message still returns <code>200</code> (status <code>suppressed</code> or <code>skipped</code>), on purpose, because Kratos retries any non-2xx and a retry would defeat the limit. A <em>provider failure</em> returns <code>502</code>, so Kratos keeps the message and retries. Because that suppression is invisible to the user, sign-in screens ask <code>POST /public/v1/login-codes/check</code> first (since 2026-10-26): it counts requests per address (existing or not, so it reveals nothing about accounts) with the same limits and answers 429 with the time to wait.</li>
-<li>The user types the code; the app posts the same body plus <code>"code"</code> to the same <code>login?flow=ID</code> URL (again counted in the 10 per minute).</li>
-<li>Kratos verifies the code and returns <code>200</code> with a <code>session_token</code> (valid 30 days, <code>session.lifespan: 720h</code>). The app sends it as <code>Authorization: Bearer ...</code> from then on.</li>
+<li>The app posts <code>{"method":"password","password":"...","traits.phone_number":"+2519..."}</code> (email optional) to <code>/kratos/self-service/registration?flow=ID</code>. Limit: <strong>5 per minute per IP</strong> (route <code>kratos-registration-submit</code>; counters in Redis): the first line of protection against SMS-cost abuse. A password shorter than 6 characters is refused here; nothing else is checked.</li>
+<li>Kratos creates the identity (schema <code>user</code>), then runs the registration hooks: the profile web_hook (section 2) and <code>show_verification_ui</code>, which starts a verification flow and queues a 6-digit code (valid 10 minutes). <strong>No session is issued.</strong> If the phone or email is already registered Kratos answers with message 4000007 (a known account-enumeration weakness of registration; see <a href="06-security.html#limitations">known limitations</a>).</li>
+<li>Kratos runs with <code>--watch-courier</code> and <code>courier.delivery_strategy: http</code>. It posts the message to <code>http://notification-service:8080/internal/kratos/sms</code> (phone) or <code>/internal/kratos/email</code> (email). The request body is built by a small Jsonnet snippet inside <code>kratos.yml</code> (decoded on the <a href="03-tools.html#kratos">Kratos page</a>); the wording comes from <code>infra/kratos/courier-templates/</code>.</li>
+<li><code>NotificationDispatcher</code> applies, in order: the per-recipient limit (5 per hour and 10 per day for SMS, 10 and 20 for email, counted from the send log by a SHA-256 hash of the recipient), then the live allowlist (real providers only), then the provider (console or Twilio for SMS, Mailpit or Resend for email), then writes a <code>send_log</code> row with a masked recipient and no code. A message dropped by the limit is answered <code>200</code> so Kratos does not retry; the app avoids this by calling <code>POST /public/v1/login-codes/check</code> first (it counts requests per address, existing or not, so it reveals nothing about accounts).</li>
+<li>The user types the code; the app posts <code>{"method":"code","code":"123456"}</code> to <code>/kratos/self-service/verification?flow=ID</code> (10 per minute per IP). Kratos marks the address verified.</li>
+<li>The app then signs in: <code>GET .../login/api</code> and <code>POST .../login?flow=ID</code> with <code>{"method":"password","identifier":"+2519...","password":"..."}</code> (10 per minute per IP and 10 per 15 minutes per identifier). Kratos answers <code>200</code> with a <code>session_token</code> (30 days, <code>session.lifespan: 720h</code>), sent as <code>Authorization: Bearer ...</code> from then on. Signing in with an address that is not verified yet is refused (<code>session_verified_address_required</code>) and starts a new verification flow.</li>
 </ol>
-<p><strong>Registration</strong> is the same shape with <code>/self-service/registration/api</code> and <code>traits.phone_number</code> or <code>traits.email</code>; after the code is verified Kratos also creates the identity and runs the hooks below. <strong>Dev mode:</strong> the "provider" is the console (log plus <code>GET /dev/messages</code>) or Mailpit, so the code can be read by tests and by you.</p>
+<p><strong>Forgot password:</strong> by email, the Kratos recovery flow (code to the typed email, then a privileged short session and a settings flow to set the new password); by phone, <code>POST /public/v1/password-reset/start</code> and <code>/finish</code> in notification-service, because Kratos recovery only accepts an email address. <strong>Dev mode:</strong> the "provider" is the console (log plus <code>GET /dev/messages</code>) or Mailpit, so codes can be read by tests and by you.</p>
 <p>Full request and response examples: <a href="08e-kratos-flows.html">Kratos flows</a>.</p>
 </section>
 
@@ -152,7 +152,7 @@
 <text class="title" x="924" y="34" text-anchor="middle">Postgres</text>
 <text class="muted" x="924" y="50" text-anchor="middle">db users</text>
 <rect class="box ext" x="36" y="80" width="504" height="26" rx="6"/>
-<text class="muted" x="288" y="98" text-anchor="middle">code verified: identity exists</text>
+<text class="muted" x="288" y="98" text-anchor="middle">account created: identity exists</text>
 <path class="edge hot" d="M79 140 L497 140" marker-end="url(#ah-reg)"/>
 <circle class="stepdot" cx="92" cy="140" r="9"/><text class="step" x="92" y="144">1</text>
 <text x="296" y="132" text-anchor="middle">POST /internal/kratos/after-registration</text>
@@ -164,7 +164,7 @@
 <text x="280" y="224" text-anchor="middle">200 (Kratos ignores the answer)</text>
 </svg>
 <ol>
-<li>After a successful sign-up Kratos runs the <code>web_hook</code> configured under <code>selfservice.flows.registration.after.code.hooks</code> (before the <code>session</code> hook). It posts <code>{"identityId":..., "email":..., "phone":...}</code> to <code>http://user-service:8080/internal/kratos/after-registration</code>. The body comes from a Jsonnet function in <code>kratos.yml</code>.</li>
+<li>After a successful sign-up Kratos runs the <code>web_hook</code> configured under <code>selfservice.flows.registration.after.password.hooks</code> (before <code>show_verification_ui</code>; there is no <code>session</code> hook, the account signs in only after verification). The hook fires at registration, not at verification: a profile row can exist for an account that never verified. It posts <code>{"identityId":..., "email":..., "phone":...}</code> to <code>http://user-service:8080/internal/kratos/after-registration</code>. The body comes from a Jsonnet function in <code>kratos.yml</code>.</li>
 <li>user-service inserts the profile row (<code>app_user</code>) with the <strong>Kratos identity id as the primary key</strong>, using <code>INSERT ... ON CONFLICT DO NOTHING</code> so a repeated or racing call is harmless.</li>
 <li>The hook is <code>response.ignore: true</code>: Kratos does not wait for, or care about, the answer. A user-service outage therefore never blocks a sign-up.</li>
 </ol>
@@ -539,7 +539,8 @@
 <thead><tr><th>Route id (priority)</th><th>Client path</th><th>Auth at the gateway</th><th>Limit per IP per minute</th><th>Upstream</th></tr></thead>
 <tbody>
 <tr><td><code>kratos-admin-blocked</code> (100)</td><td><code>/kratos/admin/*</code></td><td>-</td><td>-</td><td>mocked <code>403 {"error":"forbidden"}</code></td></tr>
-<tr><td><code>kratos-self-service-submit</code> (20)</td><td><code>POST /kratos/self-service/*</code></td><td>none (Kratos checks the flow)</td><td>10</td><td>kratos:4433, prefix <code>/kratos</code> removed</td></tr>
+<tr><td><code>kratos-login-submit</code>, <code>-registration-</code>, <code>-recovery-</code>, <code>-verification-</code>, <code>-settings-submit</code> (25)</td><td><code>POST /kratos/self-service/{login,registration,recovery,verification,settings}</code></td><td>none (Kratos checks the flow)</td><td>10 / 5 / 5 / 10 / 10 per IP (login and recovery also per identifier)</td><td>kratos:4433, prefix <code>/kratos</code> removed, Origin and Cookie removed</td></tr>
+<tr><td><code>password-reset-start|finish</code> (20)</td><td><code>POST /public/v1/password-reset/*</code></td><td>none (code check)</td><td>5 / 10 per IP and per phone</td><td>notification-service:8080</td></tr>
 <tr><td><code>kratos-public</code> (10)</td><td><code>/kratos/*</code></td><td>none</td><td>120</td><td>kratos:4433</td></tr>
 <tr><td><code>me-avatar</code> (30)</td><td><code>/api/v1/me/avatar</code></td><td>user session (forward-auth to user-service)</td><td>20</td><td>user-service</td></tr>
 <tr><td><code>me-notifications</code> (30)</td><td><code>/api/v1/me/notifications</code>, <code>/api/v1/me/notifications/*</code></td><td>user session</td><td>300</td><td>notification-service</td></tr>
