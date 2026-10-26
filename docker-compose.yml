@@ -174,7 +174,7 @@ services:
       # Delivery mode. Defaults are the safe dev ones: nothing real is sent unless .env says so.
       SMS_PROVIDER: ${SMS_PROVIDER:-console}          # console | twilio
       EMAIL_PROVIDER: ${EMAIL_PROVIDER:-mailpit}      # mailpit | resend
-      NOTIFY_DEV_ENDPOINTS: ${NOTIFY_DEV_ENDPOINTS:-true}   # must be false when a real provider is on
+      NOTIFY_DEV_ENDPOINTS: ${NOTIFY_DEV_ENDPOINTS:-true}   # dev-stack default true (the service alone defaults to false); must be false in prod / when a real provider is on
       ADERA_ENV: ${ADERA_ENV:-dev}                          # dev | prod: the ONE environment this deployment is (same value as registry-service)
       NOTIFY_LIVE_ALLOWLIST: ${NOTIFY_LIVE_ALLOWLIST:-}
       # Partner platform

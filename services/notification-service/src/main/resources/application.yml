@@ -44,6 +44,7 @@ adera:
     email-provider: ${EMAIL_PROVIDER:mailpit}    # mailpit | resend
     # Dev-only endpoint that returns recently "sent" messages (so tests can read OTP codes).
     # The service refuses to start if this is on while a real provider is selected.
+    # false here on purpose (safe when the service runs without compose); docker-compose.yml sets true for the dev stack unless .env says otherwise.
     dev-endpoints: ${NOTIFY_DEV_ENDPOINTS:false}
     # Live-mode safety net: if non-empty, real providers only deliver to these recipients (comma separated).
     live-allowlist: ${NOTIFY_LIVE_ALLOWLIST:}

@@ -163,7 +163,7 @@ Kratos always sends to `notification-service`; the service decides, from `.env`:
 |---|---|---|
 | `SMS_PROVIDER` | `console`: logs the SMS, nothing leaves the machine | `twilio`: real SMS, costs money |
 | `EMAIL_PROVIDER` | `mailpit`: local inbox <http://localhost:8025> | `resend`: real email |
-| `NOTIFY_DEV_ENDPOINTS` | `true`: `GET /dev/messages` shows codes | must be `false` (service refuses to start otherwise) |
+| `NOTIFY_DEV_ENDPOINTS` | `true`: `GET /dev/messages` shows codes. This is the default of docker-compose.yml when unset (the dev stack); the service itself defaults to `false` when started without compose, so a bare deployment is safe | must be `false` (service refuses to start otherwise) |
 | `NOTIFY_LIVE_ALLOWLIST` | ignored | if set, real sends go only to these recipients |
 
 Each channel switches independently. Defaults are the safe dev values. After editing `.env`: `docker compose up -d notification-service`.
