@@ -61,6 +61,23 @@ public class FirebaseFcmProvider implements FcmProvider {
 		throw new IllegalStateException("fcm-provider=firebase needs FIREBASE_SERVICE_ACCOUNT_B64 (Infisical /notification) or FIREBASE_CREDENTIALS_PATH");
 	}
 
+	/**
+	 * What a Firebase error means for the token. Only UNREGISTERED (the HTTP 404 "NOT_FOUND" of an uninstalled or rotated
+	 * app instance) retires it. INVALID_ARGUMENT, SENDER_ID_MISMATCH and THIRD_PARTY_AUTH_ERROR describe our payload,
+	 * project or credentials: the token is fine, so it is kept and the attempt is reported as rejected. INTERNAL,
+	 * QUOTA_EXCEEDED, UNAVAILABLE and an unknown code are retried later.
+	 */
+	static PushResult classify(MessagingErrorCode code) {
+		if (code == null) {
+			return PushResult.TRANSIENT_FAILURE;
+		}
+		return switch (code) {
+			case UNREGISTERED -> PushResult.UNREGISTERED;
+			case INVALID_ARGUMENT, SENDER_ID_MISMATCH, THIRD_PARTY_AUTH_ERROR -> PushResult.REJECTED;
+			case INTERNAL, QUOTA_EXCEEDED, UNAVAILABLE -> PushResult.TRANSIENT_FAILURE;
+		};
+	}
+
 	@Override
 	public String name() {
 		return "fcm";
@@ -83,12 +100,15 @@ public class FirebaseFcmProvider implements FcmProvider {
 			return PushResult.OK;
 		}
 		catch (FirebaseMessagingException e) {
-			MessagingErrorCode code = e.getMessagingErrorCode();
-			if (code == MessagingErrorCode.UNREGISTERED || code == MessagingErrorCode.INVALID_ARGUMENT || code == MessagingErrorCode.SENDER_ID_MISMATCH) {
-				return PushResult.UNREGISTERED;
+			PushResult result = classify(e.getMessagingErrorCode());
+			if (result == PushResult.REJECTED) {
+				// configuration or payload problem: loud in the log, and the device keeps its token
+				log.error("push rejected by Firebase (check the service account, sender id and payload): {} {}", e.getMessagingErrorCode(), e.getMessage());
 			}
-			log.warn("push failed transiently: {}", code);
-			return PushResult.TRANSIENT_FAILURE;
+			else if (result == PushResult.TRANSIENT_FAILURE) {
+				log.warn("push failed transiently: {}", e.getMessagingErrorCode());
+			}
+			return result;
 		}
 	}
 

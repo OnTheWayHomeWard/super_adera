@@ -166,6 +166,8 @@ public class DeliveryService {
 					store.recordAttempt(n.getId(), "IN_APP", fcm.name(), "PERMANENT", "token_unregistered");
 				}
 				case TRANSIENT_FAILURE -> store.recordAttempt(n.getId(), "IN_APP", fcm.name(), "TRANSIENT", "push_unavailable");
+				// our configuration or payload, not the device: the token stays active and the attempt shows as a provider error
+				case REJECTED -> store.recordAttempt(n.getId(), "IN_APP", fcm.name(), "PERMANENT", "push_rejected");
 			}
 		}
 		store.markSent(n.getId());

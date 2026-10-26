@@ -24,6 +24,9 @@ public class FakeFcmProvider implements FcmProvider {
 
 	public final List<Sent> sent = new CopyOnWriteArrayList<>();
 
+	/** Tests set this to see how the delivery reacts to each Firebase outcome. */
+	public volatile PushResult nextResult = PushResult.OK;
+
 	@Override
 	public String name() {
 		return "fcm-fake";
@@ -38,7 +41,7 @@ public class FakeFcmProvider implements FcmProvider {
 	public PushResult send(String token, String title, String body, Map<String, String> data) {
 		sent.add(new Sent(token, title, body, data));
 		log.info("[PUSH fake] token=...{} title={}", token.length() > 6 ? token.substring(token.length() - 6) : token, title);
-		return PushResult.OK;
+		return nextResult;
 	}
 
 }

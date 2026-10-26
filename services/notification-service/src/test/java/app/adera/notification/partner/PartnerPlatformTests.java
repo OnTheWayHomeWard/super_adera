@@ -338,6 +338,29 @@ class PartnerPlatformTests {
 	}
 
 	@Test
+	void aRejectedPushIsReportedAsAFailedAttemptAndKeepsTheDeviceToken() throws Exception {
+		String template = createTemplate("IN_APP", "{\"en\":{\"title\":\"Hello {name}\",\"body\":\"Your ride is here\"}}", "");
+		try {
+			push.nextResult = app.adera.notification.partner.delivery.FcmProvider.PushResult.REJECTED;
+			String ext = "rej-" + UUID.randomUUID();
+			assertThat(sendRaw(send(ext, template, alias, ""))).isEqualTo(202);
+			deliveries.runOnce();
+			org.mockito.Mockito.verify(directory, org.mockito.Mockito.never()).deactivateToken(org.mockito.ArgumentMatchers.anyString());
+			assertThat(jdbc.sql("SELECT outcome || ':' || error_code FROM notification_attempt a JOIN notification n ON n.id = a.notification_id WHERE n.external_id = :e AND n.app_id = :a")
+				.param("e", ext).param("a", appId).query(String.class).list()).contains("PERMANENT:push_rejected");
+
+			push.nextResult = app.adera.notification.partner.delivery.FcmProvider.PushResult.UNREGISTERED;
+			String ext2 = "unreg-" + UUID.randomUUID();
+			assertThat(sendRaw(send(ext2, template, alias, ""))).isEqualTo(202);
+			deliveries.runOnce();
+			org.mockito.Mockito.verify(directory).deactivateToken("tok-1");
+		}
+		finally {
+			push.nextResult = app.adera.notification.partner.delivery.FcmProvider.PushResult.OK;
+		}
+	}
+
+	@Test
 	void pushDataKeepsNestedValuesAsJsonAndRefusesTheServerKeys() throws Exception {
 		String template = createTemplate("IN_APP", "{\"en\":{\"title\":\"Hello {name}\",\"body\":\"Your ride is here\"}}", "");
 		String base = "\"userId\":\"" + alias + "\",\"templateId\":\"" + template + "\",\"params\":{\"name\":\"Abebe\"}";

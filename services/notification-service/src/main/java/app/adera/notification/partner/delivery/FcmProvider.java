@@ -10,7 +10,12 @@ public interface FcmProvider {
 		/** Firebase says this token is dead (app uninstalled, token rotated): stop using it. */
 		UNREGISTERED,
 		/** Firebase is having a bad moment: try later. */
-		TRANSIENT_FAILURE
+		TRANSIENT_FAILURE,
+		/**
+		 * Firebase refused the message itself (invalid payload, wrong sender id, bad credentials). That is a problem of our
+		 * configuration or payload, not of the user's device: the token must be kept.
+		 */
+		REJECTED
 	}
 
 	String name();
