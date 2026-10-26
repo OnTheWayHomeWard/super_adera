@@ -133,7 +133,7 @@ public class StaffService {
 
 	static String normalise(String email) {
 		String e = email == null ? "" : email.trim().toLowerCase(Locale.ROOT);
-		if (!EMAIL.matcher(e).matches()) {
+		if (e.length() > 320 || !EMAIL.matcher(e).matches()) {
 			throw new Errors.ValidationFailed("email", "must be a valid email address");
 		}
 		return e;

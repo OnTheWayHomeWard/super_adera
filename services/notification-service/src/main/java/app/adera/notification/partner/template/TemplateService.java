@@ -126,6 +126,30 @@ public class TemplateService {
 		return repository.findByIdAndAppId(id, appId).orElseThrow(() -> new ApiException(404, "template_not_found"));
 	}
 
+	/** Column sizes of inbox_item: a title or body that does not fit would make the delivery fail. */
+	public static final int INBOX_TITLE_MAX = 200;
+	public static final int INBOX_BODY_MAX = 2000;
+
+	/**
+	 * Refuses values that would make the inbox title or body (in any language of the template) longer than its column.
+	 * Templates limit their own text, but placeholders can add up to 500 characters each.
+	 */
+	public void checkInboxFits(Template t, Map<String, String> values) {
+		Map<String, Object> fields = new java.util.LinkedHashMap<>();
+		for (String lang : t.getContent().keySet()) {
+			Rendered r = render(t, lang, values);
+			if (r.title() != null && r.title().length() > INBOX_TITLE_MAX) {
+				fields.put("title", "with these values the title would be longer than " + INBOX_TITLE_MAX + " characters (" + lang + ")");
+			}
+			if (r.body() != null && r.body().length() > INBOX_BODY_MAX) {
+				fields.put("body", "with these values the body would be longer than " + INBOX_BODY_MAX + " characters (" + lang + ")");
+			}
+		}
+		if (!fields.isEmpty()) {
+			throw new ApiException(422, "param_invalid", Map.of("fields", fields));
+		}
+	}
+
 	/** Picks the user's language (falling back to English text by text) and fills in the values. */
 	public Rendered render(Template t, String language, Map<String, String> values) {
 		Map<String, String> en = t.getContent().getOrDefault("en", Map.of());

@@ -205,7 +205,7 @@ curl -s -o /dev/null -w "%{http_code}\n" -X DELETE http://127.0.0.1:4434/admin/i
 <tr><td>Markets</td><td>ET (Ethiopia) and/or US; at least one; default ET.</td><td>Where the app is offered. "must be a non-empty list of ET, US".</td></tr>
 <tr><td>Publisher name, Publisher legal name</td><td>Who runs the app (max 150 and 200).</td><td>Shown to users; legal name for contracts.</td></tr>
 <tr><td>Support email</td><td>A valid address.</td><td><strong>Required to go LIVE</strong>; users and staff contact it. "must be a valid email address". Stored lower-cased.</td></tr>
-<tr><td>Support phone, Website</td><td>Phone max 30 characters; website must start with <code>https://</code>.</td><td>"must be an https:// URL".</td></tr>
+<tr><td>Support phone, Website</td><td>Phone max 30 characters; website must start with <code>https://</code> and be at most 300 characters (entry URL: 500).</td><td>"must be an https:// URL".</td></tr>
 <tr><td>Entry URL</td><td><code>https://...</code> (or <code>http://localhost</code> / <code>http://127.0.0.1</code> for development).</td><td>The page opened inside the super app. Same message as above.</td></tr>
 <tr><td>Allowed origins</td><td>Type an origin, press Enter, at most 10: <code>https://fix.adera.et</code>, no path.</td><td>Origins allowed to talk to the app bridge (not yet used, see section 7). "each item must be origins like https://fix.adera.et (no path)".</td></tr>
 <tr><td>Extra data (JSON object)</td><td><code>{}</code> or key/value settings, up to 16384 bytes.</td><td>Free-form settings. On edit, deleting a key here removes it from the app. "Extra data not valid JSON" appears under the box before anything is sent; the server says "must be a JSON object" or "too large (max 16384 bytes)".</td></tr>

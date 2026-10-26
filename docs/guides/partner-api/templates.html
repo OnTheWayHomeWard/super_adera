@@ -157,6 +157,7 @@ GET /v1/templates/not-a-uuid                             -> 400 {"error": "inval
 <pre class="out nocopy"><code>params {}                                  -> 422 {"error":"param_invalid","fields":{"name":"required"}}
 params {"name":"A","color":"red"}          -> 422 {"error":"param_invalid","fields":{"color":"not a parameter of this template"}}
 params {"name":"visit www.evil.example"}   -> 422 {"error":"param_invalid","fields":{"name":"links are not allowed in this value"}}
+IN_APP template, values make the title > 200 or body > 2000 chars after filling -> 422 {"error":"param_invalid","fields":{"title":"with these values the title would be longer than 200 characters (en)"}}
 params {"name":"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"} (31 x) -> 422 {"error":"param_invalid","fields":{"name":"longer than 30 characters"}}
 params {"name":"a\nb"}                      -> 422 {"error":"param_invalid","fields":{"name":"contains control characters"}}
 params {"name":{"a":1}}                     -> 422 {"error":"param_invalid","fields":{"name":"must be text or a number"}}

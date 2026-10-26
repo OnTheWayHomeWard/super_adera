@@ -22,6 +22,10 @@ public final class AppPatch {
 	static final Pattern COLOR = Pattern.compile("^#[0-9A-Fa-f]{6}$");
 	static final Pattern CATEGORY = Pattern.compile("^[a-z][a-z0-9_-]{1,30}$");
 	static final Pattern EMAIL = Pattern.compile("^[^@\\s]{1,64}@[^@\\s]{1,255}\\.[^@\\s]{2,}$");
+	/** Column sizes the validators must respect (mini_app.website, entry_url, support_email). */
+	static final int MAX_WEBSITE = 300;
+	static final int MAX_ENTRY_URL = 500;
+	static final int MAX_EMAIL = 320;
 	static final Pattern ORIGIN = Pattern.compile("^https?://[A-Za-z0-9.-]+(:[0-9]{1,5})?$");
 	static final Set<String> ALLOWED = Set.of("slug", "name", "description", "brandColor", "categories", "markets",
 			"publisherName", "publisherLegalName", "supportEmail", "supportPhone", "website", "entryUrl", "allowedOrigins",
@@ -124,15 +128,15 @@ public final class AppPatch {
 			if (v == null) {
 				out.put("supportEmail", null);
 			}
-			else if (v instanceof String s && EMAIL.matcher(s.trim()).matches()) {
+			else if (v instanceof String s && s.trim().length() <= MAX_EMAIL && EMAIL.matcher(s.trim()).matches()) {
 				out.put("supportEmail", s.trim().toLowerCase());
 			}
 			else {
-				errors.put("supportEmail", "must be a valid email address");
+				errors.put("supportEmail", "must be a valid email address (max " + MAX_EMAIL + " characters)");
 			}
 		}
-		url(body, out, errors, "website", false);
-		url(body, out, errors, "entryUrl", true);
+		url(body, out, errors, "website", false, MAX_WEBSITE);
+		url(body, out, errors, "entryUrl", true, MAX_ENTRY_URL);
 		if (body.containsKey("allowedOrigins")) {
 			List<String> v = stringList(body.get("allowedOrigins"), "allowedOrigins", 10, ORIGIN, "origins like https://fix.adera.et (no path)", errors);
 			if (v != null) {
@@ -224,7 +228,7 @@ public final class AppPatch {
 		}
 	}
 
-	private static void url(Map<String, Object> body, Map<String, Object> out, Map<String, String> errors, String key, boolean allowLocalHttp) {
+	private static void url(Map<String, Object> body, Map<String, Object> out, Map<String, String> errors, String key, boolean allowLocalHttp, int max) {
 		if (!body.containsKey(key)) {
 			return;
 		}
@@ -236,7 +240,10 @@ public final class AppPatch {
 		String s = String.valueOf(v).trim();
 		boolean https = s.startsWith("https://");
 		boolean localHttp = allowLocalHttp && (s.startsWith("http://localhost") || s.startsWith("http://127.0.0.1"));
-		if (s.length() > 500 || !(https || localHttp) || s.chars().anyMatch(Character::isWhitespace)) {
+		if (s.length() > max) {
+			errors.put(key, "max " + max + " characters");
+		}
+		else if (!(https || localHttp) || s.chars().anyMatch(Character::isWhitespace)) {
 			errors.put(key, "must be an https:// URL");
 		}
 		else {

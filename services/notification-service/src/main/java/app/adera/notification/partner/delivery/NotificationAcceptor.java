@@ -150,6 +150,9 @@ public class NotificationAcceptor {
 			throw new ApiException(422, "user_unreachable"); // deleted, suspended or unknown look the same on purpose
 		}
 		String channel = chooseChannel(ctx, template, user);
+		if ("IN_APP".equals(channel)) {
+			templates.checkInboxFits(template, values);
+		}
 		boolean muted = switch (channel) {
 			case "SMS" -> user.muted().muteSms();
 			case "EMAIL" -> user.muted().muteEmail();

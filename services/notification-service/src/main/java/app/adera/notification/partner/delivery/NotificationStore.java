@@ -10,6 +10,7 @@ import java.util.UUID;
 
 import app.adera.notification.partner.ApiException;
 import app.adera.notification.partner.auth.RegistryClient;
+import app.adera.notification.partner.template.TemplateService;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
@@ -152,7 +153,12 @@ public class NotificationStore {
 				INSERT INTO inbox_item (id, user_id, app_id, notification_id, title, body, data, created_at)
 				VALUES (:id, :u, :a, :n, :t, :b, CAST(:d AS jsonb), :now) ON CONFLICT (notification_id) DO NOTHING""")
 			.param("id", UUID.randomUUID()).param("u", userId).param("a", appId).param("n", notificationId)
-			.param("t", title).param("b", body).param("d", mapper.writeValueAsString(data)).param("now", ts(clock.instant())).update();
+			.param("t", clip(title, TemplateService.INBOX_TITLE_MAX)).param("b", clip(body, TemplateService.INBOX_BODY_MAX)).param("d", mapper.writeValueAsString(data)).param("now", ts(clock.instant())).update();
+	}
+
+	/** A template edited after acceptance can render longer than the column; cut instead of failing the delivery. */
+	private static String clip(String text, int max) {
+		return text == null || text.length() <= max ? text : text.substring(0, max - 1) + "\u2026";
 	}
 
 	private static Timestamp ts(Instant i) {

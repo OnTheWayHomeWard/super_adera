@@ -338,6 +338,23 @@ class PartnerPlatformTests {
 	}
 
 	@Test
+	void aMessageThatWouldNotFitTheInboxColumnsIsRefusedAtAcceptance() throws Exception {
+		String body = "{\"appId\":\"" + appId + "\",\"code\":\"big-" + UUID.randomUUID().toString().substring(0, 8)
+				+ "\",\"kind\":\"IN_APP\",\"category\":\"TRANSACTIONAL\",\"params\":[{\"name\":\"name\",\"maxLength\":500}],"
+				+ "\"content\":{\"en\":{\"title\":\"Hi {name}\",\"body\":\"Hello\"}}}";
+		String template = json.readTree(mvc.perform(post("/admin/api/v1/notification/templates").header("X-Gateway-Secret", "gw-secret")
+			.header("X-Staff-Id", UUID.randomUUID().toString()).header("X-Staff-Role", "ADMIN")
+			.contentType(MediaType.APPLICATION_JSON).content(body)).andExpect(status().isOk()).andReturn().getResponse().getContentAsString()).get("id").asString();
+		String tooLong = "{\"externalId\":\"big-1\",\"userId\":\"" + alias + "\",\"templateId\":\"" + template + "\",\"params\":{\"name\":\"" + "x".repeat(300) + "\"}}";
+		mvc.perform(signed(post("/v1/notifications"), "POST", "/v1/notifications", tooLong)).andExpect(status().isUnprocessableEntity())
+			.andExpect(jsonPath("$.error").value("param_invalid")).andExpect(jsonPath("$.fields.title").exists());
+		String fits = tooLong.replace("x".repeat(300), "x".repeat(150)).replace("big-1", "big-2");
+		assertThat(sendRaw(fits)).isEqualTo(202);
+		deliveries.runOnce();
+		assertThat(statusOf("big-2")).isEqualTo("SENT");
+	}
+
+	@Test
 	void aKeyOfTheOtherEnvironmentIsRefusedWithWrongEnvironment() throws Exception {
 		String template = directTemplate();
 		appIn("DEV", "PROD", List.of("notify.sms"), List.of());

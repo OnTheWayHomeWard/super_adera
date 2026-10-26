@@ -74,4 +74,27 @@ class AppPatchTest {
 		assertThat(errors(Map.of("website", "http://localhost/"), false)).containsKey("website");
 	}
 
+	@Test
+	void textAndUrlFieldsRespectTheirColumnSizes() {
+		String host = "https://example.com/";
+		// website column is 300, entry_url 500, support_email 320
+		AppPatch ok = AppPatch.parse(Map.of("website", host + "w".repeat(300 - host.length()), "entryUrl", host + "e".repeat(500 - host.length())), false, MAPPER);
+		assertThat(ok.<String>as("website")).hasSize(300);
+		assertThat(ok.<String>as("entryUrl")).hasSize(500);
+
+		Map<String, String> e = errors(Map.of("website", host + "w".repeat(301 - host.length()), "entryUrl", host + "e".repeat(501 - host.length())), false);
+		assertThat(e.get("website")).isEqualTo("max 300 characters");
+		assertThat(e.get("entryUrl")).isEqualTo("max 500 characters");
+
+		String longEmail = "a@" + "b".repeat(255) + "." + "c".repeat(100);
+		assertThat(errors(Map.of("supportEmail", longEmail), false)).containsKey("supportEmail");
+		assertThat(AppPatch.parse(Map.of("supportEmail", "a@" + "b".repeat(250) + ".com"), false, MAPPER).<String>as("supportEmail")).hasSize(256);
+
+		for (String key : new String[] { "publisherName", "publisherLegalName", "supportPhone" }) {
+			int max = key.equals("publisherName") ? 150 : key.equals("publisherLegalName") ? 200 : 30;
+			assertThat(AppPatch.parse(Map.of(key, "x".repeat(max)), false, MAPPER).<String>as(key)).hasSize(max);
+			assertThat(errors(Map.of(key, "x".repeat(max + 1)), false)).containsEntry(key, "max " + max + " characters");
+		}
+	}
+
 }
