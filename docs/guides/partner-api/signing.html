@@ -1,0 +1,375 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Signing: ADERA-SIG-1 | Adera partner API</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+<button id="menu-btn" type="button" aria-label="Toggle menu">Menu</button>
+<a class="brand" href="index.html">Adera partner API</a>
+<span class="spacer"></span>
+<button id="theme-btn" type="button" aria-label="Toggle light or dark theme">Theme</button>
+</header>
+<div class="layout">
+<nav class="sidebar" aria-label="Pages">
+<h4>Mini-app backend API</h4>
+<ul><li><a href="index.html">Overview and contents</a></li><li><a href="quickstart.html">Quick start</a></li><li><a href="signing.html" class="current">Signing requests (ADERA-SIG-1)</a><ul><li><a href="#overview">Overview</a></li><li><a href="#headers">Request headers</a></li><li><a href="#canonical">The canonical string</a></li><li><a href="#setup">Make a key pair</a></li><li><a href="#python">Python (cryptography and requests)</a></li><li><a href="#node">Node.js (18 or newer, no dependencies)</a></li><li><a href="#curl">curl and openssl (no libraries)</a></li><li><a href="#responses">Verifying Adera's answers</a></li><li><a href="#jwks">Adera's public key: /.well-known/jwks.json</a></li><li><a href="#callbacks">Verifying callbacks</a></li><li><a href="#troubleshooting">Troubleshooting invalid_signature</a></li></ul></li><li><a href="environments-and-ips.html">Environments, IPs and keys</a></li><li><a href="user-ids.html">Pseudonymous user ids</a></li><li><a href="templates.html">Templates</a></li><li><a href="sending-notifications.html">Sending notifications</a></li><li><a href="statuses-and-callbacks.html">Statuses, retries and callbacks</a></li><li><a href="limits-and-quotas.html">Limits and quotas</a></li><li><a href="sandbox-and-testing.html">Sandbox and testing checklist</a></li><li><a href="errors.html">Error codes</a></li><li><a href="data-available-to-mini-apps.html">What data a mini app gets</a></li><li><a href="known-issues.html">Known issues and not built yet</a></li></ul>
+</nav>
+<main>
+<h1>Signing requests: ADERA-SIG-1</h1>
+<p class="lead">How every call to the partner API is authenticated, how you check that an answer or a callback really came from Adera, and complete runnable code in Python, Node.js and curl with openssl.</p>
+
+<h2 id="overview">Overview</h2>
+<p>ADERA-SIG-1 is a request-signing scheme based on RS256 (RSASSA-PKCS1-v1_5 with SHA-256). You generate an RSA key pair, keep the private key on your server, and give Adera staff only the public key. Each request carries a signature that proves (1) you hold the private key, (2) nobody changed the method, path, query or body, and (3) the request is fresh. The same idea works in the other direction: Adera signs every answer and every callback with its own key, and you verify with the public key published at <code>/.well-known/jwks.json</code>.</p>
+<div class="callout why"><span class="label">Why not an API token</span><p>With a shared secret or a bearer token, anyone who steals the token (a log file, a proxy, a leaked config) can impersonate the partner, and Adera has to store something that can impersonate the partner. With a signature scheme Adera holds only a public key, so a breach on Adera's side cannot be used to send requests as you, and a stolen signed request cannot be altered or reused for another call.</p></div>
+
+<h2 id="headers">Request headers</h2>
+<div class="table-wrap"><table><thead><tr><th>Header</th><th>Value</th><th>Notes</th></tr></thead><tbody>
+<tr><td><code>X-Adera-Key-Id</code></td><td>The key id staff gave you, e.g. <code>ak_dev_b05f96cc4740e2a118a55282</code></td><td>Identifies your app and the environment of the key (<code>ak_dev_...</code> or <code>ak_prod_...</code>).</td></tr>
+<tr><td><code>X-Adera-Timestamp</code></td><td>Current unix time in whole seconds, e.g. <code>1793000000</code></td><td>Must be within <strong>5 minutes</strong> of Adera's clock, in either direction. Keep your server clock in sync (NTP).</td></tr>
+<tr><td><code>X-Adera-Signature</code></td><td>Base64 of the RS256 signature of the canonical string</td><td>Standard base64 (with padding) is what you should send; URL-safe base64, with or without padding, is also accepted.</td></tr>
+<tr><td><code>Content-Type</code></td><td><code>application/json</code> on requests with a body</td><td>Not part of the signature.</td></tr>
+</tbody></table></div>
+
+<h2 id="canonical">The canonical string</h2>
+<p>The signature is computed over exactly five lines joined by a single line feed (<code>\n</code>, byte <code>0x0A</code>), <strong>with no trailing newline</strong>:</p>
+<pre class="nocopy"><code>ADERA-SIG-1
+{timestamp}
+{METHOD}
+{path[?query]}
+{base64(sha256(body))}</code></pre>
+<div class="table-wrap"><table><thead><tr><th>Line</th><th>Exact rule</th></tr></thead><tbody>
+<tr><td>1</td><td>The literal text <code>ADERA-SIG-1</code>. It names the scheme and its version.</td></tr>
+<tr><td>2</td><td>The same digits you put in <code>X-Adera-Timestamp</code>.</td></tr>
+<tr><td>3</td><td>The HTTP method in upper case: <code>GET</code> or <code>POST</code>.</td></tr>
+<tr><td>4</td><td>The request target as it goes on the wire: the path starting with <code>/</code>, then <code>?</code> and the raw query string if there is one. No scheme, no host, no fragment. Not decoded and not re-encoded: if your HTTP library rewrites the path or query (percent-encoding, reordering), you must sign what it actually sends. The path of <code>GET /v1/notifications/doc-first</code> is <code>/v1/notifications/doc-first</code>. A trailing slash is a different path (and a <code>404</code>).</td></tr>
+<tr><td>5</td><td>Standard base64 (with padding) of the SHA-256 digest of the <strong>raw request body bytes</strong>. For a request without a body (every <code>GET</code>) it is the hash of zero bytes: <code>47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=</code>.</td></tr>
+</tbody></table></div>
+<p>The signature is then <code>base64( RSASSA-PKCS1-v1_5-SHA256( privateKey, UTF-8 bytes of the canonical string ) )</code>. Keys must be RSA, at least 2048 bits.</p>
+
+<h3 id="vector">A test vector you can check your code against</h3>
+<p>Take this exact body (one line, 148 bytes, no trailing newline), timestamp <code>1793000000</code>, method <code>POST</code>, path <code>/v1/notifications</code>:</p>
+<pre class="nocopy"><code>{"externalId":"job-1","userId":"u_p_0123456789abcdef0123456789abcdef","templateId":"ef3c8771-df6c-477c-b5a8-7ba94c2fded3","params":{"name":"Abebe"}}</code></pre>
+<p>The body hash must be <code>7sxkQQvLi9R1R8MaP5HHBwUYp8pVDWFjFc3pfp4bQ+Y=</code> and the canonical string must be (shown with <code>\n</code> for the line breaks):</p>
+<pre class="nocopy"><code>ADERA-SIG-1\n1793000000\nPOST\n/v1/notifications\n7sxkQQvLi9R1R8MaP5HHBwUYp8pVDWFjFc3pfp4bQ+Y=</code></pre>
+<p>RS256 with PKCS#1 v1.5 padding is deterministic: the same key and the same canonical string always give the same signature, so you can compare your signature byte for byte with another implementation (for example with <code>openssl</code>, below) using your own test key.</p>
+
+<h3 id="rules">Rules that cause most mistakes</h3>
+<ul>
+<li><strong>Serialize the JSON once.</strong> Hash and send the same byte string. Do not hash <code>JSON.stringify(x)</code> and let the HTTP library serialize <code>x</code> again: key order or spacing may differ and the hash will not match (<code>401 invalid_signature</code>). The examples below turn the body into bytes first and pass those bytes to both the hash and the request.</li>
+<li><strong>The body can be in any JSON formatting</strong> (spaces, key order). Adera hashes the bytes you sent. The idempotency check on <code>externalId</code> compares the <em>meaning</em> of the request, not its bytes (see <a href="sending-notifications.html#idempotency">idempotency</a>).</li>
+<li><strong>Query strings are signed.</strong> <code>/v1/templates?x=1</code> and <code>/v1/templates</code> need different signatures. Adding a query after signing gives <code>invalid_signature</code>.</li>
+<li><strong>Timestamps older or newer than 5 minutes</strong> are refused with <code>401 stale_timestamp</code>. A non-numeric value gives <code>401 invalid_timestamp</code>.</li>
+<li><strong>No nonce.</strong> A captured signed request can be sent again during its 5-minute window and will be accepted. For <code>POST /v1/notifications</code> that is harmless (the same <code>externalId</code> is a replay and sends nothing twice) and for <code>GET</code> requests it is read-only; sign requests only over HTTPS anyway.</li>
+<li><strong>Maximum body:</strong> 64 KiB, otherwise <code>413 request_too_large</code> (checked before the signature).</li>
+</ul>
+
+<h3 id="order">In which order Adera checks a request</h3>
+<p>Useful to read an error: the first check that fails wins.</p>
+<div class="table-wrap"><table><thead><tr><th>#</th><th>Check</th><th>Failure</th></tr></thead><tbody>
+<tr><td>0</td><td>Gateway rate limit (600 per minute per IP)</td><td><code>429</code> from the gateway</td></tr>
+<tr><td>1</td><td>Body size</td><td><code>413 request_too_large</code></td></tr>
+<tr><td>2</td><td>The three headers are present</td><td><code>401 missing_signature</code></td></tr>
+<tr><td>3</td><td>Timestamp is a number, and fresh</td><td><code>401 invalid_timestamp</code>, <code>401 stale_timestamp</code></td></tr>
+<tr><td>4</td><td>Key id exists and is usable (not revoked, not expired)</td><td><code>401 unknown_key</code>, <code>401 key_revoked_or_expired</code></td></tr>
+<tr><td>5</td><td>Signature verifies with the stored public key</td><td><code>401 invalid_signature</code></td></tr>
+<tr><td>6</td><td>The key's environment is this deployment's environment</td><td><code>403 wrong_environment</code></td></tr>
+<tr><td>7</td><td>The key's app exists</td><td><code>401 unknown_app</code></td></tr>
+<tr><td>8</td><td>The app status allows calls here</td><td><code>403 app_draft</code>, <code>app_paused</code>, <code>app_killed</code>, <code>app_not_active</code></td></tr>
+<tr><td>9</td><td>The caller's IP is on the app's allowed list for this environment</td><td><code>403 ip_not_allowed</code></td></tr>
+<tr><td>10</td><td>Endpoint rules (validation, templates, user, capabilities, quotas)</td><td>see <a href="errors.html">Error codes</a></td></tr>
+</tbody></table></div>
+
+<h2 id="setup">Make a key pair</h2>
+<p>On your own machine (not on Adera's side, not in a shared tool). Keep <code>partner.pem</code> secret; send staff only <code>partner.pub</code>.</p>
+<pre><code>openssl genrsa -out partner.pem 2048
+openssl rsa -in partner.pem -pubout -out partner.pub
+cat partner.pub        # -----BEGIN PUBLIC KEY----- ...   this is what you send to Adera staff</code></pre>
+<p>Staff register the public key and give you back a key id. Adera refuses anything containing <code>PRIVATE KEY</code> (<code>validation_failed</code> on their side: the dashboard says "that is a PRIVATE key. Never send it"). Generating a key pair in the Adera dashboard and handing you the private half is possible only as a convenience in DEV; for PROD always generate your own. See <a href="environments-and-ips.html#keys">key lifecycle</a>.</p>
+<p>The examples below read three environment variables (the values here are the throwaway ones used to capture the outputs on this page):</p>
+<pre><code>export ADERA_BASE=http://127.0.0.1:9080               # the base URL of the deployment (dev stack)
+export ADERA_KEY_ID=ak_dev_b05f96cc4740e2a118a55282    # given to you by Adera staff
+export ADERA_PRIVATE_KEY_FILE=$PWD/partner.pem        # your PRIVATE key file</code></pre>
+<p>All the files below are also in the <code>examples/</code> folder next to these pages.</p>
+
+<h2 id="python">Python (cryptography and requests)</h2>
+<p>Install: <code>pip install cryptography requests</code>. This client signs requests, <strong>verifies the signature of every answer</strong> (raising an exception if it is wrong) and contains <code>verify_callback</code> for your callback endpoint. File <a href="examples/adera_client.py"><code>examples/adera_client.py</code></a>:</p>
+<pre><code>&quot;&quot;&quot;Minimal Adera partner API client. Needs: pip install cryptography requests
+Environment: ADERA_BASE (e.g. https://api.example), ADERA_KEY_ID, ADERA_PRIVATE_KEY_FILE (PEM, your PRIVATE key).&quot;&quot;&quot;
+import base64, hashlib, json, os, time
+import requests
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import padding, rsa
+
+BASE = os.environ[&quot;ADERA_BASE&quot;].rstrip(&quot;/&quot;)
+KEY_ID = os.environ[&quot;ADERA_KEY_ID&quot;]
+with open(os.environ[&quot;ADERA_PRIVATE_KEY_FILE&quot;], &quot;rb&quot;) as f:
+    PRIVATE_KEY = serialization.load_pem_private_key(f.read(), password=None)
+
+
+def b64(data: bytes) -&gt; str:
+    return base64.b64encode(data).decode()
+
+
+def sha256_b64(data: bytes) -&gt; str:
+    return b64(hashlib.sha256(data).digest())
+
+
+def rs256_sign(canonical: str) -&gt; str:
+    return b64(PRIVATE_KEY.sign(canonical.encode(), padding.PKCS1v15(), hashes.SHA256()))
+
+
+def call(method: str, path: str, body: dict | None = None):
+    &quot;&quot;&quot;Send one signed request. `path` includes the query string exactly as it goes on the wire.&quot;&quot;&quot;
+    raw = json.dumps(body, separators=(&quot;,&quot;, &quot;:&quot;)).encode() if body is not None else b&quot;&quot;
+    ts = str(int(time.time()))
+    canonical = &quot;\n&quot;.join([&quot;ADERA-SIG-1&quot;, ts, method.upper(), path, sha256_b64(raw)])
+    signature = rs256_sign(canonical)
+    response = requests.request(
+        method, BASE + path, data=raw if raw else None, timeout=15,
+        headers={&quot;X-Adera-Key-Id&quot;: KEY_ID, &quot;X-Adera-Timestamp&quot;: ts, &quot;X-Adera-Signature&quot;: signature,
+                 &quot;Content-Type&quot;: &quot;application/json&quot;})
+    verify_response(response, signature)
+    return response
+
+
+# ---- verifying what Adera sends back (responses AND callbacks) ---------------------------------------------------
+
+_jwks_cache: dict = {}
+
+
+def adera_public_key(kid: str):
+    &quot;&quot;&quot;Adera&#x27;s public key from /.well-known/jwks.json, cached for an hour (refetch once if the kid is unknown).&quot;&quot;&quot;
+    entry = _jwks_cache.get(kid)
+    if entry is None or time.time() - entry[1] &gt; 3600:
+        keys = requests.get(BASE + &quot;/.well-known/jwks.json&quot;, timeout=10).json()[&quot;keys&quot;]
+        for k in keys:
+            n = int.from_bytes(base64.urlsafe_b64decode(k[&quot;n&quot;] + &quot;=&quot; * (-len(k[&quot;n&quot;]) % 4)), &quot;big&quot;)
+            e = int.from_bytes(base64.urlsafe_b64decode(k[&quot;e&quot;] + &quot;=&quot; * (-len(k[&quot;e&quot;]) % 4)), &quot;big&quot;)
+            _jwks_cache[k[&quot;kid&quot;]] = (rsa.RSAPublicNumbers(e, n).public_key(), time.time())
+        entry = _jwks_cache.get(kid)
+    if entry is None:
+        raise ValueError(&quot;unknown Adera key id &quot; + kid)
+    return entry[0]
+
+
+def _check(canonical: str, headers) -&gt; None:
+    ts = headers[&quot;X-Adera-Timestamp&quot;]
+    if abs(time.time() - int(ts)) &gt; 300:
+        raise ValueError(&quot;stale timestamp&quot;)
+    key = adera_public_key(headers[&quot;X-Adera-Key-Id&quot;])
+    key.verify(base64.b64decode(headers[&quot;X-Adera-Signature&quot;]), canonical.encode(), padding.PKCS1v15(), hashes.SHA256())  # raises if wrong
+
+
+def verify_response(response: requests.Response, request_signature: str) -&gt; None:
+    if &quot;X-Adera-Signature&quot; not in response.headers:   # gateway answers (429, 502..504) and framework 404/405/415 are unsigned
+        raise RuntimeError(f&quot;unsigned answer, HTTP {response.status_code}: not produced by the API itself&quot;)
+    ts = response.headers[&quot;X-Adera-Timestamp&quot;]
+    canonical = &quot;\n&quot;.join([&quot;ADERA-SIG-1-RESPONSE&quot;, ts, str(response.status_code), sha256_b64(response.content),
+                           sha256_b64(request_signature.encode())])
+    _check(canonical, response.headers)
+
+
+def verify_callback(path_and_query: str, raw_body: bytes, headers) -&gt; None:
+    &quot;&quot;&quot;Call this in your callback endpoint with the raw (unparsed) body and the request headers.&quot;&quot;&quot;
+    canonical = &quot;\n&quot;.join([&quot;ADERA-SIG-1&quot;, headers[&quot;X-Adera-Timestamp&quot;], &quot;POST&quot;, path_and_query, sha256_b64(raw_body)])
+    _check(canonical, headers)</code></pre>
+<p>File <a href="examples/send.py"><code>examples/send.py</code></a>, a first notification and its status:</p>
+<pre><code>import json, sys
+from adera_client import call
+
+r = call(&quot;POST&quot;, &quot;/v1/notifications&quot;, {
+    &quot;externalId&quot;: sys.argv[1], &quot;userId&quot;: sys.argv[2], &quot;templateId&quot;: sys.argv[3], &quot;params&quot;: {&quot;name&quot;: &quot;Abebe&quot;}})
+print(r.status_code, json.dumps(r.json(), indent=2))
+print(call(&quot;GET&quot;, &quot;/v1/notifications/&quot; + sys.argv[1]).json())</code></pre>
+<p>Run it (<code>$ABEBE</code> is a user id for your app, <code>$JOB</code> a template id from <code>GET /v1/templates</code>):</p>
+<pre><code>python send.py doc-first $ABEBE $JOB</code></pre>
+<p>Real output:</p>
+<pre class="out nocopy"><code>202 {
+  "notificationId": "6f3c68db-8e7d-483a-b14d-6abaf484c35f",
+  "externalId": "doc-first",
+  "status": "QUEUED",
+  "channel": "SMS",
+  "environment": "DEV",
+  "createdAt": "2026-10-26T10:52:46.960692Z",
+  "expiresAt": "2026-10-27T10:52:46.949846Z"
+}
+{'notificationId': '6f3c68db-8e7d-483a-b14d-6abaf484c35f', 'externalId': 'doc-first', 'status': 'QUEUED', 'channel': 'SMS', 'environment': 'DEV', 'createdAt': '2026-10-26T10:52:46.960692Z', 'expiresAt': '2026-10-27T10:52:46.949846Z', 'attempts': 0}</code></pre>
+
+<h2 id="node">Node.js (18 or newer, no dependencies)</h2>
+<p>Uses only <code>node:crypto</code> and the built-in <code>fetch</code>. File <a href="examples/adera-client.js"><code>examples/adera-client.js</code></a>:</p>
+<pre><code>// Minimal Adera partner API client. Node 18+, no dependencies.
+// Environment: ADERA_BASE, ADERA_KEY_ID, ADERA_PRIVATE_KEY_FILE (PEM, your PRIVATE key)
+const crypto = require(&quot;node:crypto&quot;);
+const fs = require(&quot;node:fs&quot;);
+
+const BASE = process.env.ADERA_BASE.replace(/\/$/, &quot;&quot;);
+const KEY_ID = process.env.ADERA_KEY_ID;
+const PRIVATE_KEY = crypto.createPrivateKey(fs.readFileSync(process.env.ADERA_PRIVATE_KEY_FILE));
+
+const sha256b64 = (buf) =&gt; crypto.createHash(&quot;sha256&quot;).update(buf).digest(&quot;base64&quot;);
+const rs256Sign = (canonical) =&gt; crypto.sign(&quot;sha256&quot;, Buffer.from(canonical), PRIVATE_KEY).toString(&quot;base64&quot;); // RSASSA-PKCS1-v1_5
+
+// path includes the query string exactly as it goes on the wire
+async function call(method, path, body) {
+  const raw = body === undefined ? Buffer.alloc(0) : Buffer.from(JSON.stringify(body));
+  const ts = String(Math.floor(Date.now() / 1000));
+  const canonical = [&quot;ADERA-SIG-1&quot;, ts, method.toUpperCase(), path, sha256b64(raw)].join(&quot;\n&quot;);
+  const signature = rs256Sign(canonical);
+  const res = await fetch(BASE + path, {
+    method, body: raw.length ? raw : undefined,
+    headers: { &quot;X-Adera-Key-Id&quot;: KEY_ID, &quot;X-Adera-Timestamp&quot;: ts, &quot;X-Adera-Signature&quot;: signature, &quot;Content-Type&quot;: &quot;application/json&quot; },
+  });
+  const text = Buffer.from(await res.arrayBuffer());
+  await verifyResponse(res, text, signature);
+  return { status: res.status, body: text.length ? JSON.parse(text.toString()) : null };
+}
+
+// ---- verifying what Adera sends back (responses and callbacks) ----
+const jwkCache = new Map(); // kid -&gt; { key, at }
+async function aderaPublicKey(kid) {
+  let entry = jwkCache.get(kid);
+  if (!entry || Date.now() - entry.at &gt; 3600_000) {
+    const { keys } = await (await fetch(BASE + &quot;/.well-known/jwks.json&quot;)).json();
+    for (const k of keys) jwkCache.set(k.kid, { key: crypto.createPublicKey({ key: k, format: &quot;jwk&quot; }), at: Date.now() });
+    entry = jwkCache.get(kid);
+  }
+  if (!entry) throw new Error(&quot;unknown Adera key id &quot; + kid);
+  return entry.key;
+}
+
+async function check(canonical, h) { // h: function(name) -&gt; header value
+  if (Math.abs(Date.now() / 1000 - Number(h(&quot;x-adera-timestamp&quot;))) &gt; 300) throw new Error(&quot;stale timestamp&quot;);
+  const key = await aderaPublicKey(h(&quot;x-adera-key-id&quot;));
+  if (!crypto.verify(&quot;sha256&quot;, Buffer.from(canonical), key, Buffer.from(h(&quot;x-adera-signature&quot;), &quot;base64&quot;))) throw new Error(&quot;bad Adera signature&quot;);
+}
+
+async function verifyResponse(res, rawBody, requestSignature) {
+  if (!res.headers.get(&quot;x-adera-signature&quot;)) // gateway answers (429, 502..504) and framework 404/405/415 are unsigned
+    throw new Error(`unsigned answer, HTTP ${res.status}: not produced by the API itself`);
+  const canonical = [&quot;ADERA-SIG-1-RESPONSE&quot;, res.headers.get(&quot;x-adera-timestamp&quot;), String(res.status), sha256b64(rawBody),
+    sha256b64(Buffer.from(requestSignature))].join(&quot;\n&quot;);
+  await check(canonical, (n) =&gt; res.headers.get(n));
+}
+
+// in your callback endpoint: rawBody is the unparsed body (Buffer), headers are Node&#x27;s lower-cased request headers
+async function verifyCallback(pathAndQuery, rawBody, headers) {
+  const canonical = [&quot;ADERA-SIG-1&quot;, headers[&quot;x-adera-timestamp&quot;], &quot;POST&quot;, pathAndQuery, sha256b64(rawBody)].join(&quot;\n&quot;);
+  await check(canonical, (n) =&gt; headers[n]);
+}
+
+module.exports = { call, verifyCallback };</code></pre>
+<p>File <a href="examples/send.js"><code>examples/send.js</code></a>:</p>
+<pre><code>const { call } = require(&quot;./adera-client&quot;);
+(async () =&gt; {
+  const [externalId, userId, templateId] = process.argv.slice(2);
+  console.log(await call(&quot;POST&quot;, &quot;/v1/notifications&quot;, { externalId, userId, templateId, params: { name: &quot;Abebe&quot; } }));
+  console.log(await call(&quot;GET&quot;, &quot;/v1/notifications/&quot; + externalId));
+})();</code></pre>
+<pre><code>node send.js doc-node $ABEBE $JOB</code></pre>
+<pre class="out nocopy"><code>{
+  status: 202,
+  body: {
+    notificationId: 'd42759d7-c887-431e-a43d-6df670c212a4',
+    externalId: 'doc-node',
+    status: 'QUEUED',
+    channel: 'SMS',
+    environment: 'DEV',
+    createdAt: '2026-10-26T10:53:01.470222Z',
+    expiresAt: '2026-10-27T10:53:01.460886Z'
+  }
+}
+{ status: 200, body: { notificationId: 'd42759d7-c887-431e-a43d-6df670c212a4', externalId: 'doc-node', status: 'QUEUED', ... 'attempts': 0 } }</code></pre>
+
+<h2 id="curl">curl and openssl (no libraries)</h2>
+<p>Handy for a first try and for debugging. File <a href="examples/adera_call.sh"><code>examples/adera_call.sh</code></a> (Linux and macOS; on macOS <code>base64</code> works the same because the script strips line breaks itself):</p>
+<pre><code>#!/usr/bin/env bash
+# Signed call to the Adera partner API with only curl and openssl.
+# usage: adera_call.sh METHOD PATH [BODY_FILE]      e.g.  adera_call.sh POST /v1/notifications body.json
+# env:   ADERA_BASE, ADERA_KEY_ID, ADERA_PRIVATE_KEY_FILE
+set -euo pipefail
+method=$(printf &#x27;%s&#x27; &quot;$1&quot; | tr a-z A-Z); path=$2; body_file=${3:-}
+
+b64() { base64 | tr -d &#x27;\n&#x27;; }                       # one line, standard alphabet, with padding
+ts=$(date +%s)
+if [ -n &quot;$body_file&quot; ]; then body_hash=$(openssl dgst -sha256 -binary &quot;$body_file&quot; | b64)
+else                          body_hash=$(openssl dgst -sha256 -binary &lt;/dev/null | b64); fi   # empty body = hash of zero bytes
+
+# five lines joined by \n, no trailing newline; the body hash covers the exact bytes of BODY_FILE
+canonical=$(printf &#x27;ADERA-SIG-1\n%s\n%s\n%s\n%s&#x27; &quot;$ts&quot; &quot;$method&quot; &quot;$path&quot; &quot;$body_hash&quot;)
+signature=$(printf &#x27;%s&#x27; &quot;$canonical&quot; | openssl dgst -sha256 -sign &quot;$ADERA_PRIVATE_KEY_FILE&quot; | b64)   # RSASSA-PKCS1-v1_5 + SHA-256
+
+args=(-sS -i -X &quot;$method&quot; &quot;$ADERA_BASE$path&quot;
+      -H &quot;X-Adera-Key-Id: $ADERA_KEY_ID&quot; -H &quot;X-Adera-Timestamp: $ts&quot; -H &quot;X-Adera-Signature: $signature&quot;
+      -H &quot;Content-Type: application/json&quot;)
+[ -n &quot;$body_file&quot; ] &amp;&amp; args+=(--data-binary &quot;@$body_file&quot;)      # --data-binary: curl must not alter a single byte
+curl &quot;${args[@]}&quot;</code></pre>
+<pre><code>printf '%s' '{"externalId":"doc-curl","userId":"'$ABEBE'","templateId":"'$JOB'","params":{"name":"Abebe"}}' > body.json
+./adera_call.sh POST /v1/notifications body.json
+./adera_call.sh GET  /v1/notifications/doc-curl</code></pre>
+<p>Real output of the first call (signature shortened):</p>
+<pre class="out nocopy"><code>HTTP/1.1 202
+Content-Type: application/json
+X-RateLimit-Limit: 600
+X-RateLimit-Remaining: 593
+X-RateLimit-Reset: 7.99
+X-Adera-Key-Id: adera-sig-202610
+X-Adera-Timestamp: 1793011997
+X-Adera-Signature: N1aXYvFF5F9VfxZcU3ylQdNH0Swjein... (base64, 512 characters for a 3072-bit key)
+Server: APISIX/3.19.0
+X-Request-Id: 35cbc641-2916-4f2f-993b-0e59fb90d99b
+
+{"notificationId":"2bcc0003-4d6d-441d-bf38-dc806b34b8d9","externalId":"doc-curl","status":"QUEUED","channel":"SMS","environment":"DEV","createdAt":"2026-10-26T10:53:17.671849Z","expiresAt":"2026-10-27T10:53:17.661603Z"}</code></pre>
+<div class="callout"><span class="label">Debugging with curl</span><p>If you get <code>invalid_signature</code>, print what you sign: <code>printf '%s' "$canonical" | cat -A</code> shows <code>$</code> at each line end and reveals stray carriage returns or a trailing newline. Hash the body file with <code>openssl dgst -sha256 -binary body.json | base64</code> and compare with line 5. Use <code>--data-binary</code>, never <code>-d</code>/<code>--data</code> (curl would strip newlines).</p></div>
+
+<h2 id="responses">Verifying Adera's answers</h2>
+<p>Every answer of the API under <code>/v1/</code>, errors included, carries three headers made with <strong>Adera's</strong> key (exceptions: see the note after the next code block):</p>
+<div class="table-wrap"><table><thead><tr><th>Header</th><th>Value</th></tr></thead><tbody>
+<tr><td><code>X-Adera-Key-Id</code></td><td>Adera's key id (<code>kid</code> in the JWKS), e.g. <code>adera-sig-202610</code></td></tr>
+<tr><td><code>X-Adera-Timestamp</code></td><td>Unix seconds when Adera signed the answer</td></tr>
+<tr><td><code>X-Adera-Signature</code></td><td>Base64 RS256 signature of the canonical response string below</td></tr>
+</tbody></table></div>
+<pre class="nocopy"><code>ADERA-SIG-1-RESPONSE
+{timestamp}
+{HTTP status code}
+{base64(sha256(response body bytes))}
+{base64(sha256(the exact X-Adera-Signature string you sent in the request))}</code></pre>
+<p>The last line binds the answer to <em>your</em> request signature, so an answer cannot be replayed as the answer to a different request. The hash is over the signature header text (the base64 characters, as UTF-8 bytes), not over the decoded signature. The status code is the plain number (<code>202</code>). For an empty body the hash is the one of zero bytes. <code>verify_response</code> (Python) and <code>verifyResponse</code> (Node) above do exactly this; they also reject timestamps more than 5 minutes off.</p>
+<p>Verification was exercised for every call in this section, including <code>400</code>, <code>401</code>, <code>403</code>, <code>404 template_not_found</code>, <code>413</code>, <code>422</code> and <code>429 quota_exceeded</code> answers. <strong>Not signed:</strong> answers produced by the gateway itself (rate limit <code>429</code>, or <code>502/503/504</code> when a service is down) and the web framework's own bodies for an unknown path (<code>404</code>), a wrong method (<code>405</code>) and a missing content type (<code>415</code>), which only happen when your code calls something that does not exist. Treat a missing signature on a normal answer as "not from the API".</p>
+<div class="callout warn"><span class="label">Decide your policy</span><p>An answer with a bad or missing signature must not be trusted: do not mark a notification as delivered, and do not retry blindly with a new <code>externalId</code>. Retry the same request (same <code>externalId</code>) later.</p></div>
+
+<h2 id="jwks">Adera's public key: <code>/.well-known/jwks.json</code></h2>
+<span class="method m-get">GET</span> <code>/.well-known/jwks.json</code>
+<p>Public, no signature needed, no login. It returns a standard JWK set with Adera's RSA public key. Cacheable: the answer carries <code>Cache-Control: max-age=3600, public</code>. Gateway limit 120 requests per minute per IP, so cache the key instead of fetching it per request (both clients above cache it for one hour and refetch once when they meet an unknown <code>kid</code>).</p>
+<pre class="out nocopy"><code>{"keys":[{"kty":"RSA","use":"sig","alg":"RS256","kid":"adera-sig-202610","n":"1hZGZIorMnraX4Ou21BKv-KaiT3an6XHPZPI9oXyGAbDE9_WZhGIPHpqkvO2LOZpXI6bhq... (base64url, 3072-bit modulus)","e":"AQAB"}]}</code></pre>
+<ul>
+<li>Pick the key whose <code>kid</code> equals the <code>X-Adera-Key-Id</code> of the answer or callback. Do not assume a single key or a fixed <code>kid</code>.</li>
+<li>If Adera ever replaces its signing key, a new <code>kid</code> appears. When you meet a <code>kid</code> you do not know, refetch the JWKS (once, not in a loop) before rejecting. Adera has not published a rotation schedule; see <a href="known-issues.html">known issues</a>.</li>
+<li>On a deployment that has no configured signing key, Adera generates a temporary one at start-up (<code>kid</code> starts with <code>ephemeral-</code>). That is only possible while no real SMS or email provider is enabled, so it never happens in production; in such a dev deployment the key changes on every restart, so your cache must handle a changed JWKS.</li>
+<li>The same Adera key signs responses and callbacks. Always fetch the JWKS from the deployment you call (the dev and production deployments are separate and may use different keys).</li>
+</ul>
+
+<h2 id="callbacks">Verifying callbacks</h2>
+<p>Callbacks use the <em>request</em> canonical string (Adera is the caller): <code>ADERA-SIG-1\n{timestamp}\nPOST\n{path[?query] of your callbackUrl}\n{base64 sha256 of the raw body}</code>, signed with Adera's key, with headers <code>X-Adera-Key-Id</code>, <code>X-Adera-Timestamp</code>, <code>X-Adera-Signature</code>, <code>X-Adera-Event</code> and <code>Idempotency-Key</code>. Ready-to-run receivers that verify the signature and de-duplicate are on <a href="statuses-and-callbacks.html#receivers">Statuses and callbacks</a>.</p>
+
+<h2 id="troubleshooting">Troubleshooting <code>invalid_signature</code></h2>
+<ol>
+<li>Is the body you hash byte-identical to the body you send? Log both as bytes.</li>
+<li>Does the path include the query exactly as sent, and nothing else (no host)?</li>
+<li>Is the method upper case, and does the timestamp line equal the header?</li>
+<li>Is there a trailing newline in the canonical string? There must be none.</li>
+<li>Is the signature RSASSA-PKCS1-v1_5 with SHA-256 (not PSS, not SHA-1, not ECDSA)?</li>
+<li>Is the key id the one for <em>this</em> private key (a key id registered with a different public key fails here)?</li>
+<li>Is a proxy in front of your server rewriting the URL or re-encoding the body? Sign what leaves your machine.</li>
+</ol>
+
+<div class="pager"><a class="prev" href="quickstart.html"><small>Previous</small>Quick start</a><a class="next" href="environments-and-ips.html"><small>Next</small>Environments, IPs and keys</a></div>
+<p class="footer">Adera mini-app backend API guide &middot; verified against the dev deployment on 2026-10-26</p>
+</main>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

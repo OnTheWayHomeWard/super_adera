@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Known issues and not built yet | Adera guide</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+<button id="menu-btn" type="button" aria-label="Toggle menu">Menu</button>
+<span class="brand">Adera guide: sign-in and account</span>
+<span class="spacer"></span>
+<button id="theme-btn" type="button" aria-label="Toggle light or dark theme">Theme</button>
+</header>
+<div class="layout">
+<nav class="sidebar" aria-label="Pages in this guide">
+<h4>Super app: sign-in and account</h4>
+<ul><li><a href="index.html">Overview</a></li>
+<li><a href="quickstart.html">Quick start</a></li>
+<li><a href="authentication.html">Registration and login</a></li>
+<li><a href="session-and-logout.html">Session and logout</a></li>
+<li><a href="profile.html">Profile</a></li>
+<li><a href="extra-data.html">Extra data</a></li>
+<li><a href="location.html">Location</a></li>
+<li><a href="avatar.html">Avatar</a></li>
+<li><a href="devices-and-push-tokens.html">Devices and push tokens</a></li>
+<li><a href="errors.html">Error table</a></li>
+<li><a href="known-issues.html" class="current">Known issues and not built yet</a><ul><li><a href="#overview">Overview</a></li><li><a href="#known">Known issues</a></li><li><a href="#not-built">Not built yet</a></li></ul></li></ul>
+</nav>
+<main>
+<h1>Known issues and not built yet</h1>
+<p class="lead">Behaviours that can surprise a client developer today, with how to reproduce them, and the list of features that are not built yet.</p>
+<h2 id="overview">Overview</h2>
+<p>Two lists. <strong>Known issues</strong> are behaviours that exist today and can surprise a client developer; each has a short repro and the advised workaround. <strong>Not built yet</strong> lists features a client might expect that do not exist; the app must not offer them. Both were checked against the code and the running dev stack on 2026-10-26.</p>
+<h2 id="known">Known issues</h2>
+<div class="table-wrap"><table><thead><tr><th>#</th><th>Issue</th><th>Repro</th><th>Workaround / effect</th></tr></thead><tbody>
+<tr><td>1</td><td><strong>Login reveals whether an account exists.</strong> An unknown identifier gets <code>4000035</code> "This account does not exist...", a known one gets "code sent". The same text is returned for a malformed identifier.</td><td>Start a login flow, submit <code>{"method":"code","identifier":"+251977000000"}</code> for a number never registered.</td><td>Planned fix: one "continue" endpoint that always answers "code sent" (not built). Until then, use the answer only to switch to registration, never to display "this number is (not) registered" text.</td></tr>
+<tr><td>2</td><td><strong>Registering an existing identifier sends a real code, and fails only after the code is typed</strong> (<code>4000007</code>).</td><td>Start a registration flow for a number that already has an account and submit it: answer <code>1040005</code> "code sent" and an SMS goes out (verified in the send log).</td><td>Try login first, then registration (see Registration and login).</td></tr>
+<tr><td>3</td><td><strong>Error shapes are not uniform.</strong> Gateway <code>401</code> has an empty body; <code>403 account_*</code> and <code>503</code> JSON arrive with <code>Content-Type: text/plain</code>; <code>429</code> is HTML; <code>404</code>, <code>405</code> and <code>415</code> on <code>/api/v1/me*</code> use the Spring default shape (<code>error</code> is a reason phrase); Kratos has its own shape.</td><td><code>curl -i $GATEWAY/api/v1/me</code> (empty 401); <code>curl -i -X DELETE $GATEWAY/api/v1/me -H "Authorization: Bearer $TOKEN"</code> (405 Spring JSON).</td><td>Branch on the status first (see the Error table).</td></tr>
+<tr><td>4</td><td><strong>The submit rate limit is per source IP.</strong> 10 submits per minute shared by every phone behind one carrier NAT or office network; in the dev stack by every developer and test script.</td><td>Run two sign-ins within a minute from the same machine while others also sign in: the 11th submit gets <code>429</code> (HTML).</td><td>Back off and retry; do not show an error screen. Production needs the real client IP configured at the edge.</td></tr>
+<tr><td>5</td><td><strong>The per-recipient SMS/email limit is silent.</strong> After 5 SMS per hour (10 per day) to one number, Kratos still answers "code sent" but nothing is delivered.</td><td>Request more than 5 login codes for the same number within an hour. Limits come from the notification service settings (<code>LIMIT_SMS_PER_HOUR=5</code>, <code>LIMIT_SMS_PER_DAY=10</code>, <code>LIMIT_EMAIL_PER_HOUR=10</code>, <code>LIMIT_EMAIL_PER_DAY=20</code>); the sixth request was not exercised here.</td><td>Throttle "resend" in the app (about once a minute) and tell people to wait if the code does not arrive.</td></tr>
+<tr><td>6</td><td><strong>Logout is refused for blocked accounts.</strong> A suspended or deleted account gets <code>403</code> on <code>POST /api/v1/me/logout</code>, so the push token cannot be removed that way.</td><td>Suspend a test account, call <code>POST /api/v1/me/logout</code>: <code>403 account_suspended</code>.</td><td>Sign out with <code>DELETE /kratos/self-service/logout/api</code>. Push stops anyway because blocked accounts are unreachable for delivery.</td></tr>
+<tr><td>7</td><td><strong>Revoking an unknown session id answers 204.</strong> <code>DELETE /kratos/sessions/{id}</code> does not report "not found"; <code>DELETE /kratos/sessions</code> returned <code>count: 1</code> in a test where no other session was live.</td><td><code>DELETE /kratos/sessions/&lt;random uuid&gt;</code> with a valid token gives <code>204</code>.</td><td>Do not use the answers as proof of what existed; re-list with <code>GET /kratos/sessions</code>.</td></tr>
+<tr><td>8</td><td><strong>A bad <code>platform</code> value is reported as <code>invalid_json</code></strong> instead of a field message.</td><td><code>PUT /api/v1/me/devices</code> with <code>"platform":"SYMBIAN"</code> gives <code>{"error":"invalid_json"}</code>.</td><td>Send exactly ANDROID, IOS or WEB.</td></tr>
+<tr><td>9</td><td><strong><code>DELETE /api/v1/me/devices</code> needs a JSON body</strong> and answers <code>invalid_json</code> without one; some HTTP libraries cannot send a body with DELETE.</td><td><code>curl -X DELETE $GATEWAY/api/v1/me/devices -H "Authorization: Bearer $TOKEN"</code>.</td><td>Allow a body on DELETE, or use <code>POST /api/v1/me/logout</code> when signing out.</td></tr>
+<tr><td>10</td><td><strong>Devices registered without an installation id pile up</strong> on every token rotation (one row per token) until Firebase reports the old tokens dead.</td><td><code>PUT /devices</code> twice with different tokens and no <code>installationId</code>: <code>GET /devices</code> lists two.</td><td>Always send a stable <code>installationId</code>.</td></tr>
+<tr><td>11</td><td><strong>Avatar: HEIC and WebP are refused</strong> (<code>400 not a supported image</code>); EXIF orientation is not applied and is dropped (not tested with a rotated sample); animated GIF keeps one frame.</td><td>Upload a WebP file to <code>POST /api/v1/me/avatar</code>.</td><td>Convert to an upright JPEG on the device before upload.</td></tr>
+<tr><td>12</td><td><strong><code>market</code>, <code>language</code> and <code>termsAcceptedVersion</code> are self-declared.</strong> The user can set <code>market</code> to ET or US regardless of the phone; sending <code>termsAcceptedVersion</code> again refreshes <code>termsAcceptedAt</code>; the server does not know which terms version is current.</td><td><code>PATCH /api/v1/me {"market":"US"}</code> succeeds for a +251 phone.</td><td>Treat them as preferences, not as proof.</td></tr>
+<tr><td>13</td><td><strong>Unsupported Kratos self-service features are reachable.</strong> The gateway exposes all of <code>/kratos/self-service/*</code>, including the settings flow (authenticator-app enrolment, changing the email/phone trait). The app does not support them: a customer who enrolled an authenticator app would, per Kratos' behaviour for staff, need a second step the customer app does not implement, and a changed identifier is not copied to the profile. The consequences of enrolling or changing were not tested here.</td><td><code>GET /kratos/self-service/settings/api</code> with a customer token returns a settings flow (verified for a throwaway email account).</td><td>Do not call the settings flow from the app. Backend follow-up: block or wire it.</td></tr>
+<tr><td>14</td><td><strong>Real delivery is not proven.</strong> The dev stack uses a console SMS provider, Mailpit and a fake push provider. The Twilio and Resend providers are built but no real message has been sent from this platform yet; Ethiopian SMS routing is unresolved.</td><td>n/a (dev only)</td><td>Plan a real-device test with the live allow-list before launch.</td></tr>
+<tr><td>15</td><td><strong>The registration web hook is unauthenticated</strong> (internal network only, not routed by the gateway); if it is lost the profile is created on first use. No client impact.</td><td>n/a</td><td>None needed.</td></tr>
+</tbody></table></div>
+<h2 id="not-built">Not built yet</h2>
+<p>Nothing below exists in the APIs or in the apps' reach; do not design screens that assume it.</p>
+<div class="table-wrap"><table><thead><tr><th>Feature</th><th>State today</th></tr></thead><tbody>
+<tr><td><strong>Account deletion by the user</strong></td><td>No endpoint. Staff can mark an account <code>DELETED</code> (it then refuses all calls and is final), but that does not delete the Kratos identity, anonymise the profile, or remove avatar and device rows. A store-compliant "delete my account" flow (identity, profile, avatar files, device tokens) is planned.</td></tr>
+<tr><td><strong>Account linking / changing the phone or email</strong></td><td>No endpoint. A phone account and an email account are two different accounts; a person who signs in with the other identifier gets a new, empty account. Merging two profiles is not built.</td></tr>
+<tr><td><strong>"Continue with phone or email" single entry point</strong></td><td>Not built (the anti-enumeration endpoint that always answers "code sent"). The client chooses between login and registration itself.</td></tr>
+<tr><td><strong>TOTP / second factor for customers</strong></td><td>Not offered. Authenticator-app codes exist only for dashboard staff; customers are always <code>aal1</code>.</td></tr>
+<tr><td><strong>Passwords, social sign-in (Apple, Google), magic links</strong></td><td>Disabled/not built: the code method is the only one enabled.</td></tr>
+<tr><td><strong>Refresh tokens / silent renewal</strong></td><td>There is one opaque token with a fixed 30-day life. The only renewal is a refresh login that needs a new code.</td></tr>
+<tr><td><strong>Other users' profiles and avatars</strong></td><td>No endpoint: each user can only read and change their own.</td></tr>
+<tr><td><strong>Profile fields beyond the list</strong></td><td>No username, bio, address book, multiple locations, location history, or avatar size variants (one 512 px picture).</td></tr>
+<tr><td><strong>Data export</strong></td><td>No endpoint to download a user's data.</td></tr>
+<tr><td><strong>Marking a device inactive from the client</strong></td><td>Only removal exists; deactivation happens on the server when Firebase reports a token dead.</td></tr>
+<tr><td><strong>Per-device notification settings and topics</strong></td><td>Not in the device API.</td></tr>
+<tr><td><strong>Content moderation of avatars</strong></td><td>Not built (re-encoding removes active content, not inappropriate images).</td></tr>
+</tbody></table></div>
+
+<div class="pager"><a class="prev" href="errors.html"><small>Previous</small>Error table</a><span class="placeholder"></span></div>
+<p class="footer">Adera super-app guide: sign-in and account &middot; verified against the dev stack on 2026-10-26</p>
+</main>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

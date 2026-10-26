@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Error codes of these APIs | Adera guide</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+<button id="menu-btn" type="button" aria-label="Toggle menu">Menu</button>
+<span class="brand">Adera guide: sign-in and account</span>
+<span class="spacer"></span>
+<button id="theme-btn" type="button" aria-label="Toggle light or dark theme">Theme</button>
+</header>
+<div class="layout">
+<nav class="sidebar" aria-label="Pages in this guide">
+<h4>Super app: sign-in and account</h4>
+<ul><li><a href="index.html">Overview</a></li>
+<li><a href="quickstart.html">Quick start</a></li>
+<li><a href="authentication.html">Registration and login</a></li>
+<li><a href="session-and-logout.html">Session and logout</a></li>
+<li><a href="profile.html">Profile</a></li>
+<li><a href="extra-data.html">Extra data</a></li>
+<li><a href="location.html">Location</a></li>
+<li><a href="avatar.html">Avatar</a></li>
+<li><a href="devices-and-push-tokens.html">Devices and push tokens</a></li>
+<li><a href="errors.html" class="current">Error table</a><ul><li><a href="#shapes">Overview: five different error shapes</a></li><li><a href="#api-errors">Table: /api/v1/me* (profile, location, avatar, devices, logout)</a></li><li><a href="#validation-catalogue">Table: every validation_failed message</a></li><li><a href="#kratos-errors">Table: /kratos/* (sign-in, sessions)</a></li><li><a href="#limits-summary">Table: all limits in one place</a></li></ul></li>
+<li><a href="known-issues.html">Known issues and not built yet</a></li></ul>
+</nav>
+<main>
+<h1>Error codes of these APIs</h1>
+<p class="lead">Every error a client can get from the sign-in and account APIs: the five shapes, the full status table, every validation message, the Kratos answers, and the limits.</p>
+<h2 id="shapes">Overview: five different error shapes</h2>
+<p>Errors in these APIs come from four places, and they do not look the same. Write one error handler that checks the <strong>HTTP status first</strong>, then the content type, then the body.</p>
+<div class="table-wrap"><table><thead><tr><th>Source</th><th>Looks like</th><th>Where</th></tr></thead><tbody>
+<tr><td>Adera services</td><td><code>{"error": "&lt;code&gt;"}</code>, with <code>"fields": {"fieldName": "message"}</code> added for <code>validation_failed</code></td><td>everything under <code>/api/v1/me*</code> that reaches the user service</td></tr>
+<tr><td>Gateway user check (forward-auth)</td><td><code>401</code> with an <strong>empty</strong> body; <code>403</code> and <code>503</code> with the Adera JSON above (the content type is <code>text/plain</code> even though the text is JSON)</td><td>before any <code>/api/v1/me*</code> call runs</td></tr>
+<tr><td>Gateway rate limit and routing</td><td><code>429</code> with an <strong>HTML</strong> page; unknown route <code>404</code> with <code>{"error_msg":"404 Route Not Found"}</code></td><td>any route</td></tr>
+<tr><td>Spring framework defaults</td><td><code>{"timestamp":"...","status":404,"error":"Not Found","path":"/api/v1/me/nothing"}</code> (here <code>error</code> is a reason phrase, not a code)</td><td><code>404</code>, <code>405</code>, <code>415</code> on <code>/api/v1/me*</code> paths</td></tr>
+<tr><td>Kratos</td><td>flow JSON with <code>state</code> and <code>messages</code> (<code>400</code>), or <code>{"error":{"code":...,"status":...,"reason":...}}</code> where <code>error</code> is an object</td><td>everything under <code>/kratos/*</code></td></tr>
+</tbody></table></div>
+<div class="callout"><span class="label">Suggested client logic</span>
+<ol><li>Status <code>429</code>: back off and retry (the body is HTML: do not parse it).</li><li>Status <code>401</code> from <code>/api/v1/*</code>: the session is gone; sign in again. A <code>401</code> from <code>/kratos/*</code> means the same for that token.</li><li>Status <code>403</code> from <code>/api/v1/*</code> with <code>account_suspended</code> or <code>account_deleted</code>: blocking screen.</li><li>Status <code>5xx</code> or no connection: keep the session, retry with back-off.</li><li>Otherwise if the body is JSON with a string <code>error</code>: switch on it; for <code>validation_failed</code> show each <code>fields</code> entry next to its input.</li><li>Under <code>/kratos/*</code>: read <code>state</code> and the message <code>id</code>s, not only the status (a <code>400</code> may be a success step).</li></ol>
+</div>
+<h2 id="api-errors">Table: /api/v1/me* (profile, location, avatar, devices, logout)</h2>
+<div class="table-wrap"><table><thead><tr><th>Status</th><th>Error code (body)</th><th>Produced by</th><th>When</th><th>Client action</th></tr></thead><tbody>
+<tr><td>400</td><td><code>validation_failed</code> + <code>fields</code></td><td>user service</td><td>a field is invalid, an unknown key was sent, a required field is missing or blank, an uploaded file is not acceptable, location rules broken, device fields too long. The keys of <code>fields</code> are the request field names (<code>firstName</code>, <code>gender</code>, <code>extra</code>, <code>file</code>, <code>latitude</code>, <code>location</code>, <code>fcmToken</code>, <code>platform</code>, ...)</td><td>show each message by its field; do not resend unchanged</td></tr>
+<tr><td>400</td><td><code>invalid_json</code></td><td>user service</td><td>body is not valid JSON, is not an object where one is required, is missing where required (<code>DELETE /devices</code> without a body), or an enum value (<code>platform</code>) is unknown</td><td>fix the request</td></tr>
+<tr><td>401</td><td>(empty body)</td><td>gateway user check</td><td>no <code>Authorization</code> header, a scheme other than Bearer, a token that is garbage, expired (30 days) or revoked (logout, sign out everywhere, staff action), or the identity service answered "invalid"</td><td>clear local session, show sign-in</td></tr>
+<tr><td>401</td><td><code>{"error":"unauthorized"}</code></td><td>user service</td><td>request reached the service without passing the gateway (wrong or missing internal secret) or with an invalid user id header. A client behind the gateway should never see it</td><td>report as a bug</td></tr>
+<tr><td>403</td><td><code>account_suspended</code></td><td>gateway user check</td><td>staff suspended this account</td><td>blocking screen; sign out via Kratos logout</td></tr>
+<tr><td>403</td><td><code>account_deleted</code></td><td>gateway user check</td><td>staff deleted this account (final)</td><td>blocking screen; sign out</td></tr>
+<tr><td>404</td><td><code>not_found</code></td><td>user service</td><td>the profile cannot be found and the identity does not exist in Kratos either (not reproducible with a valid session)</td><td>sign out</td></tr>
+<tr><td>404</td><td>framework JSON (<code>status: 404</code>)</td><td>Spring</td><td>a path under <code>/api/v1/me/</code> that does not exist, including a trailing slash</td><td>fix the URL</td></tr>
+<tr><td>404</td><td><code>{"error_msg":"404 Route Not Found"}</code></td><td>gateway</td><td>a path that no route matches at all (for example <code>/api/v1/zzz</code>)</td><td>fix the URL</td></tr>
+<tr><td>405</td><td>framework JSON (<code>status: 405</code>)</td><td>Spring</td><td>wrong method for an existing path (for example <code>DELETE /api/v1/me</code>)</td><td>fix the call</td></tr>
+<tr><td>409</td><td><code>conflict</code></td><td>user service</td><td>a database uniqueness rule was violated. Cannot be triggered with the fields the profile accepts today</td><td>-</td></tr>
+<tr><td>413</td><td><code>file_too_large</code></td><td>user service</td><td>avatar over 5 MiB, or over the 6 MB transport limit</td><td>downscale/compress</td></tr>
+<tr><td>415</td><td>framework JSON (<code>status: 415</code>)</td><td>Spring</td><td>avatar upload sent as something other than <code>multipart/form-data</code></td><td>fix the call</td></tr>
+<tr><td>429</td><td>(HTML page)</td><td>gateway</td><td>more than 300 calls per minute from one IP on <code>/api/v1/me*</code>; more than 20 avatar uploads per minute (route <code>me-avatar</code>)</td><td>back off, retry</td></tr>
+<tr><td>503</td><td><code>identity_service_unavailable</code></td><td>gateway user check</td><td>Kratos could not be reached while the token was checked (taken from the code path; not reproduced because the identity service cannot be stopped in the shared dev stack)</td><td>keep the session; retry later</td></tr>
+<tr><td>503</td><td>(gateway)</td><td>gateway</td><td>the user service itself could not be reached by the gateway (<code>status_on_error: 503</code> on the user check); body not captured</td><td>retry later</td></tr>
+<tr><td>500</td><td>framework JSON or empty</td><td>user service</td><td>an unexpected server failure</td><td>retry once, then report</td></tr>
+</tbody></table></div>
+<h2 id="validation-catalogue">Table: every validation_failed message</h2>
+<p>The <code>fields</code> values are English developer messages. Key your UI on the field name and the endpoint, not on the text.</p>
+<div class="table-wrap"><table><thead><tr><th>Endpoint</th><th>Field</th><th>Message</th><th>Cause</th></tr></thead><tbody>
+<tr><td>PATCH /api/v1/me</td><td>any key not in the list</td><td>unknown field</td><td>typo or a read-only field (<code>email</code>, <code>phone</code>, <code>status</code>, <code>id</code>, ...)</td></tr>
+<tr><td>PATCH /api/v1/me</td><td><code>firstName</code>, <code>lastName</code></td><td>max 100 characters</td><td>longer than 100 after trimming</td></tr>
+<tr><td>PATCH /api/v1/me</td><td><code>termsAcceptedVersion</code></td><td>max 32 characters</td><td>longer than 32</td></tr>
+<tr><td>PATCH /api/v1/me</td><td><code>gender</code></td><td>must be one of MALE, FEMALE, OTHER, PREFER_NOT_TO_SAY</td><td>any other value</td></tr>
+<tr><td>PATCH /api/v1/me</td><td><code>dateOfBirth</code></td><td>must be an ISO date (YYYY-MM-DD)</td><td>not parseable</td></tr>
+<tr><td>PATCH /api/v1/me</td><td><code>dateOfBirth</code></td><td>must be a real past date (YYYY-MM-DD)</td><td>in the future or before 1900</td></tr>
+<tr><td>PATCH /api/v1/me</td><td><code>language</code></td><td>must be one of am, en, om</td><td>any other value, or <code>null</code></td></tr>
+<tr><td>PATCH /api/v1/me</td><td><code>market</code></td><td>must be one of ET, US</td><td>any other value, or <code>null</code></td></tr>
+<tr><td>PATCH /api/v1/me</td><td><code>timezone</code></td><td>must be a valid IANA time zone, e.g. Africa/Addis_Ababa</td><td>unknown zone or <code>null</code></td></tr>
+<tr><td>PATCH /api/v1/me</td><td><code>extra</code></td><td>must be a JSON object (use null values inside it to remove keys)</td><td>not an object, or <code>null</code></td></tr>
+<tr><td>PATCH /api/v1/me</td><td><code>extra</code></td><td>too large (max 16384 bytes)</td><td>the object sent exceeds 16 KiB</td></tr>
+<tr><td>PATCH /api/v1/me</td><td><code>extra</code></td><td>too large after merge (max 16384 bytes)</td><td>stored plus sent exceeds 16 KiB</td></tr>
+<tr><td>PUT /api/v1/me/location</td><td><code>location</code></td><td>give at least a city, region, country or coordinates</td><td>nothing meaningful sent</td></tr>
+<tr><td>PUT /api/v1/me/location</td><td><code>latitude</code></td><td>latitude and longitude must be given together</td><td>only one coordinate</td></tr>
+<tr><td>PUT /api/v1/me/location</td><td><code>latitude</code> / <code>longitude</code></td><td>must be less than or equal to 90.0 / greater than or equal to -90.0 (180 for longitude)</td><td>out of range</td></tr>
+<tr><td>PUT /api/v1/me/location</td><td><code>countryCode</code></td><td>must be a 2-letter ISO country code</td><td>not exactly two letters</td></tr>
+<tr><td>PUT /api/v1/me/location</td><td><code>region</code>, <code>city</code></td><td>size must be between 0 and 100</td><td>longer than 100</td></tr>
+<tr><td>POST /api/v1/me/avatar</td><td><code>file</code></td><td>a file is required (multipart field 'file')</td><td>missing, wrong field name or empty</td></tr>
+<tr><td>POST /api/v1/me/avatar</td><td><code>file</code></td><td>not a supported image (use JPEG, PNG, GIF or BMP)</td><td>other format (HTML, WebP, HEIC ...)</td></tr>
+<tr><td>POST /api/v1/me/avatar</td><td><code>file</code></td><td>could not read the image, it may be corrupt</td><td>damaged file</td></tr>
+<tr><td>POST /api/v1/me/avatar</td><td><code>file</code></td><td>image dimensions are too large</td><td>over 12000 px a side or 40 megapixels</td></tr>
+<tr><td>PUT /api/v1/me/devices</td><td><code>fcmToken</code></td><td>must not be blank</td><td>missing or blank</td></tr>
+<tr><td>PUT /api/v1/me/devices</td><td><code>platform</code></td><td>must not be null</td><td>missing</td></tr>
+<tr><td>PUT /api/v1/me/devices</td><td><code>installationId</code> / <code>appVersion</code> / <code>osVersion</code> / <code>deviceName</code> / <code>locale</code></td><td>size must be between 0 and 64 / 32 / 32 / 100 / 16</td><td>too long</td></tr>
+<tr><td>DELETE /api/v1/me/devices</td><td><code>fcmToken</code></td><td>give fcmToken or installationId</td><td>body has neither</td></tr>
+<tr><td>POST /api/v1/me/logout</td><td><code>Authorization</code></td><td>logout needs the session token as 'Authorization: Bearer &lt;token&gt;'</td><td>cannot occur behind the gateway (it already requires the header)</td></tr>
+</tbody></table></div>
+<h2 id="kratos-errors">Table: /kratos/* (sign-in, sessions)</h2>
+<div class="table-wrap"><table><thead><tr><th>Status</th><th>Body</th><th>When</th><th>Client action</th></tr></thead><tbody>
+<tr><td>200</td><td>flow JSON, or <code>{session_token, session, ...}</code></td><td>a flow was created, or the last step succeeded</td><td>on <code>session_token</code> store it</td></tr>
+<tr><td>400</td><td>flow JSON, <code>state: sent_email</code>, message <code>1040005</code> (registration) / <code>1010014</code> (login)</td><td><strong>success</strong>: the code was sent</td><td>show the code screen</td></tr>
+<tr><td>400</td><td>flow JSON, messages <code>4040003</code> / <code>4010008</code></td><td>wrong, expired or reused code</td><td>retype or resend</td></tr>
+<tr><td>400</td><td>flow JSON, <code>4000041</code> / <code>4000040</code> / <code>4000002</code></td><td>invalid phone / invalid email / no identifier</td><td>inline field error</td></tr>
+<tr><td>400</td><td>flow JSON, <code>4000035</code></td><td>login for an unknown identifier</td><td>start registration instead</td></tr>
+<tr><td>400</td><td>flow JSON, <code>4000007</code></td><td>registration step 2 for an identifier that already has an account</td><td>start login instead</td></tr>
+<tr><td>400</td><td>flow JSON, <code>4010002</code></td><td>a finished login flow was submitted again</td><td>drop the flow</td></tr>
+<tr><td>400</td><td><code>{"error":{"id":"session_already_available",...}}</code></td><td>login flow created while sending a valid session without <code>refresh=true</code></td><td>do not send the token, or add <code>refresh=true</code></td></tr>
+<tr><td>401</td><td><code>{"error":{"code":401,"status":"Unauthorized","reason":"No valid session credentials found in the request."}}</code></td><td>whoami, sessions calls with a dead token</td><td>sign in again</td></tr>
+<tr><td>403</td><td><code>{"error":"forbidden"}</code></td><td>any path under <code>/kratos/admin/</code> (blocked at the gateway)</td><td>not for apps</td></tr>
+<tr><td>404</td><td><code>{"error":{"code":404,"status":"Not Found","message":"Unable to locate the resource"}}</code></td><td>unknown flow id</td><td>start a new flow</td></tr>
+<tr><td>410</td><td>Kratos <code>self_service_flow_expired</code></td><td>flow older than 10 minutes (per the Kratos API; not waited out here)</td><td>start a new flow</td></tr>
+<tr><td>204</td><td>no body</td><td>logout / revoke succeeded</td><td>-</td></tr>
+<tr><td>429</td><td>HTML page</td><td>10 submits per minute per IP exceeded, or 120 other calls per minute</td><td>back off, retry</td></tr>
+</tbody></table></div>
+<p>Staff-only responses of Kratos that customers never meet (second-factor <code>session_aal2_required</code> on whoami) are not part of this guide.</p>
+<h2 id="limits-summary">Table: all limits in one place</h2>
+<div class="table-wrap"><table><thead><tr><th>Where</th><th>Limit</th><th>Key</th><th>Over the limit</th></tr></thead><tbody>
+<tr><td><code>POST /kratos/self-service/*</code> (submits)</td><td>10 per 60 s</td><td>client IP</td><td>429 HTML</td></tr>
+<tr><td>other <code>/kratos/*</code></td><td>120 per 60 s</td><td>client IP</td><td>429 HTML</td></tr>
+<tr><td><code>/api/v1/me/avatar</code></td><td>20 per 60 s</td><td>client IP</td><td>429 HTML</td></tr>
+<tr><td>other <code>/api/v1/me*</code></td><td>300 per 60 s</td><td>client IP</td><td>429 HTML</td></tr>
+<tr><td>SMS codes</td><td>5 per hour, 10 per day</td><td>recipient number</td><td>silently no SMS</td></tr>
+<tr><td>Email codes</td><td>10 per hour, 20 per day</td><td>recipient address</td><td>silently no email</td></tr>
+<tr><td>one-time code</td><td>valid 5 minutes, single use</td><td>code</td><td>4040003 / 4010008</td></tr>
+<tr><td>flow (registration, login)</td><td>10 minutes</td><td>flow</td><td>410</td></tr>
+<tr><td>session</td><td>30 days</td><td>token</td><td>401</td></tr>
+<tr><td>avatar file</td><td>5 MiB; 12000 px side; 40 megapixels; output at most 512 px</td><td>upload</td><td>413 / 400</td></tr>
+<tr><td><code>extra</code></td><td>16384 bytes</td><td>profile</td><td>400</td></tr>
+<tr><td>signed avatar link</td><td>60 minutes</td><td>link</td><td>storage 403</td></tr>
+</tbody></table></div>
+<p>The rate-limit counters are per source IP address and per route. Successful responses carry <code>X-RateLimit-Limit</code> and <code>X-RateLimit-Remaining</code> headers you can read to slow down before hitting the limit.</p>
+
+<div class="pager"><a class="prev" href="devices-and-push-tokens.html"><small>Previous</small>Devices and push tokens</a><a class="next" href="known-issues.html"><small>Next</small>Known issues and not built yet</a></div>
+<p class="footer">Adera super-app guide: sign-in and account &middot; verified against the dev stack on 2026-10-26</p>
+</main>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

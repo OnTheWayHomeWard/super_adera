@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Audit log | Admin: users, staff, moderation and audit</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+<button id="menu-btn" type="button" aria-label="Toggle menu">Menu</button>
+<span class="brand">Admin: users, staff, moderation and audit</span>
+<span class="spacer"></span>
+<button id="theme-btn" type="button" aria-label="Toggle light or dark theme">Theme</button>
+</header>
+<div class="layout">
+<nav class="sidebar" aria-label="Pages in this guide"><h4>Admin: users, staff, moderation and audit</h4><ul><li><a href="index.html">Overview and conventions</a></li>
+<li><a href="roles-and-access.html">Staff sign-in, roles and permissions</a></li>
+<li><a href="dashboard.html">Dashboard, system and health</a></li>
+<li><a href="users.html">Registered users</a></li>
+<li><a href="moderation-reviews.html">Moderation: reviews</a></li>
+<li><a href="moderation-reports.html">Moderation: reports</a></li>
+<li><a href="staff.html">Staff management</a></li>
+<li><a href="audit-log.html" class="current">Audit log</a><ul><li><a href="#overview">Overview</a></li><li><a href="#ep-audit">GET /audit</a></li><li><a href="#filters">Every filter</a></li><li><a href="#record">What is recorded</a></li><li><a href="#catalogue">Catalogue of action names</a></li><li><a href="#notaudited">What is not audited</a></li><li><a href="#howto">How to read it</a></li><li><a href="#errors">Errors</a></li><li><a href="#notbuilt">Not built yet</a></li></ul></li>
+<li><a href="notifications-overview.html">Notification visibility</a></li>
+<li><a href="runbooks.html">Runbooks</a></li>
+<li><a href="errors.html">Error codes</a></li>
+<li><a href="known-issues.html">Known issues and not built yet</a></li>
+</ul></nav>
+<main>
+<h1>Audit log</h1>
+<p class="lead">The append-only record of staff changes: how to query it with every filter, what each entry contains, and the catalogue of action names.</p>
+<section><h2 id="overview">Overview</h2>
+<p>The <strong>audit log</strong> is the append-only record of every change staff make through the admin API: who (staff id, role, IP), what (an action name), on what (target type and id) and details. It answers "who changed this, when, and from where?". Each entry is written <strong>in the same database transaction as the change</strong>, so a change cannot exist without its entry: if the entry cannot be written the change is rolled back (<code>503 audit_unavailable</code> on user status changes). The API offers no way to edit or delete entries. In the backoffice it is the screen <strong>Audit log</strong> the card <em>Audit for this user</em> on a user's page and the tab <em>Audit</em> of an app; the Dashboard shows a Recent staff activity panel. Admins and super admins only.</p>
+<div class="callout why"><span class="label">Why it matters</span><p>Staff can suspend customers, hide reviews, grant partners the right to send SMS and add admins. The log is how the owner proves who did what, spots a misuse, and reconstructs a bad change.</p></div></section>
+<section><h2 id="list">Read the audit log</h2>
+<details class="endpoint" id="ep-audit"><summary><span class="method m-get">GET</span><span class="path">/admin/api/v1/audit</span><span class="sum">Filtered, paged audit events, newest first</span></summary><div class="body"><dl class="meta"><dt>Why</dt><dd>Investigate a change, review one person's activity, or export a period.</dd><dt>Auth</dt><dd>Staff aal2 Bearer, role <strong>ADMIN</strong> or SUPER_ADMIN (VIEWER: <code>403 insufficient_role</code>)</dd><dt>Rate limit</dt><dd>300/min/IP</dd><dt>Backoffice</dt><dd>Audit log (filters Actor, Action, Target type, Target id, Between; click a row to expand the details). The Actor box is a name picker for super admins, a plain id box for admins.</dd></dl><h4>Query parameters</h4><div class="table-wrap"><table><thead><tr><th>Name</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why it exists</th></tr></thead><tbody><tr><td><code>limit</code></td><td>integer</td><td>no (50)</td><td>Clamped to 1 to 200</td><td>Page size.</td></tr><tr><td><code>offset</code></td><td>integer</td><td>no (0)</td><td>Negative becomes 0</td><td>Paging: next page is <code>offset += limit</code>.</td></tr><tr><td><code>actor</code></td><td>uuid</td><td>no</td><td>A staff id; anything else: <code>400 validation_failed</code></td><td>Everything one person did.</td></tr><tr><td><code>action</code></td><td>string</td><td>no</td><td><strong>Starts-with</strong> match, case-sensitive; a trailing <code>*</code> is allowed and ignored; <code>%</code> and <code>_</code> are literal</td><td><code>app.</code> finds all app events; <code>app.status</code> that one; <code>user.</code> the user changes.</td></tr><tr><td><code>target</code></td><td>string</td><td>no</td><td>Exact match on the target id (app id, user id, key id such as <code>ak_dev_...</code>, review id, report id, staff id)</td><td>The history of one thing.</td></tr><tr><td><code>targetType</code></td><td>string</td><td>no</td><td>Exact match: <code>mini_app</code>, <code>partner_key</code>, <code>staff</code>, <code>app_review</code>, <code>app_report</code>, <code>app_user</code></td><td>Everything about a kind of thing.</td></tr><tr><td><code>from</code></td><td>ISO-8601 instant</td><td>no</td><td>Like <code>2026-10-01T00:00:00Z</code>; <strong>inclusive</strong></td><td>Start of the period.</td></tr><tr><td><code>to</code></td><td>ISO-8601 instant</td><td>no</td><td>Same format; <strong>exclusive</strong></td><td>End of the period.</td></tr></tbody></table></div><p>Blank values are ignored. Filters combine with AND. All problems in the filters are reported together.</p>
+<h4>Request</h4><pre><code>curl -sS -i "$GATEWAY/admin/api/v1/audit?target=$USER_ID" -H "Authorization: Bearer $ADMIN_TOKEN"</code></pre><h4>Response 200</h4><pre class="out"><code>HTTP/1.1 200 OK
+X-Total-Count: 3
+
+[
+  {
+    "id": "8f9b7bf8-35fe-49c1-a839-0765c284860f",
+    "actorId": "a44fc404-7813-4fce-8fe4-dde4c455ece4",
+    "actorEmail": "tempstaff-3d81c4c5@adera.local",
+    "actorRole": "ADMIN",
+    "action": "user.status",
+    "targetType": "app_user",
+    "targetId": "a5529687-ddd2-421f-867d-b6b5cf82d1fc",
+    "meta": {
+      "to": "DELETED",
+      "from": "ACTIVE",
+      "reason": "doc-tmp: account closed at owner request"
+    },
+    "ip": "172.18.0.1",
+    "at": "2026-10-26T10:56:46.154247Z"
+  },
+  {
+    "id": "e05d0778-53e9-4b0f-9a7b-6da862cb7ce3",
+    "actorId": "a44fc404-7813-4fce-8fe4-dde4c455ece4",
+    "actorEmail": "tempstaff-3d81c4c5@adera.local",
+    "actorRole": "ADMIN",
+    "action": "user.status",
+    "targetType": "app_user",
+    "targetId": "a5529687-ddd2-421f-867d-b6b5cf82d1fc",
+    "meta": {
+      "to": "ACTIVE",
+      "from": "SUSPENDED",
+      "reason": "doc-tmp: appeal accepted"
+    },
+    "ip": "172.18.0.1",
+    "at": "2026-10-26T10:56:46.119203Z"
+  },
+  {
+    "id": "2ef67764-a1a1-4294-94aa-da6c28a0a782",
+    "actorId": "a44fc404-7813-4fce-8fe4-dde4c455ece4",
+    "actorEmail": "tempstaff-3d81c4c5@adera.local",
+    "actorRole": "ADMIN",
+    "action": "user.status",
+    "targetType": "app_user",
+    "targetId": "a5529687-ddd2-421f-867d-b6b5cf82d1fc",
+    "meta": {
+      "to": "SUSPENDED",
+      "from": "ACTIVE",
+      "reason": "doc-tmp: abusive review text"
+    },
+    "ip": "172.18.0.1",
+    "at": "2026-10-26T10:56:45.022917Z"
+  }
+]</code></pre><p>Newest first (ties broken by id). The number of events that match the filters, ignoring paging, is in the response header <strong><code>X-Total-Count</code></strong> (3 here).</p>
+<div class="table-wrap"><table><thead><tr><th>Field</th><th>Meaning</th></tr></thead><tbody><tr><td><code>id</code></td><td>Event id.</td></tr><tr><td><code>actorId</code>, <code>actorEmail</code>, <code>actorRole</code></td><td>The staff member, and the role they had <strong>at that moment</strong>. <code>actorEmail</code> is looked up from the staff table and is <code>null</code> when that row no longer exists. <code>actorId</code> is <code>null</code> for system actions (for example the start-up bootstrap).</td></tr><tr><td><code>action</code></td><td>A dotted name from the catalogue below.</td></tr><tr><td><code>targetType</code>, <code>targetId</code></td><td>What was changed. <code>targetId</code> is a string (app, user, review and staff ids are UUIDs, a key id looks like <code>ak_dev_&lt;hex&gt;</code>).</td></tr><tr><td><code>meta</code></td><td>An object with the details of the change (columns in the catalogue). Never secrets or full personal data.</td></tr><tr><td><code>ip</code></td><td>The caller's IP as seen by the gateway (<code>172.18.0.1</code> is the Docker gateway in the dev stack).</td></tr><tr><td><code>at</code></td><td>UTC instant with microseconds.</td></tr></tbody></table></div><h4>Errors</h4><pre class="out"><code>HTTP/1.1 400 Bad Request
+
+{
+  "error": "validation_failed",
+  "fields": {
+    "actor": "must be a staff id (uuid)",
+    "from": "must be an ISO-8601 instant like 2026-10-01T00:00:00Z"
+  }
+}</code></pre><p>Plus the sign-in errors and <code>403 insufficient_role</code> for a viewer. A filter that matches nothing is not an error: it returns <code>[]</code> with <code>X-Total-Count: 0</code>.</p>
+<h4>Use in a client</h4><p>Read <code>X-Total-Count</code> to build the pager, and request <code>limit=200</code> pages to export a period. To show a person's name instead of an id, join <code>actorId</code> with the staff list (super admins) or use <code>actorEmail</code>. Do not parse <code>meta</code> by position: key sets differ per action.</p>
+</div></details>
+</section>
+<section><h2 id="filters">Every filter, with a verified example</h2>
+<div class="table-wrap"><table><thead><tr><th>Question</th><th>Request (path and query)</th><th>Matches (live)</th></tr></thead><tbody><tr><td>What happened to this user?</td><td><code>/audit?target=&lt;userId&gt;</code></td><td>3 events (suspend, reactivate, delete)</td></tr><tr><td>All user status changes</td><td><code>/audit?action=user.&amp;limit=2</code></td><td><code>X-Total-Count</code> 5 on the stack at the time</td></tr><tr><td>Everything about reviews</td><td><code>/audit?targetType=app_review&amp;limit=2</code></td><td>6</td></tr><tr><td>What did one person do?</td><td><code>/audit?actor=&lt;staffId&gt;&amp;limit=3</code></td><td>11 for the throwaway admin</td></tr><tr><td>Events on 25 October</td><td><code>/audit?from=2026-10-25T00:00:00Z&amp;to=2026-10-26T00:00:00Z&amp;limit=1</code></td><td>191</td></tr><tr><td>Nothing matches</td><td><code>/audit?limit=1000&amp;offset=-5&amp;action=zzz</code></td><td><code>[]</code>, total 0 (limit and offset are clamped)</td></tr></tbody></table></div><pre class="out"><code>HTTP/1.1 200 OK
+X-Total-Count: 6
+
+[
+  {
+    "id": "0a5ef043-21f1-48d0-a09a-1ca31b9ec2af",
+    "actorId": "a44fc404-7813-4fce-8fe4-dde4c455ece4",
+    "actorEmail": "tempstaff-3d81c4c5@adera.local",
+    "actorRole": "ADMIN",
+    "action": "review.moderate",
+    "targetType": "app_review",
+    "targetId": "2f7cf84b-d265-43d9-99e5-b451514525fb",
+    "meta": {
+      "appId": "4eae7304-b8b1-43d6-a9c4-adee75af06c6",
+      "status": "VISIBLE"
+    },
+    "ip": "172.18.0.1",
+    "at": "2026-10-26T10:56:44.757922Z"
+  },
+  {
+    "id": "eff41d7b-6074-4745-bd46-63c8afb2156e",
+    "actorId": "a44fc404-7813-4fce-8fe4-dde4c455ece4",
+    "actorEmail": "tempstaff-3d81c4c5@adera.local",
+    "actorRole": "ADMIN",
+    "action": "review.moderate",
+    "targetType": "app_review",
+    "targetId": "2f7cf84b-d265-43d9-99e5-b451514525fb",
+    "meta": {
+      "appId": "4eae7304-b8b1-43d6-a9c4-adee75af06c6",
+      "status": "HIDDEN"
+    },
+    "ip": "172.18.0.1",
+    "at": "2026-10-26T10:56:44.704394Z"
+  }
+]</code></pre><pre class="out"><code>HTTP/1.1 200 OK
+X-Total-Count: 0
+
+[]</code></pre></section>
+<section><h2 id="record">What is recorded</h2>
+<ul><li>Every successful change made through the admin API listed in the catalogue, with the actor's staff id, the role at that moment, the client IP and a timestamp.</li><li>Rejected requests (validation errors, 403, 404, 409) write <strong>nothing</strong>: only changes that happened.</li><li>Asking for the status a user already has changes nothing and writes nothing; re-sending the same review or report status writes a new event each time.</li><li>The same table is open to other services: any service can post an event to registry-service's internal endpoint (<code>POST /internal/audit</code>, internal secret) with an action name of 2 to 61 lower-case characters (letters, digits, <code>_ . -</code>). Today only user-service does, for <code>user.status</code>.</li></ul>
+</section>
+<section><h2 id="catalogue">Catalogue of audit action names</h2>
+<p>Derived from the code of all three services; every name below is written by exactly one place. Use the <strong>Action</strong> filter with the prefix (<code>app.</code>, <code>capability.</code>, <code>key.</code>, <code>staff.</code>, <code>user.</code>, <code>review.</code>, <code>report.</code>).</p>
+<div class="table-wrap"><table><thead><tr><th>Action</th><th>Target type</th><th><code>meta</code></th><th>Meaning</th><th>Role that can cause it</th></tr></thead><tbody><tr><td><code>app.create</code></td><td>mini_app</td><td><code>{slug}</code></td><td>A staff member created a mini app (DRAFT).</td><td>ADMIN</td></tr><tr><td><code>app.update</code></td><td>mini_app</td><td><code>{fields: [names]}</code></td><td>App details edited; <code>fields</code> lists which fields were in the request (not the values).</td><td>ADMIN</td></tr><tr><td><code>app.status</code></td><td>mini_app</td><td><code>{from, to}</code></td><td>Status moved between DRAFT, LIVE, PAUSED, KILLED. Moving out of KILLED needs SUPER_ADMIN.</td><td>ADMIN</td></tr><tr><td><code>app.logo</code></td><td>mini_app</td><td><code>{imageId}</code></td><td>Logo uploaded or replaced.</td><td>ADMIN</td></tr><tr><td><code>app.logo.remove</code></td><td>mini_app</td><td><code>{}</code></td><td>Logo removed.</td><td>ADMIN</td></tr><tr><td><code>capability.set</code></td><td>mini_app</td><td><code>{capability, state}</code></td><td>A capability (for example <code>notify.sms</code>) was granted, suspended or revoked for an app.</td><td>ADMIN</td></tr><tr><td><code>limit.set</code></td><td>mini_app</td><td><code>{channel, limits}</code></td><td>Notification limits of a channel were set. (<code>limits</code> is a text rendering of the new limits, see Known issues.)</td><td>ADMIN</td></tr><tr><td><code>environment.set</code></td><td>mini_app</td><td><code>{environment, allowedCidrs}</code></td><td>The allowed server addresses of an app for DEV or PROD were set.</td><td>ADMIN</td></tr><tr><td><code>payment.set</code></td><td>mini_app</td><td><code>{currencies, allowHold}</code></td><td>Payment settings of an app were set.</td><td>ADMIN</td></tr><tr><td><code>key.register</code></td><td>partner_key</td><td><code>{appId, environment, fingerprint}</code></td><td>A partner public key was registered, or generated by the platform (both write this name). The key id is the target.</td><td>ADMIN</td></tr><tr><td><code>key.revoke</code></td><td>partner_key</td><td><code>{appId}</code></td><td>A partner key was revoked (only written when it was not already revoked).</td><td>ADMIN</td></tr><tr><td><code>review.moderate</code></td><td>app_review</td><td><code>{status, appId}</code></td><td>A review was hidden (<code>HIDDEN</code>) or restored (<code>VISIBLE</code>).</td><td>ADMIN</td></tr><tr><td><code>report.handle</code></td><td>app_report</td><td><code>{status, appId}</code></td><td>A report was set to OPEN, REVIEWED or DISMISSED.</td><td>ADMIN</td></tr><tr><td><code>user.status</code></td><td>app_user</td><td><code>{from, to, reason?}</code></td><td>A user was suspended, reactivated or deleted. <code>reason</code> is the staff member's text (required for suspend and delete). Written by user-service through registry-service's internal audit endpoint.</td><td>ADMIN</td></tr><tr><td><code>staff.create</code></td><td>staff</td><td><code>{email, role}</code></td><td>A new staff row was created (first time this identity became staff).</td><td>SUPER_ADMIN</td></tr><tr><td><code>staff.update</code></td><td>staff</td><td><code>{role, status}</code></td><td>A staff role or status changed, or an existing staff address was granted a role again; the values are those <em>after</em> the change.</td><td>SUPER_ADMIN</td></tr></tbody></table></div><p>Target types in use: <code>mini_app</code>, <code>partner_key</code>, <code>app_review</code>, <code>app_report</code>, <code>app_user</code>, <code>staff</code>. The backoffice filter also offers <code>template</code>, but nothing writes it (see below).</p>
+</section>
+<section><h2 id="notaudited">What is not audited</h2>
+<ul><li><strong>Notification template changes</strong> (create and edit, notification-service): no audit entries exist for them today.</li><li><strong>Sign-ins and sign-outs</strong>, and failed sign-ins (Kratos keeps its own records; they are not in this log).</li><li><strong>Reads</strong>: looking at a user's full contact data is not recorded.</li><li>Changes made directly in the database or with the Kratos admin API (for example resetting an authenticator), and changes by the e2e and seeding scripts' direct SQL.</li></ul>
+</section>
+<section><h2 id="howto">How to read it: examples</h2>
+<ul><li><strong>Who hid this review?</strong> <code>/audit?target=&lt;reviewId&gt;</code> shows each hide and restore with the actor and time.</li><li><strong>What did Sara do last week?</strong> <code>/audit?actor=&lt;her staff id&gt;&amp;from=...&amp;to=...</code>.</li><li><strong>Who gave this app SMS rights?</strong> <code>/audit?target=&lt;appId&gt;&amp;action=capability.</code>; <code>meta.capability</code> and <code>meta.state</code> tell which and what.</li><li><strong>Why was this user suspended?</strong> <code>/audit?target=&lt;userId&gt;</code>: <code>meta.reason</code> is the text the admin wrote.</li></ul>
+</section>
+<section><h2 id="errors">Errors</h2>
+<p><code>400 validation_failed</code> (<code>fields.actor</code>, <code>fields.from</code>, <code>fields.to</code>), <code>403 insufficient_role</code> for a viewer, plus the sign-in errors. See the error codes page.</p>
+</section>
+<section><h2 id="notbuilt">Not built yet</h2>
+<ul><li>No export file (CSV/JSON download); page through the API.</li><li>No free-text search in <code>meta</code>.</li><li>No alerting on risky actions (for example a new SUPER_ADMIN).</li><li>No retention policy or archive: entries are kept forever.</li><li>No audit of template changes, sign-ins or reads of personal data.</li></ul>
+</section>
+
+<div class="pager"><a class="prev" href="staff.html"><small>Previous</small>Staff management</a><a class="next" href="notifications-overview.html"><small>Next</small>Notification visibility</a></div>
+<p class="footer">Adera admin guide &middot; verified against the running dev stack on 2026-10-26</p>
+</main>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

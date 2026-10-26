@@ -1,0 +1,295 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Capabilities | Admin: managing mini apps</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+<button id="menu-btn" type="button" aria-label="Toggle menu">Menu</button>
+<a class="brand" href="index.html">Admin: managing mini apps</a>
+<span class="spacer"></span>
+<button id="theme-btn" type="button" aria-label="Toggle light or dark theme">Theme</button>
+</header>
+<div class="layout">
+<nav class="sidebar" aria-label="Pages in this guide">
+<h4>This guide</h4>
+<ul><li><a href="index.html">Overview</a></li>
+<li><a href="roles-and-access.html">Roles and access</a></li>
+<li><a href="apps-create-and-edit.html">Create, edit, list apps</a></li>
+<li><a href="status-lifecycle.html">Status lifecycle</a></li>
+<li><a href="logo.html">Logo</a></li>
+<li><a href="capabilities.html" class="current">Capabilities</a><ul><li><a href="#overview">Overview</a></li><li><a href="#catalog">The catalog</a></li><li><a href="#states">States and reasons</a></li><li><a href="#side-effects">Side effect: default notification limits</a></li><li><a href="#endpoints">Endpoints</a></li><li><a href="#notify-effects">How the notify.* capabilities act on partner sends</a></li><li><a href="#not-built">Not built yet</a></li></ul></li>
+<li><a href="notification-limits.html">Notification limits</a></li>
+<li><a href="environments-and-ips.html">Environments and IPs</a></li>
+<li><a href="partner-keys.html">Partner keys</a></li>
+<li><a href="templates.html">Templates</a></li>
+<li><a href="payment-settings.html">Payment settings</a></li>
+<li><a href="notification-log-and-usage.html">Notification log and usage</a></li>
+<li><a href="reviews-reports-audit.html">Reviews, reports, audit</a></li>
+<li><a href="runbooks.html">Runbooks</a></li>
+<li><a href="errors.html">Errors</a></li>
+<li><a href="known-issues.html">Known issues</a></li>
+</ul></nav>
+<main>
+<h1>Capabilities</h1>
+<p class="lead">What a mini app may ask for: the catalog, granting, denying and suspending, reasons, and what each capability does.</p>
+<h2 id="overview">Overview</h2>
+<p>A <strong>capability</strong> is one thing a mini app is allowed to ask for: a piece of user data, a kind of location, the right to send SMS, the right to ask for a payment. By default an app has none. Staff grant them one by one, and can deny or suspend them again. The capabilities that are <em>granted</em> are what the user sees on the app's detail page ("this app can ..." with the reason you wrote), and, for the three <code>notify.*</code> capabilities, what the notification service enforces on every partner call.</p>
+<div class="callout why"><span class="label">Why this exists</span>Least privilege: a partner gets only what its product needs, each grant is a deliberate, audited decision, and any sensitive grant must come with a plain-language reason that is shown to users. Suspending is the quick brake when a partner misuses one capability but the rest of the app should keep working.</div>
+<h2 id="catalog">The catalog</h2>
+<div class="table-wrap"><table><thead><tr><th>Key</th><th>Description (from the catalog)</th><th>Reason required to grant</th><th>What it enables for the mini app</th><th>Today</th></tr></thead><tbody><tr><td><code>user.basic</code></td><td>Pseudonymous id and display name</td><td>no</td><td>Pseudonymous id and display name of the user. The in-app bridge will give the app these once a user opens it.</td><td>Shown on the detail page; not enforced yet (no bridge).</td></tr><tr><td><code>user.full_name</code></td><td>The user's first and last name</td><td>yes</td><td>First and last name of the user.</td><td>Shown on the detail page with your reason; not enforced yet.</td></tr><tr><td><code>user.contact</code></td><td>The user's phone number and email</td><td>yes</td><td>The user's phone number and email.</td><td>Shown with your reason; not enforced yet.</td></tr><tr><td><code>user.address</code></td><td>One saved address the user picks</td><td>yes</td><td>One saved address that the user picks.</td><td>Shown with your reason; not enforced yet.</td></tr><tr><td><code>location.coarse</code></td><td>City-level location</td><td>yes</td><td>City-level location.</td><td>Shown with your reason; not enforced yet.</td></tr><tr><td><code>location.fine</code></td><td>Precise location, foreground only</td><td>yes</td><td>Precise location, only while the app is in the foreground.</td><td>Shown with your reason; not enforced yet.</td></tr><tr><td><code>pay.request</code></td><td>Ask the user to pay (currencies and limits in payment settings)</td><td>yes</td><td>Ask the user to pay. Currencies and limits come from the payment settings.</td><td>Shown with your reason; payments are not built yet.</td></tr><tr><td><code>notify.inapp</code></td><td>Send in-app notifications (inbox + push) to users</td><td>no</td><td>Send in-app notifications (inbox entry plus push) to users, using IN_APP templates.</td><td><strong>Enforced</strong>: without it an IN_APP send is refused (<code>403 capability_not_granted</code>).</td></tr><tr><td><code>notify.sms</code></td><td>Send SMS to users (costs money; capped)</td><td>no</td><td>Send SMS to users with DIRECT templates. Costs real money, so it is capped.</td><td><strong>Enforced</strong> on every send.</td></tr><tr><td><code>notify.email</code></td><td>Send email to users</td><td>no</td><td>Send email to users with DIRECT templates.</td><td><strong>Enforced</strong> on every send.</td></tr></tbody></table></div>
+<p>The first four columns are what <code>GET /admin/api/v1/capabilities</code> returns (plus the extra explanation). The catalog is fixed in the code: staff cannot invent a capability, and an unknown key is refused (<code>unknown capability</code>).</p>
+<div class="callout warn"><span class="label">Be clear with partners</span><p>Only the <code>notify.*</code> capabilities change what the platform does today. <code>user.*</code>, <code>location.*</code> and <code>pay.request</code> are recorded, audited and shown to users, but no service checks them yet because the in-app bridge and the payment feature are not built. Grant them anyway when the product needs them, so that the consent text users see is already right when the bridge ships.</p></div>
+<h2 id="states">States and reasons</h2>
+<div class="table-wrap"><table><thead><tr><th>State</th><th>Meaning</th><th>Effect today</th></tr></thead><tbody><tr><td><code>GRANTED</code></td><td>The app may use it.</td><td>Counts for the notification checks; listed to users in the catalog with its description and reason.</td></tr><tr><td><code>DENIED</code></td><td>Reviewed and refused (or never approved).</td><td>Not usable; not shown to users. The reason you write is kept for staff.</td></tr><tr><td><code>SUSPENDED</code></td><td>Was granted, switched off for now (misuse, investigation).</td><td>Not usable; not shown to users. Switch back with GRANTED.</td></tr></tbody></table></div>
+<ul><li>A capability that has never been set is simply not granted (default deny). There is no "delete": set DENIED.</li><li>DENIED and SUSPENDED behave the same for the platform; the difference is the story you tell staff and the audit trail.</li><li><strong>Reasons</strong> are objects like <code>{"en": "To show technicians near you.", "am": "..."}</code> (en, am, om). When you GRANT a capability whose <code>reasonRequired</code> is true (<code>user.full_name</code>, <code>user.contact</code>, <code>user.address</code>, <code>location.coarse</code>, <code>location.fine</code>, <code>pay.request</code>) an <strong>English reason of at least 10 characters</strong> is required; Amharic and Oromo are optional but recommended. Write it for the user ("To show technicians near you"), not for engineers: it is shown verbatim.</li><li>Reasons are optional for the other capabilities and for DENIED or SUSPENDED (stored, not shown to users).</li></ul>
+<h4>What users see</h4>
+<p>In the user-facing catalog detail (<code>GET /api/v1/apps/{slug}</code>) the app carries a <code>permissions</code> list with only the GRANTED capabilities, each with its description and your reasons. The client renders it as the consent text. From the throwaway app:</p>
+<pre class="out"><code>[
+  {
+    "capability": "location.coarse",
+    "description": "City-level location",
+    "reason": {
+      "am": "በአቅራቢያዎ ያሉ ባለሙያዎችን ለማሳየት።",
+      "en": "To show technicians near you."
+    }
+  },
+  {
+    "capability": "notify.email",
+    "description": "Send email to users",
+    "reason": {}
+  },
+  {
+    "capability": "notify.inapp",
+    "description": "Send in-app notifications (inbox + push) to users",
+    "reason": {}
+  },
+  {
+    "capability": "notify.sms",
+    "description": "Send SMS to users (costs money; capped)",
+    "reason": {}
+  },
+  {
+    "capability": "user.basic",
+    "description": "Pseudonymous id and display name",
+    "reason": {}
+  }
+]</code></pre>
+<h2 id="side-effects">Side effect: default notification limits</h2>
+<p>Granting <code>notify.sms</code>, <code>notify.email</code> or <code>notify.inapp</code> also creates that channel's notification limits with conservative defaults, <strong>but only if the app has no limits for that channel yet</strong> (existing limits are never touched, and suspending or denying never removes them). An admin raises them per app later (see <a href="notification-limits.html">Notification limits</a>).</p>
+<div class="table-wrap"><table><thead><tr><th>Capability granted</th><th>Channel</th><th>maxPerUserPerDay</th><th>maxPerDay</th><th>maxDistinctUsersPerDay</th><th>maxTotal</th></tr></thead><tbody><tr><td><code>notify.sms</code></td><td>SMS</td><td>3</td><td>100</td><td>100</td><td>1000</td></tr><tr><td><code>notify.email</code></td><td>EMAIL</td><td>5</td><td>500</td><td>500</td><td>10000</td></tr><tr><td><code>notify.inapp</code></td><td>IN_APP</td><td>20</td><td>10000</td><td>10000</td><td>null (no lifetime cap)</td></tr></tbody></table></div>
+<p>Real result of granting <code>notify.inapp</code> to the throwaway app: the capability row, and the limits row that appeared with it:</p>
+<pre class="out"><code>{
+  "capabilities": [
+    {
+      "capability": "notify.inapp",
+      "state": "GRANTED",
+      "reason": {},
+      "updatedAt": "2026-10-26T11:05:20.774853Z"
+    }
+  ],
+  "notificationLimits": [
+    {
+      "channel": "IN_APP",
+      "maxPerUserPerDay": 20,
+      "maxPerDay": 10000,
+      "maxDistinctUsersPerDay": 10000,
+      "maxTotal": null
+    }
+  ]
+}</code></pre>
+<h2 id="endpoints">Endpoints</h2>
+<details class="endpoint" id="ep-catalog" open><summary><span class="method m-get">GET</span><span class="path">/admin/api/v1/capabilities</span><span class="sum">The catalog of capabilities</span></summary><div class="body"><dl class="meta"><dt>Who may call</dt><dd>Any staff role</dd><dt>Auth</dt><dd>Staff session Bearer token at assurance level aal2 (<code>Authorization: Bearer $TOKEN</code>)</dd><dt>Rate limit</dt><dd>300 requests per minute per client IP at the gateway (HTTP 429 beyond that)</dd><dt>Backoffice</dt><dd>App &gt; Capabilities (the table), System page (catalog section)</dd><dt>Audit name</dt><dd>none (read)</dd><dt>Reversible</dt><dd>n/a</dd></dl>
+<p><strong>Purpose.</strong> The list of capabilities that exist, with their descriptions and whether a reason is required. <strong>When to use it.</strong> To build the capability picker (the backoffice does), or to check the key names before a script.</p>
+<pre><code>curl -sS -X GET "$GATEWAY/admin/api/v1/capabilities" \
+  -H "Authorization: Bearer $TOKEN"</code></pre>
+<pre class="out"><code>HTTP 200 OK
+
+[
+  {
+    "key": "user.basic",
+    "description": "Pseudonymous id and display name",
+    "reasonRequired": false
+  },
+  {
+    "key": "user.full_name",
+    "description": "The user's first and last name",
+    "reasonRequired": true
+  },
+  {
+    "key": "user.contact",
+    "description": "The user's phone number and email",
+    "reasonRequired": true
+  },
+  {
+    "key": "user.address",
+    "description": "One saved address the user picks",
+    "reasonRequired": true
+  },
+  {
+    "key": "location.coarse",
+    "description": "City-level location",
+    "reasonRequired": true
+  },
+  {
+    "key": "location.fine",
+    "description": "Precise location, foreground only",
+    "reasonRequired": true
+  },
+  {
+    "key": "pay.request",
+    "description": "Ask the user to pay (currencies and limits in payment settings)",
+    "reasonRequired": true
+  },
+  {
+    "key": "notify.inapp",
+    "description": "Send in-app notifications (inbox + push) to users",
+    "reasonRequired": false
+  },
+  {
+    "key": "notify.sms",
+    "description": "Send SMS to users (costs money; capped)",
+    "reasonRequired": false
+  },
+  {
+    "key": "notify.email",
+    "description": "Send email to users",
+    "reasonRequired": false
+  }
+]</code></pre>
+<p>No parameters. The list is the same for every app.</p>
+</div></details>
+<details class="endpoint" id="ep-capability-set" open><summary><span class="method m-put">PUT</span><span class="path">/admin/api/v1/apps/{appId}/capabilities/{capability}</span><span class="sum">Grant, deny or suspend a capability</span></summary><div class="body"><dl class="meta"><dt>Who may call</dt><dd>ADMIN or SUPER_ADMIN</dd><dt>Auth</dt><dd>Staff session Bearer token at assurance level aal2 (<code>Authorization: Bearer $TOKEN</code>)</dd><dt>Rate limit</dt><dd>300 requests per minute per client IP at the gateway (HTTP 429 beyond that)</dd><dt>Backoffice</dt><dd>App &gt; <em>Capabilities</em> (Edit button per row: state, reason in English / Amharic / Afaan Oromoo)</dd><dt>Audit name</dt><dd><code>capability.set</code> (meta: capability, state)</dd><dt>Reversible</dt><dd>Yes: set the previous state again</dd></dl>
+<p><strong>Purpose.</strong> Sets the state of one capability for one app, and (when granting) the reason users will read. The call <strong>replaces</strong> that capability's state and reason; it is an upsert, not a patch. <strong>When to use it.</strong> To approve what a partner asked for, to refuse it, or to suspend a capability during a misuse investigation.</p>
+<h4>Path and body</h4>
+<div class="table-wrap"><table><thead><tr><th>Name</th><th>Where</th><th>Type</th><th>Required</th><th>Meaning</th></tr></thead><tbody><tr><td><code>appId</code></td><td>path</td><td>UUID</td><td>yes</td><td>The app.</td></tr><tr><td><code>capability</code></td><td>path</td><td>string</td><td>yes</td><td>A key from the catalog, e.g. <code>location.coarse</code>.</td></tr><tr><td><code>state</code></td><td>body</td><td>string</td><td>yes</td><td><code>GRANTED</code>, <code>DENIED</code> or <code>SUSPENDED</code> (any letter case).</td></tr><tr><td><code>reason</code></td><td>body</td><td>object</td><td>required when granting a capability that needs one</td><td>Texts per language (<code>en</code>, <code>am</code>, <code>om</code>); <code>en</code> at least 10 characters when required.</td></tr><tr><td>(anything else)</td><td>body</td><td>-</td><td>-</td><td>Any other body field is refused with <code>unknown field</code>.</td></tr></tbody></table></div>
+<p>Grant a capability that needs a reason:</p>
+<pre><code>curl -sS -X PUT "$GATEWAY/admin/api/v1/apps/$APP_ID/capabilities/location.coarse" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+  "state": "GRANTED",
+  "reason": {
+    "en": "To show technicians near you.",
+    "am": "በአቅራቢያዎ ያሉ ባለሙያዎችን ለማሳየት።"
+  }
+}'</code></pre>
+<h4>Response (HTTP 200)</h4>
+<p>The full app detail (<a href="apps-create-and-edit.html#ep-get">same as GET</a>); the <code>capabilities</code> list after this call:</p>
+<pre class="out"><code>HTTP 200 OK
+
+{
+  "capabilities": [
+    {
+      "capability": "location.coarse",
+      "state": "GRANTED",
+      "reason": {
+        "am": "በአቅራቢያዎ ያሉ ባለሙያዎችን ለማሳየት።",
+        "en": "To show technicians near you."
+      },
+      "updatedAt": "2026-10-26T11:05:20.761439Z"
+    },
+    {
+      "capability": "user.basic",
+      "state": "GRANTED",
+      "reason": {},
+      "updatedAt": "2026-10-26T11:05:20.747871Z"
+    }
+  ]
+}</code></pre>
+<p>Suspend one (SMS) and deny another (payments, with an internal note):</p>
+<pre><code>curl -sS -X PUT "$GATEWAY/admin/api/v1/apps/$APP_ID/capabilities/notify.sms" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+  "state": "SUSPENDED"
+}'</code></pre>
+<pre class="out"><code>HTTP 200 OK  (capabilities rows of interest)
+
+[
+  {
+    "capability": "notify.sms",
+    "state": "SUSPENDED",
+    "reason": {},
+    "updatedAt": "2026-10-26T11:05:20.814565Z"
+  }
+]
+
+[
+  {
+    "capability": "pay.request",
+    "state": "DENIED",
+    "reason": {
+      "en": "Not approved yet"
+    },
+    "updatedAt": "2026-10-26T11:05:20.826991Z"
+  }
+]</code></pre>
+<p>Suspending SMS left the SMS limits in place: <code>notificationLimits</code> in the same response still holds the SMS row:</p>
+<pre class="out"><code>[
+  {
+    "channel": "EMAIL",
+    "maxPerUserPerDay": 5,
+    "maxPerDay": 500,
+    "maxDistinctUsersPerDay": 500,
+    "maxTotal": 10000
+  },
+  {
+    "channel": "IN_APP",
+    "maxPerUserPerDay": 20,
+    "maxPerDay": 10000,
+    "maxDistinctUsersPerDay": 10000,
+    "maxTotal": null
+  },
+  {
+    "channel": "SMS",
+    "maxPerUserPerDay": 3,
+    "maxPerDay": 100,
+    "maxDistinctUsersPerDay": 100,
+    "maxTotal": 1000
+  }
+]</code></pre>
+<h4>Errors</h4>
+<div class="table-wrap"><table><thead><tr><th>Status</th><th><code>error</code></th><th>When it happens</th><th>What to do</th></tr></thead><tbody><tr><td>400</td><td><code>validation_failed</code></td><td>Unknown capability key; state not one of the three; reason missing/too short when required; unsupported language in <code>reason</code>; unknown field.</td><td>Read <code>fields</code>.</td></tr><tr><td>403</td><td><code>insufficient_role</code></td><td>VIEWER.</td><td>Use an ADMIN.</td></tr><tr><td>404</td><td><code>not_found</code></td><td>No such app.</td><td>Check the id.</td></tr></tbody></table></div>
+<pre class="out nocopy"><code>PUT /admin/api/v1/apps/$APP_ID/capabilities/user.shoe_size  {"state":"GRANTED"}
+HTTP 400  {"error": "validation_failed", "fields": {"capability": "unknown capability 'user.shoe_size'"}}
+
+PUT /admin/api/v1/apps/$APP_ID/capabilities/location.coarse  {"state":"GRANTED"}
+HTTP 400  {"error": "validation_failed", "fields": {"reason": "required for location.coarse: a plain-language English reason (min 10 chars) shown to users, e.g. 'To show technicians near you'"}}
+
+PUT /admin/api/v1/apps/$APP_ID/capabilities/user.basic  {"state":"ALLOWED","extra":1}
+HTTP 400  {"error": "validation_failed", "fields": {"extra": "unknown field", "state": "must be GRANTED, DENIED or SUSPENDED"}}
+
+PUT /admin/api/v1/apps/$APP_ID/capabilities/user.basic  {"state":"DENIED"}
+HTTP 403  {"error": "insufficient_role"}</code></pre>
+<h4>Effects, audit, gotchas</h4>
+<ul><li>Audit: <code>capability.set</code>, meta <code>{"capability": "notify.sms", "state": "SUSPENDED"}</code> (the reason text is not in the audit event; it is stored on the capability).</li><li>Takes effect in the notification service within about 15 seconds. After you suspend <code>notify.sms</code>, new DIRECT sends are not made by SMS (see the next section).</li><li>Messages already accepted keep their channel; they are not re-routed when a capability changes later.</li><li>To remove a grant, set DENIED (or SUSPENDED if it should come back).</li><li>The reason of a GRANTED capability is shown to users verbatim: re-read it before saving. Changing it later is another PUT with the same state and a new reason.</li></ul>
+<h4>Scenario</h4>
+<p>A home-services partner asks for city-level location. You grant <code>location.coarse</code> with "To show technicians near you" and the Amharic text. Users who open the app's details now see that line. Later you find the partner sends too many SMS: you suspend <code>notify.sms</code> only, and tell them to use in-app messages until you re-grant it.</p>
+</div></details>
+<h2 id="notify-effects">How the notify.* capabilities act on partner sends</h2>
+<p>The partner never chooses a channel. The template kind and the user's contact details decide, and the capabilities gate each channel:</p>
+<div class="table-wrap"><table><thead><tr><th>Template kind</th><th>Channel chosen</th><th>Needs</th></tr></thead><tbody><tr><td><code>IN_APP</code></td><td>IN_APP (inbox entry plus push to the user's devices)</td><td><code>notify.inapp</code> GRANTED, else <code>403 capability_not_granted</code> (with <code>capability: notify.inapp</code>).</td></tr><tr><td><code>DIRECT</code></td><td>SMS if the user has a phone and <code>notify.sms</code> is granted; otherwise EMAIL if the user has an email and <code>notify.email</code> is granted</td><td>At least one of the two matching capabilities. If the user's reachable contact needs a capability that is not granted: <code>403 capability_not_granted</code>; if no contact fits: <code>422 user_unreachable</code>.</td></tr></tbody></table></div>
+<p>Real partner-side results from the test (the DIRECT template to a test user who has both a phone and an email):</p>
+<pre class="out nocopy"><code>notify.sms SUSPENDED, notify.email GRANTED -&gt; falls back to email:
+HTTP 202  channel: EMAIL
+
+both SUSPENDED:
+HTTP 403  {"error": "capability_not_granted", "capability": "notify.sms"}
+
+both GRANTED again -&gt; SMS:
+HTTP 202  channel: SMS</code></pre>
+<p>So <strong>suspending SMS alone can quietly move a partner's traffic to email</strong>; suspend both channels if you want the DIRECT sends to stop.</p>
+<h2 id="not-built">Not built yet</h2>
+<ul><li>Enforcement of <code>user.*</code>, <code>location.*</code> and <code>pay.request</code>, and the per-user consent step (they arrive with the in-app bridge).</li><li>A history view of a capability's old reasons (only the audit log shows that it changed).</li><li>Adding new capability keys without a code change.</li></ul>
+
+<div class="pager"><a class="prev" href="logo.html"><small>Previous</small>Logo</a><a class="next" href="notification-limits.html"><small>Next</small>Notification limits</a></div>
+<p class="footer">Admin guide: managing mini apps. Examples were captured from a running dev stack (ADERA_ENV=dev) with a throwaway app and a temporary staff account, both removed afterwards. Ids, timestamps and key ids differ on your system.</p>
+</main>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

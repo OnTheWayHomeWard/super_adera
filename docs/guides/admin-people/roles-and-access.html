@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Staff sign-in, roles and permissions | Admin: users, staff, moderation and audit</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+<button id="menu-btn" type="button" aria-label="Toggle menu">Menu</button>
+<span class="brand">Admin: users, staff, moderation and audit</span>
+<span class="spacer"></span>
+<button id="theme-btn" type="button" aria-label="Toggle light or dark theme">Theme</button>
+</header>
+<div class="layout">
+<nav class="sidebar" aria-label="Pages in this guide"><h4>Admin: users, staff, moderation and audit</h4><ul><li><a href="index.html">Overview and conventions</a></li>
+<li><a href="roles-and-access.html" class="current">Staff sign-in, roles and permissions</a><ul><li><a href="#overview">Overview</a></li><li><a href="#auth">Staff authentication</a></li><li><a href="#levels">What each step answers</a></li><li><a href="#session">Session handling</a></li><li><a href="#roles">The three roles</a></li><li><a href="#matrix">Permission matrix</a></li><li><a href="#masking">Masking rules for VIEWER</a></li><li><a href="#me">GET /me</a></li><li><a href="#headers">What the gateway adds</a></li></ul></li>
+<li><a href="dashboard.html">Dashboard, system and health</a></li>
+<li><a href="users.html">Registered users</a></li>
+<li><a href="moderation-reviews.html">Moderation: reviews</a></li>
+<li><a href="moderation-reports.html">Moderation: reports</a></li>
+<li><a href="staff.html">Staff management</a></li>
+<li><a href="audit-log.html">Audit log</a></li>
+<li><a href="notifications-overview.html">Notification visibility</a></li>
+<li><a href="runbooks.html">Runbooks</a></li>
+<li><a href="errors.html">Error codes</a></li>
+<li><a href="known-issues.html">Known issues and not built yet</a></li>
+</ul></nav>
+<main>
+<h1>Staff sign-in, roles and permissions</h1>
+<p class="lead">How staff authenticate for the admin API (<code>aal1</code> versus <code>aal2</code>), what the three roles can do, and a verified permission matrix for every admin endpoint.</p>
+<section><h2 id="overview">Overview</h2>
+<p>Every staff call goes through the gateway. Before it reaches a service the gateway asks registry-service (which asks Kratos) whether the caller is an <strong>active staff member</strong> with a valid session that completed the <strong>authenticator-app step</strong>. The gateway then forwards the request with the caller's id and role, and each endpoint decides whether that role is enough. This page covers the sign-in, the three roles, and the full permission matrix for every admin endpoint.</p>
+<div class="callout why"><span class="label">Why two steps</span><p>The admin API can suspend customers, hide reviews, change who may send SMS and add other admins. A stolen emailed code must not be enough on its own, so a staff session only works after the authenticator-app code was also entered. Kratos names that level <code>aal2</code>; a session with only the emailed code is <code>aal1</code>.</p></div></section>
+<section><h2 id="auth">Staff authentication for API use</h2>
+<p>Staff sign in with <strong>passwordless email codes plus an authenticator app (TOTP)</strong>. There are no passwords. The sign-in is a Kratos native (API) flow under <code>$GATEWAY/kratos</code>. The backoffice screen <em>Login</em> performs the same steps for people; a script does them like this:</p>
+<ol><li><strong>Emailed code.</strong> <code>GET /kratos/self-service/login/api</code> returns a flow id. <code>POST /kratos/self-service/login?flow=&lt;id&gt;</code> with <code>{"method":"code","identifier":"you@company.com"}</code> emails a 6-digit code (valid 5 minutes). POST again with the same body plus <code>"code":"123456"</code> to receive <code>session_token</code>. That session is <strong>aal1</strong>.</li><li><strong>First time only: enrol the authenticator.</strong> With the aal1 token (<code>Authorization: Bearer ...</code>) call <code>GET /kratos/self-service/settings/api</code>. The flow's node <code>totp_secret_key</code> holds the secret (the backoffice also draws it as a QR code). Add it to an authenticator app, then <code>POST /kratos/self-service/settings?flow=&lt;id&gt;</code> with <code>{"method":"totp","totp_code":"&lt;6 digits&gt;"}</code>. Right after enrolment the same session is already aal2. Settings changes need a session younger than 15 minutes.</li><li><strong>Every later sign-in: upgrade to aal2.</strong> After the emailed code call <code>GET /kratos/self-service/login/api?aal=aal2&amp;refresh=false</code> with header <code>X-Session-Token: &lt;aal1 token&gt;</code>, then <code>POST /kratos/self-service/login?flow=&lt;id&gt;</code> with <code>{"method":"totp","totp_code":"&lt;6 digits&gt;"}</code> and the same header. The response carries the aal2 <code>session_token</code>.</li><li><strong>Call the admin API</strong> with <code>Authorization: Bearer $TOKEN</code> (the aal2 token). There is no separate staff API key.</li></ol>
+<p>The Kratos request and response bodies are Kratos' own; the Python helper <code>tests/e2e/staff.py</code> in the repository is a working reference (<code>email_login</code>, <code>enrol_totp</code>, <code>upgrade_to_aal2</code>). Kratos refuses an authenticator code it has already accepted, so wait for the next 30-second window before reusing the app. Gateway limits: <strong>10 login-step submits per minute per IP</strong> (everyone behind one office address shares it), 300 admin calls per minute per IP. In DEV the emailed code is readable at the Mailpit inbox (http://127.0.0.1:8025) or the dev endpoint <code>/dev/messages</code> of notification-service; nothing real is sent.</p>
+</section>
+<section><h2 id="levels">What each step answers</h2>
+<p>Real answers from the running stack (calling <code>GET /admin/api/v1/me</code>, which any staff role may call):</p>
+<h3 id="lv-none">No token</h3><pre><code>curl -sS -i "$GATEWAY/admin/api/v1/me"</code></pre><pre class="out"><code>HTTP/1.1 401 Unauthorized
+
+{
+  "error": "unauthorized"
+}</code></pre><h3 id="lv-aal1">Emailed code only (aal1)</h3><pre><code>curl -sS -i "$GATEWAY/admin/api/v1/me" -H "Authorization: Bearer $AAL1_TOKEN"</code></pre><pre class="out"><code>HTTP/1.1 403 Forbidden
+
+{
+  "error": "mfa_required"
+}</code></pre><h3 id="lv-nonstaff">A customer's session</h3><p>A valid session of an ordinary Adera user (the app's own users sign in to the same Kratos) is not staff:</p>
+<pre class="out"><code>HTTP/1.1 403 Forbidden
+
+{
+  "error": "not_staff"
+}</code></pre><h3 id="lv-ok">Staff, aal2</h3><pre><code>curl -sS -i "$GATEWAY/admin/api/v1/me" -H "Authorization: Bearer $TOKEN"</code></pre><pre class="out"><code>HTTP/1.1 200 OK
+
+{
+  "role": "VIEWER",
+  "id": "8834038d-18f3-4777-8f44-3aa6e641f2d9"
+}</code></pre><div class="table-wrap"><table><thead><tr><th>Situation</th><th>Answer</th><th>What to do</th></tr></thead><tbody><tr><td>No header, garbage, expired or revoked token</td><td><code>401 unauthorized</code></td><td>Sign in again.</td></tr><tr><td>Valid session, authenticator step missing (aal1)</td><td><code>403 mfa_required</code></td><td>Do the authenticator step; if the account has no authenticator yet, enrol one (step 2).</td></tr><tr><td>Valid session, account is not an active staff member (every customer, or a deactivated colleague)</td><td><code>403 not_staff</code></td><td>A super admin must add or reactivate the account.</td></tr><tr><td>Active staff, aal2, role too low for the endpoint</td><td><code>403 insufficient_role</code> (from the service)</td><td>Use a higher role.</td></tr><tr><td>Kratos unreachable</td><td><code>503</code> (gateway) or <code>503 identity_service_unavailable</code></td><td>Retry; check Kratos on the System page.</td></tr><tr><td>Rate limit</td><td><code>429</code></td><td>Wait; the window is one minute.</td></tr></tbody></table></div><div class="callout warn"><span class="label">Order of checks</span><p>A deactivated colleague who still has an authenticator enrolled gets <code>mfa_required</code> at aal1 and <code>not_staff</code> only after the authenticator step (verified). Do not read <code>mfa_required</code> as proof that the account is still staff.</p></div></section>
+<section><h2 id="session">Session handling</h2>
+<ul><li><strong>Lifetime.</strong> A Kratos session lasts 720 hours (30 days) after sign-in (<code>session.lifespan</code> in <code>infra/kratos/kratos.yml</code>). The token is the Kratos <em>session token</em>; the backoffice keeps it in the browser tab.</li><li><strong>The role is read on every call.</strong> It lives in the Kratos identity (<code>metadata_public.role</code>), which only the Kratos admin API can write (a user cannot edit it through any self-service flow). A role change therefore applies to the very next request, with no new sign-in. The staff row (status ACTIVE or DISABLED) is read on every call too.</li><li><strong>Deactivation revokes every session</strong> of that person immediately: their next call answers <code>401</code> (verified in the Staff runbook).</li><li><strong>Sign-out.</strong> Kratos native logout: <code>DELETE /kratos/self-service/logout/api</code> with <code>{"session_token":"$TOKEN"}</code>. Afterwards the token answers <code>401</code>.</li><li><strong>Sign-ins are not audited.</strong> The audit log records changes made through the admin API, not logins or logouts.</li><li><strong>Lost authenticator.</strong> There is no self-service recovery and no dashboard button; see the lost-authenticator runbook.</li></ul>
+</section>
+<section><h2 id="roles">The three roles</h2>
+<div class="table-wrap"><table><thead><tr><th>Role</th><th>Intended for</th><th>Can</th></tr></thead><tbody><tr><td><code>VIEWER</code></td><td>Support and read-only colleagues</td><td>Read everything the dashboard shows except the audit log and the staff list. Personal data of users is masked. Cannot change anything.</td></tr><tr><td><code>ADMIN</code></td><td>Operators who run mini apps and moderation</td><td>Everything a viewer can, plus see full user contact data, read the audit log, and make changes: create and edit apps, keys, limits, templates, moderate reviews and reports, suspend/reactivate/delete users.</td></tr><tr><td><code>SUPER_ADMIN</code></td><td>The owner and a few trusted people</td><td>Everything an admin can, plus manage staff (list, add, change role, deactivate) and move a KILLED app back to another status.</td></tr></tbody></table></div><p>Higher ranks include everything below. Keep at least two super admins so that losing one authenticator does not lock you out (see the runbooks).</p>
+</section>
+<section><h2 id="matrix">Permission matrix (every admin endpoint)</h2>
+<p>Verified from the controllers (<code>role.require(...)</code> calls in registry-service, user-service and notification-service). <span class="badge built">any</span> means any active staff role at aal2. Endpoints about configuring one mini app are listed for completeness; they are documented in the mini-app administration guide.</p>
+<div class="table-wrap"><table><thead><tr><th>Endpoint</th><th>Backoffice screen</th><th>VIEWER</th><th>ADMIN</th><th>SUPER_ADMIN</th></tr></thead><tbody><tr><td><code>GET /me</code></td><td>(header, role badge)</td><td>yes</td><td>yes</td><td>yes</td></tr><tr><td><code>GET /dashboard</code>, <code>GET /system</code></td><td>Dashboard, System</td><td>yes</td><td>yes</td><td>yes</td></tr><tr><td><code>GET /backoffice/api/health/{service}</code></td><td>System</td><td>yes</td><td>yes</td><td>yes</td></tr><tr><td><code>GET /capabilities</code></td><td>System (Capability catalog)</td><td>yes</td><td>yes</td><td>yes</td></tr><tr><td><code>GET /apps</code>, <code>/apps/{id}</code>, <code>/apps/{id}/keys</code>, <code>/apps/{id}/reviews</code></td><td>Apps</td><td>yes</td><td>yes</td><td>yes</td></tr><tr><td><code>POST /apps</code>, <code>PATCH /apps/{id}</code>, <code>POST/DELETE /apps/{id}/logo</code></td><td>Apps</td><td>403</td><td>yes</td><td>yes</td></tr><tr><td><code>POST /apps/{id}/status</code></td><td>App detail</td><td>403</td><td>yes (not out of KILLED)</td><td>yes (also out of KILLED)</td></tr><tr><td><code>PUT /apps/{id}/capabilities/{c}</code>, <code>/payment-settings</code>, <code>/notification-limits/{ch}</code>, <code>/environments/{env}</code></td><td>App detail tabs</td><td>403</td><td>yes</td><td>yes</td></tr><tr><td><code>POST /apps/{id}/keys</code>, <code>/keys/generate</code>, <code>DELETE /apps/{id}/keys/{keyId}</code></td><td>App detail, Keys</td><td>403</td><td>yes</td><td>yes</td></tr><tr><td><code>GET /reviews</code>, <code>GET /reports</code></td><td>Moderation</td><td>yes</td><td>yes</td><td>yes</td></tr><tr><td><code>PATCH /reviews/{id}</code>, <code>PATCH /reports/{id}</code></td><td>Moderation</td><td>403</td><td>yes</td><td>yes</td></tr><tr><td><code>GET /users</code>, <code>/users/stats</code>, <code>/users/{id}</code></td><td>Users</td><td>yes, masked</td><td>yes, full</td><td>yes, full</td></tr><tr><td><code>POST /users/{id}/status</code></td><td>User detail</td><td>403</td><td>yes</td><td>yes</td></tr><tr><td><code>GET /notification/notifications</code>, <code>/{id}</code>, <code>/stats</code>, <code>/usage</code></td><td>Notifications; Dashboard</td><td>yes</td><td>yes</td><td>yes</td></tr><tr><td><code>GET /notification/templates</code>, <code>/{id}</code></td><td>App detail, Templates</td><td>yes</td><td>yes</td><td>yes</td></tr><tr><td><code>POST /notification/templates</code>, <code>PATCH /notification/templates/{id}</code></td><td>App detail, Templates</td><td>403</td><td>yes</td><td>yes</td></tr><tr><td><code>GET /audit</code></td><td>Audit log</td><td>403</td><td>yes</td><td>yes</td></tr><tr><td><code>GET /staff</code>, <code>POST /staff</code>, <code>PATCH /staff/{id}</code></td><td>Staff</td><td>403</td><td>403</td><td>yes</td></tr></tbody></table></div><p>All paths are under <code>/admin/api/v1</code>. The backoffice hides what a role cannot do (menu entries Staff and Audit log, action buttons) but the server is the authority; the 403 answers are verified below.</p>
+<h3 id="mx-403">What a refused call looks like</h3><pre><code>curl -sS -i -X POST "$GATEWAY/admin/api/v1/users/$USER_ID/status" \
+  -H "Authorization: Bearer $VIEWER_TOKEN" -H "Content-Type: application/json" \
+  -d '{"status":"SUSPENDED","reason":"doc test"}'</code></pre><pre class="out"><code>HTTP/1.1 403 Forbidden
+
+{
+  "error": "insufficient_role"
+}</code></pre><p>The same <code>403 insufficient_role</code> answers <code>GET /audit</code>, <code>GET /staff</code>, <code>POST /staff</code>, <code>PATCH /reviews/{id}</code> and <code>PATCH /reports/{id}</code> for a viewer (all verified). The role is checked before the request body is validated, so a viewer never learns about field errors.</p>
+</section>
+<section><h2 id="masking">Masking rules for VIEWER</h2>
+<p>Applied by user-service to every user response (list and detail). The response says so: <code>"masked": true</code> on the detail. A viewer sees:</p>
+<div class="table-wrap"><table><thead><tr><th>Field</th><th>ADMIN / SUPER_ADMIN</th><th>VIEWER</th></tr></thead><tbody><tr><td><code>email</code></td><td>full value</td><td>first letter, <code>***@</code>, first letter of the domain, <code>***</code> and the last domain part: <code>d***@e***.com</code>. Very short or malformed values become <code>***</code>.</td></tr><tr><td><code>phone</code></td><td>full E.164 value</td><td>country part and last four digits: <code>+251*****0015</code> (for <code>+1</code> numbers the first two characters are kept).</td></tr><tr><td><code>gender</code>, <code>dateOfBirth</code></td><td>values</td><td><code>null</code></td></tr><tr><td><code>extra</code> (free-form JSON)</td><td>the object</td><td><code>null</code>, and <code>extraKeys</code> lists only the key names</td></tr><tr><td>names, status, market, language, tier, timezone, location summary, devices, aliasCount, mute preferences</td><td>values</td><td>values (not masked)</td></tr></tbody></table></div><div class="callout warn"><span class="label">Search sees the full value</span><p>A viewer can still <em>search</em> by a full phone number or email: the search runs on the real data and returns the masked row. That lets a viewer confirm that a given phone is registered. This is how the dashboard is built today (listed in Known issues).</p></div><p>Reviews and reports show the author's user id (not masked) to every role; the id alone does not reveal contact data. The notification log never contains message values, user ids or aliases for any role.</p>
+</section>
+<section><h2 id="me">GET /me: who am I</h2>
+<details class="endpoint" id="ep-me"><summary><span class="method m-get">GET</span><span class="path">/admin/api/v1/me</span><span class="sum">The signed-in staff member's id and role</span></summary><div class="body"><dl class="meta"><dt>Why</dt><dd>Lets a client decide which screens and buttons to offer, and confirms the token is a working aal2 staff session.</dd><dt>Auth</dt><dd>Staff aal2 Bearer, any role</dd><dt>Rate limit</dt><dd>300/min/IP</dd><dt>Backoffice</dt><dd>Header badge showing your role</dd></dl><h4>Request</h4><p>No parameters, no body.</p>
+<pre><code>curl -sS "$GATEWAY/admin/api/v1/me" -H "Authorization: Bearer $TOKEN"</code></pre><h4>Response 200</h4><pre class="out"><code>HTTP/1.1 200 OK
+
+{
+  "role": "VIEWER",
+  "id": "8834038d-18f3-4777-8f44-3aa6e641f2d9"
+}</code></pre><p><code>id</code> is the Kratos identity id (the same id used as <code>actorId</code> in the audit log and <code>id</code> in the staff list). <code>role</code> is the current role.</p>
+<h4>Errors</h4><p><code>401 unauthorized</code>, <code>403 mfa_required</code>, <code>403 not_staff</code> as in the table above.</p>
+<h4>Use in a client</h4><p>Call it once after sign-in. Treat <code>mfa_required</code> as the cue to show the authenticator step, <code>not_staff</code> as the cue to sign out. Re-call it when a request answers <code>insufficient_role</code>, in case the role changed.</p>
+</div></details>
+</section>
+<section><h2 id="headers">What the gateway adds to your request</h2>
+<p>After the staff check the gateway sets <code>X-Staff-Id</code> and <code>X-Staff-Role</code> on the forwarded request, together with a shared secret and the client IP (<code>X-Client-IP</code>), and overwrites any value a client sent. Services refuse requests that did not come through the gateway. You never send these headers yourself. The audit log records the staff id, the role at that moment and the client IP of each change.</p>
+</section>
+
+<div class="pager"><a class="prev" href="index.html"><small>Previous</small>Overview and conventions</a><a class="next" href="dashboard.html"><small>Next</small>Dashboard, system and health</a></div>
+<p class="footer">Adera admin guide &middot; verified against the running dev stack on 2026-10-26</p>
+</main>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

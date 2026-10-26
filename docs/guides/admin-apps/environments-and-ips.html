@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Environments and allowed IPs | Admin: managing mini apps</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+<button id="menu-btn" type="button" aria-label="Toggle menu">Menu</button>
+<a class="brand" href="index.html">Admin: managing mini apps</a>
+<span class="spacer"></span>
+<button id="theme-btn" type="button" aria-label="Toggle light or dark theme">Theme</button>
+</header>
+<div class="layout">
+<nav class="sidebar" aria-label="Pages in this guide">
+<h4>This guide</h4>
+<ul><li><a href="index.html">Overview</a></li>
+<li><a href="roles-and-access.html">Roles and access</a></li>
+<li><a href="apps-create-and-edit.html">Create, edit, list apps</a></li>
+<li><a href="status-lifecycle.html">Status lifecycle</a></li>
+<li><a href="logo.html">Logo</a></li>
+<li><a href="capabilities.html">Capabilities</a></li>
+<li><a href="notification-limits.html">Notification limits</a></li>
+<li><a href="environments-and-ips.html" class="current">Environments and IPs</a><ul><li><a href="#overview">Overview</a></li><li><a href="#environments">DEV and PROD, and ADERA_ENV</a></li><li><a href="#cidr">Allowed server addresses</a></li><li><a href="#read">Reading the lists</a></li><li><a href="#not-built">Not built yet</a></li></ul></li>
+<li><a href="partner-keys.html">Partner keys</a></li>
+<li><a href="templates.html">Templates</a></li>
+<li><a href="payment-settings.html">Payment settings</a></li>
+<li><a href="notification-log-and-usage.html">Notification log and usage</a></li>
+<li><a href="reviews-reports-audit.html">Reviews, reports, audit</a></li>
+<li><a href="runbooks.html">Runbooks</a></li>
+<li><a href="errors.html">Errors</a></li>
+<li><a href="known-issues.html">Known issues</a></li>
+</ul></nav>
+<main>
+<h1>Environments and allowed IPs</h1>
+<p class="lead">DEV and PROD, ADERA_ENV, and the list of server addresses a partner may call from.</p>
+<h2 id="overview">Overview</h2>
+<p>Two ideas decide whether a partner's server may call Adera: <strong>which environment</strong> this deployment is, and <strong>from which addresses</strong> the call comes.</p>
+<div class="callout why"><span class="label">Why this exists</span>A partner's backend is a server with a fixed place on the internet. Allowing only its registered addresses means a stolen key is useless from anywhere else, and keeping DEV and PROD apart means a test key can never send real SMS and a production key never reaches the test system.</div>
+<h2 id="environments">DEV and PROD, and ADERA_ENV</h2>
+<ul><li>A deployment of Adera is <strong>exactly one environment</strong>, set by <code>ADERA_ENV=dev</code> or <code>ADERA_ENV=prod</code> (in the <code>.env</code> file, passed to the registry service and the notification service; both must agree). Any other value stops the service from starting; a mismatch between the two services is logged and partner calls answer <code>503 service_unavailable</code>.</li><li>The dev deployment is DEV, the production deployment is PROD, and they never run together. They are separate deployments.</li><li>Staff can store addresses and register keys for <strong>both</strong> environments on either deployment, but only the one that matches the deployment is <em>active</em>: the other is stored and ignored. A key of the other environment is refused with <code>403 wrong_environment</code>.</li><li>Usage counters, limits in effect and stored notifications always use the deployment's environment.</li><li>App status rules differ by environment (see <a href="status-lifecycle.html">Status lifecycle</a>): DEV works for any app that is not KILLED, PROD only while the app is LIVE.</li><li>Every new app starts with both environments present and <strong>empty address lists</strong>: nothing can call until you add addresses.</li><li>DEV is not an isolated simulator: it runs with the development providers (SMS printed to a console, email into a local inbox, fake push), so real users in DEV are "delivered" through those. Test users whose id starts with <code>u_p_test_</code> are simulated in DEV and refused in PROD.</li></ul>
+<details class="endpoint" id="ep-system" open><summary><span class="method m-get">GET</span><span class="path">/admin/api/v1/system</span><span class="sum">Which environment is this deployment?</span></summary><div class="body"><dl class="meta"><dt>Who may call</dt><dd>Any staff role</dd><dt>Auth</dt><dd>Staff session Bearer token at assurance level aal2 (<code>Authorization: Bearer $TOKEN</code>)</dd><dt>Rate limit</dt><dd>300 requests per minute per client IP at the gateway (HTTP 429 beyond that)</dd><dt>Backoffice</dt><dd>System page; the banners "This deployment runs DEV" on the Environments and Partner keys tabs, and the "active here" tag</dd><dt>Audit name</dt><dd>none (read)</dd><dt>Reversible</dt><dd>n/a</dd></dl>
+<p><strong>Purpose.</strong> Tells you which environment the deployment you are talking to is. <strong>When to use it.</strong> Before you change addresses or keys (so you know which list is the active one), and in tools that must not touch PROD by mistake.</p>
+<pre><code>curl -sS -X GET "$GATEWAY/admin/api/v1/system" \
+  -H "Authorization: Bearer $TOKEN"</code></pre>
+<pre class="out"><code>HTTP 200 OK
+
+{
+  "environment": "DEV"
+}</code></pre>
+</div></details>
+<h2 id="cidr">Allowed server addresses</h2>
+<p>For each app and environment there is one list of <strong>IPs or CIDR ranges</strong>. The partner's calls to <code>/v1/*</code> are accepted only when the caller's address is in the list for the deployment's environment (<code>403 ip_not_allowed</code> otherwise).</p>
+<div class="table-wrap"><table><thead><tr><th>Rule</th><th>Details</th></tr></thead><tbody><tr><td>Accepted forms</td><td>An IPv4 or IPv6 address (<code>203.0.113.10</code>), or a range in CIDR form (<code>198.51.100.0/24</code>, <code>2001:db8::/32</code>). <strong>Hostnames are not accepted</strong> and no DNS lookup is ever done.</td></tr><tr><td>Normalisation</td><td>A single address becomes a /32 (IPv4) or /128 (IPv6) range. IPv6 is written in full: <code>2001:db8::/32</code> is stored as <code>2001:db8:0:0:0:0:0:0/32</code>. Duplicates are removed (the order you sent is kept).</td></tr><tr><td>Size</td><td>At most 50 entries per environment. The list may be empty (then nothing can call).</td></tr><tr><td>The all-addresses range</td><td><code>/0</code> (for example <code>0.0.0.0/0</code>) is refused for PROD. It is accepted for DEV, where it means "any server"; avoid it unless you are testing from changing addresses.</td></tr><tr><td>Replace, not add</td><td>The PUT <strong>replaces</strong> the whole list. To add one address, send the current list plus the new one.</td></tr><tr><td>Families</td><td>An IPv4 range never matches an IPv6 caller and the reverse.</td></tr><tr><td>Which address counts</td><td>The address the gateway sees the partner's request coming from (the gateway forwards it as <code>X-Client-IP</code>, trusted only with the gateway secret). If Adera sits behind a load balancer or CDN, give the platform team the address the gateway really sees. On the dev stack, calls from the host machine arrive as the Docker bridge address (<code>172.18.0.1</code> in the capture below).</td></tr><tr><td>Order of checks</td><td>For a partner call the checks run in this order: timestamp, key exists, key usable, signature, key's environment, app usable (status), <strong>then</strong> the address. So a partner who gets <code>ip_not_allowed</code> has a valid key and signature; only the address is wrong.</td></tr></tbody></table></div>
+<details class="endpoint" id="ep-env-set" open><summary><span class="method m-put">PUT</span><span class="path">/admin/api/v1/apps/{appId}/environments/{environment}</span><span class="sum">Set the allowed server addresses</span></summary><div class="body"><dl class="meta"><dt>Who may call</dt><dd>ADMIN or SUPER_ADMIN</dd><dt>Auth</dt><dd>Staff session Bearer token at assurance level aal2 (<code>Authorization: Bearer $TOKEN</code>)</dd><dt>Rate limit</dt><dd>300 requests per minute per client IP at the gateway (HTTP 429 beyond that)</dd><dt>Backoffice</dt><dd>App &gt; <em>Environments and IPs</em>: one box per environment ("One address or range per line", at most 50), the active one marked; a Reset button reverts unsaved edits</dd><dt>Audit name</dt><dd><code>environment.set</code> (meta: environment, allowedCidrs)</dd><dt>Reversible</dt><dd>Yes: send the previous list</dd></dl>
+<p><strong>Purpose.</strong> Sets the list of allowed server addresses of one app for one environment. <strong>When to use it.</strong> During onboarding (give the partner's production server IPs), when the partner moves hosting, or to remove an address that should no longer call.</p>
+<h4>Path and body</h4>
+<div class="table-wrap"><table><thead><tr><th>Name</th><th>Where</th><th>Type</th><th>Required</th><th>Meaning</th></tr></thead><tbody><tr><td><code>appId</code></td><td>path</td><td>UUID</td><td>yes</td><td>The app.</td></tr><tr><td><code>environment</code></td><td>path</td><td>string</td><td>yes</td><td><code>DEV</code> or <code>PROD</code> (any letter case).</td></tr><tr><td><code>allowedCidrs</code></td><td>body</td><td>list of strings, at most 50</td><td>yes</td><td>The complete new list (replaces the old one). <code>[]</code> removes every address.</td></tr></tbody></table></div>
+<pre><code>curl -sS -X PUT "$GATEWAY/admin/api/v1/apps/$APP_ID/environments/PROD" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+  "allowedCidrs": [
+    "203.0.113.10",
+    "198.51.100.0/24",
+    "2001:db8::/32",
+    "203.0.113.10/32"
+  ]
+}'</code></pre>
+<h4>Response (HTTP 200)</h4>
+<p>The stored, normalised list (note the /32, the removed duplicate, and the expanded IPv6 form):</p>
+<pre class="out"><code>HTTP 200 OK
+
+{
+  "environment": "PROD",
+  "allowedCidrs": [
+    "203.0.113.10/32",
+    "198.51.100.0/24",
+    "2001:db8:0:0:0:0:0:0/32"
+  ]
+}</code></pre>
+<h4>Errors</h4>
+<div class="table-wrap"><table><thead><tr><th>Status</th><th><code>error</code></th><th>When it happens</th><th>What to do</th></tr></thead><tbody><tr><td>400</td><td><code>validation_failed</code></td><td><code>allowedCidrs</code> missing, not a list, more than 50, an entry is not an IP or a range (including hostnames), or <code>/0</code> for PROD; <code>environment</code> is not DEV or PROD.</td><td>Read <code>fields</code>; fix the entry named in the message.</td></tr><tr><td>403</td><td><code>insufficient_role</code></td><td>VIEWER.</td><td>Use an ADMIN.</td></tr><tr><td>404</td><td><code>not_found</code></td><td>No such app.</td><td>Check the id.</td></tr></tbody></table></div>
+<pre class="out nocopy"><code>PUT /admin/api/v1/apps/$APP_ID/environments/STAGING  {"allowedCidrs":[]}
+HTTP 400  {"error": "validation_failed", "fields": {"environment": "must be DEV or PROD"}}
+
+PUT /admin/api/v1/apps/$APP_ID/environments/DEV  {"allowedCidrs":["203.0.113.999"]}
+HTTP 400  {"error": "validation_failed", "fields": {"allowedCidrs": "'203.0.113.999' is not a valid IP address or range"}}
+
+PUT /admin/api/v1/apps/$APP_ID/environments/PROD  {"allowedCidrs":["0.0.0.0/0"]}
+HTTP 400  {"error": "validation_failed", "fields": {"allowedCidrs": "a range that matches every address (/0) is not allowed for PROD"}}
+
+PUT /admin/api/v1/apps/$APP_ID/environments/DEV  {"cidrs":["1.2.3.4"]}
+HTTP 400  {"error": "validation_failed", "fields": {"allowedCidrs": "must be a list (max 50) of IPs or ranges, e.g. [\"203.0.113.10\", \"198.51.100.0/24\"]"}}
+
+PUT /admin/api/v1/apps/$APP_ID/environments/DEV  {"allowedCidrs":["10.0.0.1","10.0.1.1","10.0.2.1","10.0.3.1","10.0.4.1","10.0.5.1","10.0.6.1","10.0.7.1","10.0.8.1","10.0.9.1","10.0.10.1","10.0.11...
+HTTP 400  {"error": "validation_failed", "fields": {"allowedCidrs": "must be a list (max 50) of IPs or ranges, e.g. [\"203.0.113.10\", \"198.51.100.0/24\"]"}}
+
+PUT /admin/api/v1/apps/$APP_ID/environments/DEV  {"allowedCidrs":[]}
+HTTP 403  {"error": "insufficient_role"}</code></pre>
+<h4>What the partner sees</h4>
+<p>Before an address is registered, and after the dev stack's address was added (the call was made from this machine; the first refusal is the first call, the second answer comes after the 15-second delay described below):</p>
+<pre class="out nocopy"><code>before:
+HTTP 403  {"error": "ip_not_allowed"}
+
+PUT DEV allowedCidrs ["172.18.0.1"] -&gt;
+HTTP 200  {"environment": "DEV", "allowedCidrs": ["172.18.0.1/32"]}
+
+after (~15 s later):
+HTTP 202  {"notificationId": "dda14451-2d22-43a9-8cf4-2c62b3afb1c2", "externalId": "doc-order-1001", "status": "QUEUED", "channel": "IN_APP", "environment": "DEV", "createdAt": "2026-10-26T11:05:53.746186Z", "expiresAt": "2026-10-27T11:05:53.745969Z"}</code></pre>
+<p>Allowing any address in DEV (accepted; not allowed for PROD):</p>
+<pre class="out nocopy"><code>HTTP 200  {"environment": "DEV", "allowedCidrs": ["0.0.0.0/0"]}</code></pre>
+<h4>Effects, audit</h4>
+<ul><li>Audit: <code>environment.set</code>, meta <code>{"environment": "PROD", "allowedCidrs": [the stored list]}</code>.</li><li>The notification service remembers an app's addresses for about <strong>15 seconds</strong>, so a new address may need up to 15 seconds to start working, and a removed one up to 15 seconds to stop. Tell the partner to retry after a quarter of a minute rather than assuming the change failed.</li><li>The other environment's list is unaffected. Reversible: send the previous list.</li></ul>
+<h4>Scenario</h4>
+<p>A partner moves its servers. You add the new address next to the old one (send both), wait for the partner to confirm traffic from the new host, then send the list with only the new address. Never send an empty list to the active environment unless you want to cut the partner off.</p>
+</div></details>
+<h2 id="read">Reading the lists</h2>
+<p>The lists are part of <code>GET /admin/api/v1/apps/{appId}</code> (<code>environments</code>: one row per environment with <code>allowedCidrs</code>). There is no separate GET.</p>
+<pre class="out"><code>[
+  {
+    "environment": "DEV",
+    "allowedCidrs": []
+  },
+  {
+    "environment": "PROD",
+    "allowedCidrs": []
+  }
+]</code></pre>
+<p>That is a fresh app: both lists empty.</p>
+<h2 id="not-built">Not built yet</h2>
+<ul><li>A real sandbox: DEV uses the development providers and a test-user convention, it is not a separate simulator.</li><li>Per-address labels or expiry dates; the lists are plain strings.</li><li>Alerting when a partner's calls are refused with <code>ip_not_allowed</code> (look at the partner's report, or at the gateway logs).</li></ul>
+
+<div class="pager"><a class="prev" href="notification-limits.html"><small>Previous</small>Notification limits</a><a class="next" href="partner-keys.html"><small>Next</small>Partner keys</a></div>
+<p class="footer">Admin guide: managing mini apps. Examples were captured from a running dev stack (ADERA_ENV=dev) with a throwaway app and a temporary staff account, both removed afterwards. Ids, timestamps and key ids differ on your system.</p>
+</main>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

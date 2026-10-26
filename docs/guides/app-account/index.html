@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Super app: sign-in and account | Adera guide</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+<button id="menu-btn" type="button" aria-label="Toggle menu">Menu</button>
+<span class="brand">Adera guide: sign-in and account</span>
+<span class="spacer"></span>
+<button id="theme-btn" type="button" aria-label="Toggle light or dark theme">Theme</button>
+</header>
+<div class="layout">
+<nav class="sidebar" aria-label="Pages in this guide">
+<h4>Super app: sign-in and account</h4>
+<ul><li><a href="index.html" class="current">Overview</a><ul><li><a href="#audience">Who this is for and what it covers</a></li><li><a href="#base">Base URL, authentication, conventions</a></li><li><a href="#endpoints">All endpoints in this guide (19)</a></li><li><a href="#how-it-fits">How the pieces fit</a></li><li><a href="#glossary">Glossary</a></li></ul></li>
+<li><a href="quickstart.html">Quick start</a></li>
+<li><a href="authentication.html">Registration and login</a></li>
+<li><a href="session-and-logout.html">Session and logout</a></li>
+<li><a href="profile.html">Profile</a></li>
+<li><a href="extra-data.html">Extra data</a></li>
+<li><a href="location.html">Location</a></li>
+<li><a href="avatar.html">Avatar</a></li>
+<li><a href="devices-and-push-tokens.html">Devices and push tokens</a></li>
+<li><a href="errors.html">Error table</a></li>
+<li><a href="known-issues.html">Known issues and not built yet</a></li></ul>
+</nav>
+<main>
+<h1>Super app: sign-in and account</h1>
+<p class="lead">Everything the super-app client calls to sign a person in and manage their own account, verified against the running dev stack.</p>
+<h2 id="audience">Who this is for and what it covers</h2>
+<p>This guide is for the developers who build the <strong>super app</strong> (the Adera mobile or web client) and the backend colleagues who support them. It covers everything an end-user client calls to <strong>sign in and manage the user's own account</strong>: registration and login with a one-time code, the session token, the profile, the free-form <code>extra</code> JSON, the optional location, the avatar, push-notification devices, and logout, plus what the client sees when an account is suspended or deleted. You should be able to build all of it from this guide without reading the code.</p>
+<p>It does <strong>not</strong> cover the mini-app catalog and ratings, the in-app notification inbox, per-app preferences, or anything staff or partners do; those have their own guides. They use the same session token described here.</p>
+<div class="cards"><div class="card"><h3>Quick start</h3><p>Paste-and-run first-run sequence: sign up, profile, device, avatar, logout, sign in again.</p><a class="stretch" href="quickstart.html" aria-label="Quick start"></a></div>
+<div class="card"><h3>Registration and login</h3><p>The Kratos code flows, new versus returning users, messages, rate limits, what registration creates.</p><a class="stretch" href="authentication.html" aria-label="Registration and login"></a></div>
+<div class="card"><h3>Session and logout</h3><p>Token storage, 30-day lifetime and renewal, whoami, sessions, logout, blocked accounts.</p><a class="stretch" href="session-and-logout.html" aria-label="Session and logout"></a></div>
+<div class="card"><h3>Profile</h3><p>GET and PATCH /api/v1/me: every field and its validation.</p><a class="stretch" href="profile.html" aria-label="Profile"></a></div>
+<div class="card"><h3>Extra data</h3><p>The free-form JSON: merge rules and the 16 KiB limit.</p><a class="stretch" href="extra-data.html" aria-label="Extra data"></a></div>
+<div class="card"><h3>Location</h3><p>Share, replace and clear the optional location; coarse versus fine.</p><a class="stretch" href="location.html" aria-label="Location"></a></div>
+<div class="card"><h3>Avatar</h3><p>Upload, limits, what the server does to the image, signed URLs.</p><a class="stretch" href="avatar.html" aria-label="Avatar"></a></div>
+<div class="card"><h3>Devices and push tokens</h3><p>Register FCM tokens, rotation, listing, removal, logout behaviour.</p><a class="stretch" href="devices-and-push-tokens.html" aria-label="Devices and push tokens"></a></div>
+<div class="card"><h3>Error table</h3><p>Every status and error code, every validation message, every limit.</p><a class="stretch" href="errors.html" aria-label="Error table"></a></div>
+<div class="card"><h3>Known issues and not built yet</h3><p>Surprises with repros, and the list of missing features.</p><a class="stretch" href="known-issues.html" aria-label="Known issues and not built yet"></a></div>
+</div>
+<h2 id="base">Base URL, authentication, conventions</h2>
+<div class="table-wrap"><table><thead><tr><th>Topic</th><th>Detail</th></tr></thead><tbody>
+<tr><td>Base URL</td><td>One address for everything: the <strong>gateway</strong>. In the dev stack <code>http://127.0.0.1:9080</code>, written <code>$GATEWAY</code> in all examples. The app never talks to a service directly. Two path prefixes matter here: <code>/kratos/*</code> (sign-in, sessions) and <code>/api/v1/me*</code> (the user's own data)</td></tr>
+<tr><td>Authentication</td><td>Sign-in calls need no credentials. All <code>/api/v1/me*</code> calls need <code>Authorization: Bearer $TOKEN</code>, where <code>$TOKEN</code> is the <code>session_token</code> returned by the code step. The gateway verifies it on every call and tells the service who the user is; a user id you send is ignored</td></tr>
+<tr><td>Content types</td><td>JSON requests use <code>Content-Type: application/json</code>; the avatar upload is <code>multipart/form-data</code>. Responses are JSON (except the empty <code>204</code>s and the HTML <code>429</code> page)</td></tr>
+<tr><td>Names</td><td>Adera's own APIs use camelCase JSON (<code>firstName</code>, <code>avatarUrl</code>); Kratos uses snake_case (<code>session_token</code>, <code>expires_at</code>) and dotted field names in submits (<code>traits.phone_number</code>)</td></tr>
+<tr><td>Error shape</td><td>Adera services: <code>{"error": "&lt;code&gt;"}</code>, and for validation <code>{"error":"validation_failed","fields":{"&lt;field&gt;":"&lt;message&gt;"}}</code> listing every problem at once. The gateway and Kratos answer differently in some cases: see the Error table</td></tr>
+<tr><td>Ids</td><td>UUIDs (lower-case, hyphenated). The user id equals the Kratos identity id</td></tr>
+<tr><td>Timestamps</td><td>ISO-8601 in UTC with a <code>Z</code>, 6 to 9 fractional digits (<code>2026-10-26T10:49:43.643301Z</code>); dates of birth are plain <code>YYYY-MM-DD</code></td></tr>
+<tr><td>Languages</td><td><code>en</code>, <code>am</code> (Amharic), <code>om</code> (Oromo). The profile <code>language</code> decides the language of notifications sent to the user</td></tr>
+<tr><td>Markets</td><td><code>ET</code> (Ethiopia), <code>US</code></td></tr>
+<tr><td>Pagination</td><td>none in these APIs (the device list is small and complete)</td></tr>
+<tr><td>Rate limits</td><td>per client IP and route at the gateway: submits 10/min, other Kratos calls 120/min, avatar upload 20/min, other profile calls 300/min; over the limit the answer is <code>429</code> with an HTML body. Per-recipient code limits: SMS 5/hour, email 10/hour</td></tr>
+<tr><td>Request id</td><td>gateway responses carry <code>X-Request-Id</code>; include it in bug reports</td></tr>
+<tr><td>Dev mode</td><td>in the dev stack nothing real is sent: read one-time codes from <code>http://127.0.0.1:8085/dev/messages?to=...</code> (or Mailpit at <code>http://127.0.0.1:8025</code> for email)</td></tr>
+</tbody></table></div>
+<h2 id="endpoints">All endpoints in this guide (19)</h2>
+<div class="table-wrap"><table><thead><tr><th>Method and path</th><th>What it does</th><th>Page</th></tr></thead><tbody>
+<tr><td><code>GET /kratos/self-service/registration/api</code></td><td>start a registration flow</td><td>Registration and login</td></tr>
+<tr><td><code>POST /kratos/self-service/registration?flow=ID</code></td><td>send / verify the code (new user)</td><td>Registration and login</td></tr>
+<tr><td><code>GET /kratos/self-service/login/api</code></td><td>start a login flow (also the refresh flow)</td><td>Registration and login</td></tr>
+<tr><td><code>POST /kratos/self-service/login?flow=ID</code></td><td>send / verify the code (returning user)</td><td>Registration and login</td></tr>
+<tr><td><code>GET /kratos/sessions/whoami</code></td><td>check a token</td><td>Session and logout</td></tr>
+<tr><td><code>GET /kratos/sessions</code></td><td>list my other sessions</td><td>Session and logout</td></tr>
+<tr><td><code>DELETE /kratos/sessions/{id}</code></td><td>sign one other session out</td><td>Session and logout</td></tr>
+<tr><td><code>DELETE /kratos/sessions</code></td><td>sign out everywhere else</td><td>Session and logout</td></tr>
+<tr><td><code>DELETE /kratos/self-service/logout/api</code></td><td>revoke a token (Kratos logout)</td><td>Session and logout</td></tr>
+<tr><td><code>POST /api/v1/me/logout</code></td><td>log this device out (push token + session)</td><td>Session and logout</td></tr>
+<tr><td><code>GET /api/v1/me</code></td><td>read my profile</td><td>Profile</td></tr>
+<tr><td><code>PATCH /api/v1/me</code></td><td>update my profile and <code>extra</code></td><td>Profile, Extra data</td></tr>
+<tr><td><code>PUT /api/v1/me/location</code></td><td>set my location</td><td>Location</td></tr>
+<tr><td><code>DELETE /api/v1/me/location</code></td><td>clear my location</td><td>Location</td></tr>
+<tr><td><code>POST /api/v1/me/avatar</code></td><td>upload my avatar</td><td>Avatar</td></tr>
+<tr><td><code>DELETE /api/v1/me/avatar</code></td><td>remove my avatar</td><td>Avatar</td></tr>
+<tr><td><code>PUT /api/v1/me/devices</code></td><td>register / refresh a device and its FCM token</td><td>Devices and push tokens</td></tr>
+<tr><td><code>GET /api/v1/me/devices</code></td><td>list my active devices</td><td>Devices and push tokens</td></tr>
+<tr><td><code>DELETE /api/v1/me/devices</code></td><td>remove a device</td><td>Devices and push tokens</td></tr>
+</tbody></table></div>
+<h2 id="how-it-fits">How the pieces fit</h2>
+<ol><li>The app asks the <strong>gateway</strong> (APISIX) for a Kratos flow; Kratos asks Adera's notification service to deliver the code by SMS (Twilio) or email (Resend); dev uses a console log and Mailpit.</li><li>When the code is right, Kratos creates the <strong>identity</strong> (the account) and calls a web hook so the <strong>user service</strong> creates the profile row with the same id, then returns a <code>session_token</code>.</li><li>For every <code>/api/v1/me*</code> call the gateway asks the user service to check the token with Kratos and to check the account status, then forwards the call with the verified user id. A suspended or deleted account is refused here.</li><li>Avatar images live in private object storage (RustFS, S3 API); the profile hands out short-lived signed links. Device (FCM) tokens are stored by the user service and used by the notification service when a mini app sends a push.</li></ol>
+<h2 id="glossary">Glossary</h2>
+<div class="table-wrap"><table><thead><tr><th>Term</th><th>Meaning</th></tr></thead><tbody>
+<tr><td>Super app</td><td>the Adera client app. Mini apps are partner services listed inside it</td></tr>
+<tr><td>User id</td><td>the id of a person's account: Kratos identity id = profile <code>id</code> = the id the gateway forwards</td></tr>
+<tr><td>Identity</td><td>Kratos' record of an account: its login identifier (phone or email) and nothing else</td></tr>
+<tr><td>Profile</td><td>Adera's record of the user (<code>app_user</code>): name, language, location, avatar, <code>extra</code></td></tr>
+<tr><td>Flow</td><td>one sign-up or sign-in attempt on the Kratos side; has an id, a state and a 10-minute life</td></tr>
+<tr><td>Session / session token</td><td>one login on one device; the opaque token the app sends as the Bearer credential; 30 days</td></tr>
+<tr><td>aal1 / aal2</td><td>assurance level: one factor (the code) or two (staff add an authenticator app). Customers are always aal1</td></tr>
+<tr><td>One-time code</td><td>6 digits sent by SMS or email, valid 5 minutes, single use</td></tr>
+<tr><td>Web hook</td><td>the call Kratos makes to the user service right after an identity is created</td></tr>
+<tr><td>FCM token</td><td>the Firebase Cloud Messaging address of one app installation, used to push notifications</td></tr>
+<tr><td>Installation id</td><td>a random id the app generates once per install and sends with the device registration</td></tr>
+<tr><td>Signed URL</td><td>a link to a private file that works without credentials for a limited time (the avatar link, 60 minutes)</td></tr>
+<tr><td>Merge patch</td><td>the way <code>extra</code> is updated: sent keys are merged, <code>null</code> removes a key</td></tr>
+<tr><td>ACTIVE / SUSPENDED / DELETED</td><td>account status set by staff; the last two are refused with <code>403</code></td></tr>
+<tr><td>Gateway</td><td>the single entry point (APISIX) that checks tokens, rate-limits and routes</td></tr>
+</tbody></table></div>
+
+<div class="pager"><span class="placeholder"></span><a class="next" href="quickstart.html"><small>Next</small>Quick start</a></div>
+<p class="footer">Adera super-app guide: sign-in and account &middot; verified against the dev stack on 2026-10-26</p>
+</main>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

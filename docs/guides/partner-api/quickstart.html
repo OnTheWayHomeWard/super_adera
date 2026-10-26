@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Quick start: zero to first delivered notification | Adera partner API</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+<button id="menu-btn" type="button" aria-label="Toggle menu">Menu</button>
+<a class="brand" href="index.html">Adera partner API</a>
+<span class="spacer"></span>
+<button id="theme-btn" type="button" aria-label="Toggle light or dark theme">Theme</button>
+</header>
+<div class="layout">
+<nav class="sidebar" aria-label="Pages">
+<h4>Mini-app backend API</h4>
+<ul><li><a href="index.html">Overview and contents</a></li><li><a href="quickstart.html" class="current">Quick start</a><ul><li><a href="#overview">Overview</a></li><li><a href="#s1">1. Make a key pair, tell Adera</a></li><li><a href="#s2">2. What you get back</a></li><li><a href="#s3">3. Check connectivity: GET /v1/templates</a></li><li><a href="#s4">4. Send the first notification</a></li><li><a href="#s5">5. Read the status</a></li><li><a href="#s6">6. Receive the callback</a></li><li><a href="#next">Next steps</a></li></ul></li><li><a href="signing.html">Signing requests (ADERA-SIG-1)</a></li><li><a href="environments-and-ips.html">Environments, IPs and keys</a></li><li><a href="user-ids.html">Pseudonymous user ids</a></li><li><a href="templates.html">Templates</a></li><li><a href="sending-notifications.html">Sending notifications</a></li><li><a href="statuses-and-callbacks.html">Statuses, retries and callbacks</a></li><li><a href="limits-and-quotas.html">Limits and quotas</a></li><li><a href="sandbox-and-testing.html">Sandbox and testing checklist</a></li><li><a href="errors.html">Error codes</a></li><li><a href="data-available-to-mini-apps.html">What data a mini app gets</a></li><li><a href="known-issues.html">Known issues and not built yet</a></li></ul>
+</nav>
+<main>
+<h1>Quick start: zero to first delivered notification</h1>
+<p class="lead">Twenty minutes from nothing to a notification with status <code>SENT</code>, using the DEV deployment and a synthetic test user. Each step has the exact command and the real answer.</p>
+
+<h2 id="overview">Overview</h2>
+<ol>
+<li><a href="#s1">Make a key pair</a> and send the public half and your server's address to Adera.</li>
+<li><a href="#s2">Receive</a> a key id, the base URL, template ids.</li>
+<li><a href="#s3">Check connectivity</a> with a signed <code>GET /v1/templates</code>.</li>
+<li><a href="#s4">Send</a> a notification to the synthetic user <code>u_p_test_ok</code>.</li>
+<li><a href="#s5">Read the status</a> until it is <code>SENT</code>.</li>
+<li><a href="#s6">Receive the callback</a>.</li>
+<li><a href="#next">Next steps</a>.</li>
+</ol>
+<div class="callout"><span class="label">What you need to know first</span><p>You send notifications to Adera users through your server only (never from a browser or a mobile app: the private key must stay secret). You address users by pseudonymous ids and send only approved templates. Read <a href="index.html">the overview</a> for the concepts; this page is the shortest path.</p></div>
+
+<h2 id="s1">1. Make a key pair, tell Adera</h2>
+<pre><code>openssl genrsa -out partner.pem 2048
+openssl rsa -in partner.pem -pubout -out partner.pub</code></pre>
+<p>Send Adera staff: (a) the contents of <code>partner.pub</code> (<code>-----BEGIN PUBLIC KEY-----</code>), never the private key; (b) the public IP address (or range) your server's outgoing requests come from, for DEV; (c) which channels you need (<code>SMS</code>, <code>EMAIL</code>, in-app) and your expected volume; (d) the messages you want to send, in the languages you need (they become templates: partners cannot create them). <span class="badge ours">Adera staff</span> do what is listed in <a href="environments-and-ips.html#staff-checklist">the staff checklist</a>.</p>
+
+<h2 id="s2">2. What you get back</h2>
+<div class="table-wrap"><table><thead><tr><th>You receive</th><th>Looks like</th><th>Used for</th></tr></thead><tbody>
+<tr><td>Base URL of the DEV deployment</td><td><code>http://127.0.0.1:9080</code> on Adera's own stack</td><td><code>ADERA_BASE</code></td></tr>
+<tr><td>Key id (and a fingerprint to compare)</td><td><code>ak_dev_b05f96cc4740e2a118a55282</code></td><td><code>X-Adera-Key-Id</code></td></tr>
+<tr><td>Template ids (or call <code>GET /v1/templates</code>)</td><td><code>ef3c8771-df6c-477c-b5a8-7ba94c2fded3</code></td><td><code>templateId</code></td></tr>
+</tbody></table></div>
+<pre><code>export ADERA_BASE=http://127.0.0.1:9080
+export ADERA_KEY_ID=ak_dev_b05f96cc4740e2a118a55282
+export ADERA_PRIVATE_KEY_FILE=$PWD/partner.pem
+export TEMPLATE_ID=ef3c8771-df6c-477c-b5a8-7ba94c2fded3</code></pre>
+<p>Copy the <code>examples/</code> folder of this guide next to your key. It has the signing helpers in Python (needs <code>pip install cryptography requests</code>), Node.js (18+, no dependencies) and shell (curl and openssl). Pick one; the steps below show the shell version and the Python/Node equivalents.</p>
+
+<h2 id="s3">3. Check connectivity: <code>GET /v1/templates</code></h2>
+<pre><code>./examples/adera_call.sh GET /v1/templates</code></pre>
+<p>Expected: <code>HTTP/1.1 200</code> and a JSON array of your templates (here truncated):</p>
+<pre class="out nocopy"><code>HTTP/1.1 200
+Content-Type: application/json
+X-Adera-Key-Id: adera-sig-202610
+X-Adera-Timestamp: 1793012301
+X-Adera-Signature: ...
+
+[{"id":"7d51f90e-...","code":"future-offer", ... },{"id":"ef3c8771-df6c-477c-b5a8-7ba94c2fded3","code":"job-accepted","kind":"DIRECT","params":[{"name":"name","required":true,"maxLength":30,"allowLinks":false}, ...], ...}]</code></pre>
+<p>Python: <code>from adera_client import call; print(call("GET", "/v1/templates").json())</code>. Node: <code>require("./adera-client").call("GET", "/v1/templates").then(console.log)</code>.</p>
+<div class="table-wrap"><table><thead><tr><th>If you get</th><th>It means</th></tr></thead><tbody>
+<tr><td><code>403 ip_not_allowed</code></td><td>Adera does not know your server's address yet. Tell staff the address your requests really leave from.</td></tr>
+<tr><td><code>401 invalid_signature</code></td><td>Your canonical string differs from Adera's: use the <a href="signing.html#vector">test vector</a> and the <a href="signing.html#troubleshooting">checklist</a>.</td></tr>
+<tr><td><code>401 stale_timestamp</code></td><td>Your clock is off by more than 5 minutes.</td></tr>
+<tr><td><code>401 unknown_key</code></td><td>Typo in the key id, or the key was registered on another deployment.</td></tr>
+<tr><td><code>403 wrong_environment</code></td><td>You used a <code>ak_prod_...</code> key against DEV (or the reverse).</td></tr>
+<tr><td><code>403 app_killed</code></td><td>Staff stopped the app. (A <code>DRAFT</code> app works on DEV.)</td></tr>
+</tbody></table></div>
+<p>Changes staff make (address list, capabilities, status, key revocation) take up to 15 seconds to apply.</p>
+
+<h2 id="s4">4. Send the first notification</h2>
+<p>Use the synthetic test user <code>u_p_test_ok</code>: it exists in DEV for every app, needs no issuing, and nothing is sent to anybody.</p>
+<pre><code>printf '%s' '{"externalId":"qs-1","userId":"u_p_test_ok","templateId":"'$TEMPLATE_ID'","params":{"name":"Abebe"}}' &gt; body.json
+./examples/adera_call.sh POST /v1/notifications body.json</code></pre>
+<pre class="out nocopy"><code>HTTP/1.1 202
+Content-Type: application/json
+X-Adera-Key-Id: adera-sig-202610
+...
+
+{"notificationId":"c1ae35d4-5d15-4115-acfa-473d2fba996e","externalId":"qs-1","status":"QUEUED","channel":"SMS","environment":"DEV","createdAt":"2026-10-26T11:18:27.560943Z","expiresAt":"2026-10-27T11:18:27.560774Z"}</code></pre>
+<p>Python: <code>python examples/send.py qs-1 u_p_test_ok $TEMPLATE_ID</code>. Node: <code>node examples/send.js qs-1 u_p_test_ok $TEMPLATE_ID</code> (both use <code>{"name":"Abebe"}</code>; adapt <code>params</code> to your template).</p>
+<p><code>202</code> and <code>QUEUED</code> mean "accepted". <code>channel: "SMS"</code> was chosen by Adera because the template is <code>DIRECT</code> and your app may send SMS. Sending the identical request again returns <code>200</code> with <code>"replayed": true</code> and sends nothing twice.</p>
+
+<h2 id="s5">5. Read the status</h2>
+<pre><code>./examples/adera_call.sh GET /v1/notifications/qs-1</code></pre>
+<pre class="out nocopy"><code>{"notificationId":"c1ae35d4-5d15-4115-acfa-473d2fba996e","externalId":"qs-1","status":"SENT","channel":"SMS","environment":"DEV","createdAt":"2026-10-26T11:18:27.560943Z","expiresAt":"2026-10-27T11:18:27.560774Z","completedAt":"2026-10-26T11:18:28.486769Z","attempts":1}</code></pre>
+<p><code>SENT</code> about a second later: the first notification is delivered (simulated, because <code>u_p_test_ok</code> is synthetic). For a real DEV test user (an id Adera staff issue for your app) the SMS text appears in the dev SMS log and the email in the dev mail catcher.</p>
+
+<h2 id="s6">6. Receive the callback</h2>
+<p>Run the callback receiver (Python: <code>python examples/callback_receiver.py 8099</code>; Node: <code>node examples/callback-receiver.js 8099</code>), then send again with a <code>callbackUrl</code> that Adera's DEV can reach (on Adera's own dev stack: the address of your machine as seen from the dev containers, for example the Docker bridge <code>http://172.18.0.1:8099/adera/hook</code>; production needs public https):</p>
+<pre><code>printf '%s' '{"externalId":"qs-2","userId":"u_p_test_ok","templateId":"'$TEMPLATE_ID'","params":{"name":"Abebe"},"callbackUrl":"http://172.18.0.1:8099/adera/hook"}' &gt; body.json
+./examples/adera_call.sh POST /v1/notifications body.json</code></pre>
+<p>The receiver prints, a moment after the <code>202</code>:</p>
+<pre class="out nocopy"><code>callback notification.status {"at": "2026-10-26T11:19:02.1...Z", "event": "notification.status", "reason": null, "status": "SENT", "channel": "SMS", "externalId": "qs-2", "environment": "DEV", "notificationId": "..."}</code></pre>
+<p>The receiver already verified Adera's signature and ignores duplicates (<a href="statuses-and-callbacks.html#callbacks">details</a>).</p>
+
+<h2 id="next">Next steps</h2>
+<ul>
+<li>Try a real DEV user, and the error paths with <code>u_p_test_muted</code> and <code>u_p_test_unreachable</code>: <a href="sandbox-and-testing.html">Sandbox and testing checklist</a>.</li>
+<li>Understand every field: <a href="sending-notifications.html">Sending notifications</a>; how channels are chosen; <code>externalId</code>; <code>ttlSeconds</code>; <code>data</code>.</li>
+<li>Handle failures properly: <a href="errors.html">Error codes</a>, <a href="statuses-and-callbacks.html#retries">retries</a>, <a href="limits-and-quotas.html">quotas</a>.</li>
+<li>Know the limits of what is built: <a href="data-available-to-mini-apps.html">what data a mini app gets</a> and <a href="user-ids.html#obtaining">how you obtain real user ids</a> (today: from Adera staff only).</li>
+<li>Ask staff for a PROD key, PROD addresses and to set the app <code>LIVE</code> when your checklist is green.</li>
+</ul>
+
+<div class="pager"><a class="prev" href="index.html"><small>Previous</small>Overview and contents</a><a class="next" href="signing.html"><small>Next</small>Signing requests (ADERA-SIG-1)</a></div>
+<p class="footer">Adera mini-app backend API guide &middot; verified against the dev deployment on 2026-10-26</p>
+</main>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

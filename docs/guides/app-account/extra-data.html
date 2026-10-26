@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The free-form extra object | Adera guide</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+<button id="menu-btn" type="button" aria-label="Toggle menu">Menu</button>
+<span class="brand">Adera guide: sign-in and account</span>
+<span class="spacer"></span>
+<button id="theme-btn" type="button" aria-label="Toggle light or dark theme">Theme</button>
+</header>
+<div class="layout">
+<nav class="sidebar" aria-label="Pages in this guide">
+<h4>Super app: sign-in and account</h4>
+<ul><li><a href="index.html">Overview</a></li>
+<li><a href="quickstart.html">Quick start</a></li>
+<li><a href="authentication.html">Registration and login</a></li>
+<li><a href="session-and-logout.html">Session and logout</a></li>
+<li><a href="profile.html">Profile</a></li>
+<li><a href="extra-data.html" class="current">Extra data</a><ul><li><a href="#overview">Overview</a></li><li><a href="#rules">Rules</a></li><li><a href="#examples">Examples (captured)</a></li><li><a href="#design">Design advice for the client</a></li><li><a href="#errors">Errors</a></li></ul></li>
+<li><a href="location.html">Location</a></li>
+<li><a href="avatar.html">Avatar</a></li>
+<li><a href="devices-and-push-tokens.html">Devices and push tokens</a></li>
+<li><a href="errors.html">Error table</a></li>
+<li><a href="known-issues.html">Known issues and not built yet</a></li></ul>
+</nav>
+<main>
+<h1>The free-form extra object</h1>
+<p class="lead">The free-form <code>extra</code> JSON of the profile: merge rules, the 16 KiB size limit, examples and advice.</p>
+<h2 id="overview">Overview</h2>
+<p><code>extra</code> is a free-form JSON object stored with the profile. It exists so the client team can keep small per-user settings (theme, font size, onboarding steps seen, home-screen order, last chosen city...) <strong>without a backend change for every new setting</strong>. The server does not interpret it, validate its content, or use it for anything: it only stores it, merges updates into it, and returns it in every profile response.</p>
+<div class="callout warn"><span class="label">Not a place for secrets or shared data</span>
+<p><code>extra</code> is plain JSON in the database. No other Adera service (mini apps, partners, notifications) reads it today and staff screens do not show it, but do not store passwords, tokens or other people's data there, and do not use it for anything a mini app must see. It is the user's data and goes where the profile goes.</p>
+</div>
+<h2 id="rules">Rules</h2>
+<div class="table-wrap"><table><thead><tr><th>Rule</th><th>Detail</th></tr></thead><tbody>
+<tr><td>Shape</td><td>the top level of <code>extra</code> must be a JSON <strong>object</strong>. A string, array, number or <code>null</code> as the whole value is rejected: <code>"must be a JSON object (use null values inside it to remove keys)"</code></td></tr>
+<tr><td>Keys and values</td><td>any keys; values may be strings, numbers, booleans, arrays, objects. There is no schema, no depth limit and no limit on the number of keys: only the size limit below. Key order in the answer is not guaranteed (the database does not keep it)</td></tr>
+<tr><td>Update semantics</td><td><strong>JSON Merge Patch (RFC 7386)</strong>: the object you send is merged into the stored one. A key with a value sets or replaces it; a nested object merges recursively; a key set to <code>null</code> <strong>removes</strong> that key; keys you do not mention are kept</td></tr>
+<tr><td>Arrays</td><td>an array is a plain value: it <strong>replaces</strong> the stored array as a whole (there is no per-element merge)</td></tr>
+<tr><td>Removing a subtree</td><td><code>{"prefs": null}</code> removes the whole <code>prefs</code> object</td></tr>
+<tr><td>Size limit</td><td><strong>16384 bytes</strong> (16 KiB) of serialised JSON, checked twice: on the object you send, and on the <strong>merged result</strong>. Either failing rejects the whole PATCH and saves nothing. The limit is a server setting (<code>EXTRA_MAX_BYTES</code>, default 16384); ask the backend team before relying on a different value</td></tr>
+<tr><td>Where it is sent</td><td>inside <code>PATCH /api/v1/me</code>, together with other fields if you like: <code>{"language":"am","extra":{...}}</code>. There is no separate endpoint</td></tr>
+<tr><td>Reading</td><td>always present in the profile as <code>extra</code>; <code>{}</code> when empty</td></tr>
+<tr><td>Concurrency</td><td>no version check. Keys merge independently, so two devices changing different keys both win; the same key is last-write-wins. Reading, changing and writing the <em>whole</em> object back would erase other devices' keys: send only the keys you changed</td></tr>
+</tbody></table></div>
+<h2 id="examples">Examples (captured)</h2>
+<p><strong>1. Set values</strong> (also changes other profile fields in the same call):</p>
+<pre><code>curl -s -X PATCH "$GATEWAY/api/v1/me" -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"extra":{"occupation":"nurse","prefs":{"theme":"dark"}}}'</code></pre>
+<pre class="out"><code>HTTP/1.1 200 OK
+{ "...": "profile fields",
+  "extra": { "occupation": "nurse", "prefs": { "theme": "dark" } } }</code></pre>
+<p><strong>2. Merge: remove one key, add a nested key, keep the sibling</strong>:</p>
+<pre><code>curl -s -X PATCH "$GATEWAY/api/v1/me" -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"extra":{"occupation":null,"prefs":{"font":16}}}'</code></pre>
+<pre class="out"><code>HTTP/1.1 200 OK
+{ "...": "profile fields",
+  "extra": { "prefs": { "theme": "dark", "font": 16 } } }</code></pre>
+<p><strong>3. Arrays replace</strong>: after <code>{"extra":{"tags":["a","b"]}}</code> the stored value is exactly <code>["a","b"]</code>; sending <code>{"tags":["c"]}</code> later leaves <code>["c"]</code>.</p>
+<p><strong>4. Remove several at once</strong>: <code>{"extra":{"a":null,"tags":null,"prefs":null}}</code> answered <code>"extra": {}</code>.</p>
+<p><strong>5. Not an object</strong>:</p>
+<pre class="out"><code>HTTP/1.1 400 Bad Request
+
+{ "error": "validation_failed",
+  "fields": { "extra": "must be a JSON object (use null values inside it to remove keys)" } }</code></pre>
+<p><strong>6. Too large in one request</strong> (a single 17000-character string):</p>
+<pre class="out"><code>HTTP/1.1 400 Bad Request
+
+{ "error": "validation_failed", "fields": { "extra": "too large (max 16384 bytes)" } }</code></pre>
+<p><strong>7. Each request fits, the result does not</strong>: after storing a 9000-character value under <code>a</code>, adding another 9000-character value under <code>b</code> is refused:</p>
+<pre class="out"><code>HTTP/1.1 400 Bad Request
+
+{ "error": "validation_failed", "fields": { "extra": "too large after merge (max 16384 bytes)" } }</code></pre>
+<p>Free the space by removing keys (<code>{"extra":{"a":null}}</code>) and retry.</p>
+<h2 id="design">Design advice for the client</h2>
+<ul><li>Namespace your own keys (<code>ui</code>, <code>onboarding</code>, <code>feature_flags</code>) so independent features do not collide, and keep each value small.</li><li>Treat unknown keys as data you must preserve: never write back the whole object you read, only the keys you changed.</li><li>Store a schema version inside it (<code>{"v":1}</code>) if the shape of a value may change.</li><li>Do not store large blobs (images, long lists): the 16 KiB cap is shared by everything under <code>extra</code>.</li><li>To drop all your data on a user's request, send <code>null</code> for each top-level key you own.</li></ul>
+<h2 id="errors">Errors</h2>
+<div class="table-wrap"><table><thead><tr><th>Status</th><th>Body</th><th>When</th></tr></thead><tbody>
+<tr><td>400</td><td><code>validation_failed</code>, <code>fields.extra</code> = "must be a JSON object ..."</td><td>the value of <code>extra</code> is not an object</td></tr>
+<tr><td>400</td><td><code>validation_failed</code>, <code>fields.extra</code> = "too large (max 16384 bytes)"</td><td>the object you sent is over the limit</td></tr>
+<tr><td>400</td><td><code>validation_failed</code>, <code>fields.extra</code> = "too large after merge (max 16384 bytes)"</td><td>the merged result would be over the limit</td></tr>
+<tr><td>400</td><td><code>invalid_json</code></td><td>the body is not valid JSON</td></tr>
+<tr><td>401 / 403 / 429 / 503</td><td>see the Error table</td><td>as for every profile call</td></tr>
+</tbody></table></div>
+
+<div class="pager"><a class="prev" href="profile.html"><small>Previous</small>Profile</a><a class="next" href="location.html"><small>Next</small>Location</a></div>
+<p class="footer">Adera super-app guide: sign-in and account &middot; verified against the dev stack on 2026-10-26</p>
+</main>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Reporting an app | Mini-app catalog guide</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<header class="topbar">
+<button id="menu-btn" type="button" aria-label="Toggle menu">Menu</button>
+<a class="brand" href="index.html">Mini-app catalog guide</a>
+<span class="spacer"></span>
+<button id="theme-btn" type="button" aria-label="Toggle light or dark theme">Theme</button>
+</header>
+<div class="layout">
+<nav class="sidebar" aria-label="Pages">
+<h4>Mini-app catalog</h4><ul><li><a href="index.html">Overview</a></li><li><a href="list-apps.html">List the mini apps</a></li><li><a href="app-details.html">App details</a></li><li><a href="capabilities-and-permissions.html">Capabilities and permissions</a></li><li><a href="reviews-and-ratings.html">Reviews and ratings</a></li><li><a href="reporting.html" class="current">Reporting an app</a></li><li><a href="mute-preferences.html">Mute preferences</a></li><li><a href="building-the-store-screen.html">Building the store screen</a></li><li><a href="errors.html">Error codes</a></li><li><a href="known-issues.html">Known issues</a></li></ul>
+</nav>
+<main>
+<h1>Reporting an app</h1>
+<p class="lead">The report-this-app endpoint: the five reasons, the one-open-report rule and what the client should show.</p>
+
+<h2 id="overview">Overview</h2>
+<p>Users can report a mini app. This page documents the one endpoint, the five reasons, the duplicate rule and what the user sees. Only <strong>apps</strong> can be reported: there is no way to report an individual review, and no way to report an app that is not LIVE (it answers <code>404 not_found</code>, as does any non-LIVE app; the app is already off the shelf).</p>
+<h2 id="reasons">Reasons and how to word them</h2>
+<div class="table-wrap"><table><thead><tr><th>Value</th><th>Show to the user as</th><th>Typical use</th></tr></thead><tbody><tr><td><code>SPAM</code></td><td>"Spam or misleading"</td><td>Unwanted promotion, fake listings</td></tr><tr><td><code>SCAM</code></td><td>"Scam or fraud"</td><td>Asks for money or secrets under false pretences. Staff look at these first.</td></tr><tr><td><code>INAPPROPRIATE</code></td><td>"Offensive or inappropriate content"</td><td>Abusive or adult content</td></tr><tr><td><code>BROKEN</code></td><td>"Not working"</td><td>Crashes, cannot open, wrong behaviour</td></tr><tr><td><code>OTHER</code></td><td>"Something else"</td><td>Anything else; encourage filling <code>details</code></td></tr></tbody></table></div>
+<p>Send the upper-case values as above. Localise the labels yourself; the server only knows the codes.</p>
+<h2 id="after">What happens after a report</h2>
+<ul><li>It is stored with status <code>OPEN</code>, the reporting user and time. The dashboard shows an "open reports" count and a list; staff set the status to <code>REVIEWED</code> or <code>DISMISSED</code> (or back to <code>OPEN</code>).</li><li>The user gets no notification and no status read-back; the report is private (not visible to the publisher or to other users).</li><li>Reporting does not hide or pause the app by itself. Staff decide.</li><li>Reports from suspended or deleted users stay as they are.</li></ul>
+<h2 id="ui">UI recommendations</h2>
+<ul><li>Place "Report this app" in the three-dot menu of the store page and of the app window (when launching exists).</li><li>Sheet with the five reasons as radio rows and an optional multi-line field (counter to 2000).</li><li>On 200 show a confirmation and mark the app locally as reported by this user.</li><li>On 404 show "This app is no longer available" and drop it from lists.</li></ul>
+<h2 id="notbuilt">Not built yet</h2>
+<ul><li>Reporting a review or a publisher; a note or screenshot attachment; a way to read back the status of my reports; a way to withdraw a report; telling the user the outcome.</li><li>Reporting from outside the catalog (for example an app that is PAUSED).</li></ul>
+<h2 id="endpoint">Endpoint</h2>
+<details class="endpoint" id="ep-report"><summary><span class="method m-post">POST</span><span class="path">/api/v1/apps/{idOrSlug}/report</span><span class="sum">Report an app</span></summary><div class="body"><dl class="meta"><dt>Who may call</dt><dd>Signed-in end user, any LIVE app.</dd><dt>Rate limit</dt><dd>300 requests per 60 s per client IP (route <code>apps-catalog</code>).</dd><dt>Headers</dt><dd><code>Authorization: Bearer $TOKEN</code>, <code>Content-Type: application/json</code></dd><dt>Implemented in</dt><dd><code>AppPublicController#report, ReviewService#report</code></dd></dl>
+<h4>Purpose</h4><p>The "Report this app" item in the three-dot menu. It lets users flag a mini app that is a scam, spam, offensive or broken. Staff read the reports in the dashboard (Moderation, Reports) and mark them reviewed or dismissed, and may pause or kill the app. The user is not told the outcome.</p>
+<h4>Request body</h4>
+<div class="table-wrap"><table><thead><tr><th>Name</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why it exists</th></tr></thead><tbody><tr><td><code>reason</code></td><td>string</td><td><strong>yes</strong></td><td>One of <code>SPAM</code>, <code>SCAM</code>, <code>INAPPROPRIATE</code>, <code>BROKEN</code>, <code>OTHER</code>. Case-insensitive (<code>broken</code> is accepted and stored as <code>BROKEN</code>).</td><td>Lets staff triage: scams first.</td></tr><tr><td><code>details</code></td><td>string or null</td><td>no</td><td>Up to 2000 characters after trimming; blank is stored as none.</td><td>The user's explanation.</td></tr></tbody></table></div>
+<p>Unlike the review endpoint, unknown extra keys are <strong>ignored</strong> here, not rejected.</p>
+<h4>Example request</h4><pre><code>curl -s -X POST "$GATEWAY/api/v1/apps/doc-tmp-store/report" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"reason": "broken", "details": "Does not open."}'</code></pre>
+<h4>Example response (200)</h4><pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+
+{
+  "status": "received",
+  "reportId": "7f450156-3652-442f-81be-c26610225c93"
+}</code></pre>
+<p>The success status is <strong>200</strong>, not 201. <code>reportId</code> is an opaque id; there is no endpoint for the user to read it back, so you only need it for support conversations.</p>
+<h4>Duplicate rule</h4>
+<p>One <strong>open</strong> report per user per app. If the user reports the same app again while their earlier report is still <code>OPEN</code> (staff have not handled it), the server does not create a second one: it answers 200 with the <strong>same</strong> <code>reportId</code>, and the new reason and details are <strong>silently discarded</strong>. Verified: after <code>BROKEN</code>, sending <code>{"reason":"SCAM"}</code> returned the same id (the stored reason stayed <code>BROKEN</code>). Once staff mark the report REVIEWED or DISMISSED, the user can report the app again and a new report is created.</p>
+<p>Client advice: after a successful report show "Thanks, we received your report" and keep the menu item enabled but remember locally (per app) that a report was sent, then show "You already reported this app" instead of letting the user write a second, lost, message. The server gives no way to ask "have I already reported this app?".</p>
+<h4>Example: invalid reason</h4><pre><code>curl -s -X POST "$GATEWAY/api/v1/apps/doc-tmp-store/report" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d '{"reason": "NOPE"}'</code></pre>
+<pre class="out"><code>HTTP/1.1 400 Bad Request
+
+{
+  "error": "validation_failed",
+  "fields": {
+    "reason": "must be one of SPAM, SCAM, INAPPROPRIATE, BROKEN, OTHER"
+  }
+}</code></pre>
+<p>A missing <code>reason</code> gives the same message. Details over 2000 characters: <code>{"error":"validation_failed","fields":{"details":"max 2000 characters"}}</code>.</p>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th>Error code</th><th>When it happens</th><th>What the caller should do</th></tr></thead><tbody><tr><td><strong>400</strong></td><td><code>validation_failed</code></td><td><code>reason</code> missing or not one of the five; <code>details</code> over 2000 characters.</td><td>Show the message; use a fixed list of five reasons in the UI so it cannot happen.</td></tr><tr><td><strong>400</strong></td><td><code>invalid_request</code></td><td>Body is not valid JSON or not an object.</td><td>Client bug.</td></tr><tr><td><strong>404</strong></td><td><code>not_found</code></td><td>The app does not exist or is not LIVE (DRAFT, PAUSED, KILLED).</td><td>Tell the user the app is not available; remove it from lists.</td></tr><tr><td><strong>401</strong></td><td>(empty body)</td><td>Missing or invalid session.</td><td>Sign in again.</td></tr><tr><td><strong>429</strong></td><td>(HTML page)</td><td>Gateway rate limit (300 per 60 s per IP).</td><td>Back off.</td></tr><tr><td><strong>415</strong></td><td>(framework body)</td><td>Missing <code>Content-Type</code>.</td><td>Client bug.</td></tr></tbody></table></div>
+</div></details>
+
+<div class="pager"><a class="prev" href="reviews-and-ratings.html"><small>Previous</small>Reviews and ratings</a><a class="next" href="mute-preferences.html"><small>Next</small>Mute preferences</a></div>
+<p class="footer">Adera super-app guides &middot; mini-app catalog &middot; last verified against the running dev stack on 2026-10-26</p>
+</main>
+</div>
+<script src="assets/app.js"></script>
+</body>
+</html>

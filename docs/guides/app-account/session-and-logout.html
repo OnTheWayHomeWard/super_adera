@@ -1,0 +1,279 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Session, token storage and logout | Adera guide</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+<button id="menu-btn" type="button" aria-label="Toggle menu">Menu</button>
+<span class="brand">Adera guide: sign-in and account</span>
+<span class="spacer"></span>
+<button id="theme-btn" type="button" aria-label="Toggle light or dark theme">Theme</button>
+</header>
+<div class="layout">
+<nav class="sidebar" aria-label="Pages in this guide">
+<h4>Super app: sign-in and account</h4>
+<ul><li><a href="index.html">Overview</a></li>
+<li><a href="quickstart.html">Quick start</a></li>
+<li><a href="authentication.html">Registration and login</a></li>
+<li><a href="session-and-logout.html" class="current">Session and logout</a><ul><li><a href="#overview">Overview</a></li><li><a href="#store-and-send">What to store and what to send</a></li><li><a href="#startup">App start-up and the three answers that matter</a></li><li><a href="#refresh">Session lifetime and renewing a session</a></li><li><a href="#endpoints">Endpoints</a></li><li><a href="#account-status">When the account is suspended or deleted</a></li></ul></li>
+<li><a href="profile.html">Profile</a></li>
+<li><a href="extra-data.html">Extra data</a></li>
+<li><a href="location.html">Location</a></li>
+<li><a href="avatar.html">Avatar</a></li>
+<li><a href="devices-and-push-tokens.html">Devices and push tokens</a></li>
+<li><a href="errors.html">Error table</a></li>
+<li><a href="known-issues.html">Known issues and not built yet</a></li></ul>
+</nav>
+<main>
+<h1>Session, token storage and logout</h1>
+<p class="lead">The session token: what to store, how to send it, how long it lives, how to renew it, how to sign out, and what the app sees when an account is blocked.</p>
+<h2 id="overview">Overview</h2>
+<p>A successful sign-in returns a <code>session_token</code>. It is an opaque string that stands for one <strong>session</strong> (one login on one device). The gateway turns it into the user's id on every call, so the app never sends a user id: it sends the token and the server decides who you are.</p>
+<div class="table-wrap"><table><thead><tr><th>Fact</th><th>Value</th></tr></thead><tbody>
+<tr><td>Who issues it</td><td>Ory Kratos, after the code step of registration or login</td></tr>
+<tr><td>Lifetime</td><td><strong>30 days</strong> from the moment the code was entered (<code>session.lifespan: 720h</code>); <code>session.expires_at</code> tells the exact instant</td></tr>
+<tr><td>Sliding?</td><td><strong>No.</strong> Using the API does not extend it. Only a refresh login (below) or a new login does.</td></tr>
+<tr><td>Assurance level</td><td>customers are always <code>aal1</code> (one factor: the code)</td></tr>
+<tr><td>One per login</td><td>each sign-in on each phone is its own session; they are independent and can be listed and revoked</td></tr>
+<tr><td>User id</td><td><code>session.identity.id</code>; the same value as <code>id</code> in <code>GET /api/v1/me</code></td></tr>
+</tbody></table></div>
+<h2 id="store-and-send">What to store and what to send</h2>
+<ul><li><strong>Store</strong> the <code>session_token</code> in the platform's secure storage (iOS Keychain, Android Keystore-backed encrypted storage), never in plain preferences or logs. Also keep <code>session.expires_at</code> and the user id (<code>session.identity.id</code>) if you want to show them without a call.</li><li><strong>Send</strong> <code>Authorization: Bearer &lt;session_token&gt;</code> on every call to <code>/api/v1/...</code>. The scheme word is case-insensitive (<code>bearer</code> worked); a token without the word <code>Bearer</code> gets <code>401</code>.</li><li>The alternative header <code>X-Session-Token</code> is accepted by Kratos' own endpoints (<code>/kratos/sessions/whoami</code> answered <code>200</code> with it) but <strong>not</strong> by <code>/api/v1/*</code> (<code>401</code>). Use <code>Authorization: Bearer</code> everywhere to keep it simple.</li><li>Do not send cookies and do not send an <code>X-User-Id</code> header: the gateway replaces it with the verified id (a forged one was ignored: the call still returned the caller's own profile).</li><li>Never put the token in a URL or a log line. Signed avatar URLs (see Avatar) are separate and carry no session.</li></ul>
+<div class="callout"><span class="label">How the gateway checks the token</span>
+<p>For every <code>/api/v1/me*</code> call the gateway first asks the user service (<code>GET /internal/auth/verify</code>) who owns the token. The user service asks Kratos <code>whoami</code>, checks the account status, and answers with the user id or a refusal. This is why a stopped Kratos shows up as <code>503</code>, and why a suspended account is refused even though its Kratos session is still valid.</p>
+</div>
+<h2 id="startup">App start-up and the three answers that matter</h2>
+<p>On launch, read the stored token and call <code>GET /api/v1/me</code> (it doubles as the session check and loads the profile). React to the status:</p>
+<div class="table-wrap"><table><thead><tr><th>Status</th><th>Body</th><th>Meaning</th><th>App action</th></tr></thead><tbody>
+<tr><td>200</td><td>profile JSON</td><td>session valid, account active</td><td>continue into the app</td></tr>
+<tr><td>401</td><td><strong>empty</strong> (<code>Content-Type: text/plain</code>)</td><td>token missing, malformed, expired, revoked (logout, "sign out everywhere", staff action)</td><td>delete the stored token, local profile caches and the FCM registration for this user; show the sign-in screen</td></tr>
+<tr><td>403</td><td><code>{"error":"account_suspended"}</code> or <code>{"error":"account_deleted"}</code></td><td>session valid but the account is blocked by staff</td><td>show a blocking "account suspended / closed, contact support" screen; offer sign out (see below)</td></tr>
+<tr><td>503</td><td><code>{"error":"identity_service_unavailable"}</code></td><td>the identity service could not be reached; <strong>not</strong> a statement about your token</td><td>keep the token, show "try again" and retry with back-off; do not log the user out</td></tr>
+<tr><td>429</td><td>HTML page</td><td>too many requests from this IP (300 per minute on <code>/api/v1/me*</code>)</td><td>back off, retry</td></tr>
+</tbody></table></div>
+<p>Never treat a network failure or a <code>5xx</code> as "logged out". Only a <code>401</code> from the gateway means the token is dead.</p>
+<h2 id="refresh">Session lifetime and renewing a session</h2>
+<p>A session ends 30 days after login. The app can simply send the person through sign-in again when a call returns <code>401</code>. To renew <em>without</em> creating a new session, Kratos supports a <strong>refresh login</strong>: start a login flow with <code>?refresh=true</code> and the current token, then do the normal code steps. Verified result:</p>
+<ol><li><code>GET /kratos/self-service/login/api?refresh=true</code> with header <code>X-Session-Token: $TOKEN</code> answers <code>200</code>, flow with <code>"refresh": true</code>.</li><li><code>POST /kratos/self-service/login?flow=ID</code> with the identifier (step 1: code sent) and then with the code (step 2), both with the same <code>X-Session-Token</code> header.</li><li>Step 2 answers <code>200</code> with the <strong>same</strong> <code>session_token</code> and the same session id, but <code>authenticated_at</code> and <code>expires_at</code> are now moved 30 days forward (captured: <code>expires_at</code> went from 2026-11-25T10:54:50Z to 2026-11-25T10:55:40Z, <code>authenticated_at</code> to the new time). The old token value keeps working (it is the same token).</li></ol>
+<p>Because it costs a code (an SMS), use it sparingly: for instance when the person opens the app inside the last days of the 30 and you want to avoid a surprise logout; otherwise just let a <code>401</code> lead to a normal sign-in. Starting a <em>normal</em> login while sending a valid token fails with <code>400 session_already_available</code> ("you are already logged in ... forget to set ?refresh=true"). A flow created with <code>refresh=true</code> and <em>no</em> session simply behaves like a normal login flow.</p>
+<h2 id="endpoints">Endpoints</h2>
+<details class="endpoint" id="ep-logout">
+<summary><span class="method m-post">POST</span><span class="path">/api/v1/me/logout</span><span class="sum">Log out this device (the call the app should use)</span></summary>
+<div class="body"><dl class="meta">
+<dt>Who may call</dt><dd>a signed-in user whose account is not blocked</dd>
+<dt>Auth</dt><dd><code>Authorization: Bearer $TOKEN</code> (the same token is the one revoked)</dd>
+<dt>Headers</dt><dd><code>Content-Type: application/json</code> if you send a body</dd>
+<dt>Rate limit</dt><dd>300 per 60 s per IP (route <code>me</code>)</dd>
+<dt>Implemented by</dt><dd><code>services/user-service/.../auth/LogoutController.java</code></dd>
+</dl>
+<h4>Purpose</h4>
+<p>One call that fully signs this phone out: (1) removes this device's push token so the <em>next person</em> who uses the phone does not receive this user's notifications, and (2) revokes the session behind the token. Kratos has no logout hook for native apps, which is why this combined call exists. Prefer it over Kratos' own logout.</p>
+<h4>Parameters (JSON body, optional)</h4>
+<div class="table-wrap"><table><thead><tr><th>Field</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why</th></tr></thead><tbody>
+<tr><td><code>fcmToken</code></td><td>string</td><td>optional</td><td>max 4096</td><td>the FCM token of this device; the matching device row of this user is deleted</td></tr>
+<tr><td><code>installationId</code></td><td>string</td><td>optional</td><td>max 64</td><td>the app's installation id; the matching device row of this user is deleted. Give at least one of the two to remove a device; both may be given</td></tr>
+</tbody></table></div>
+<p>An empty body, no body, or a body with both fields blank skips the device step and only revokes the session.</p>
+<h4>Example request</h4>
+<pre><code>curl -s -X POST "$GATEWAY/api/v1/me/logout" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"fcmToken":"&lt;this device FCM token&gt;","installationId":"a1b2c3d4-0000-4000-8000-doc000000001"}'</code></pre>
+<h4>Example response</h4>
+<pre class="out"><code>HTTP/1.1 204 No Content</code></pre>
+<h4>Errors</h4>
+<div class="table-wrap"><table><thead><tr><th>Status</th><th>Body</th><th>When</th><th>What to do</th></tr></thead><tbody>
+<tr><td>401</td><td>empty</td><td>token already dead (for example a second logout)</td><td>treat as logged out; clear local state</td></tr>
+<tr><td>403</td><td><code>account_suspended</code> / <code>account_deleted</code></td><td>the account is blocked (the gateway refuses this call too)</td><td>sign out locally and call Kratos' logout (below)</td></tr>
+<tr><td>503</td><td><code>identity_service_unavailable</code></td><td>Kratos could not be reached after the device was already removed</td><td>retry; clear local state anyway</td></tr>
+<tr><td>429</td><td>HTML page</td><td>limit</td><td>retry</td></tr>
+</tbody></table></div>
+<h4>Using it in the app</h4>
+<ul><li>Call it, then in all cases delete the stored token, cached profile and avatar, and the local FCM token (ask Firebase for a fresh one for the next user).</li><li>Verified: after logout the old token answers <code>401</code> on <code>/api/v1/me</code> and on Kratos' <code>whoami</code>; the user's other sessions are unaffected.</li><li>A device row that is not matched by the given token or installation id stays (for instance one registered without an installation id and logged out without its token).</li></ul>
+</div></details>
+<details class="endpoint" id="ep-whoami">
+<summary><span class="method m-get">GET</span><span class="path">/kratos/sessions/whoami</span><span class="sum">Who am I (check a token)</span></summary>
+<div class="body"><dl class="meta">
+<dt>Who may call</dt><dd>a signed-in user (any session)</dd>
+<dt>Auth</dt><dd><code>Authorization: Bearer $TOKEN</code> or <code>X-Session-Token: $TOKEN</code></dd>
+<dt>Rate limit</dt><dd>120 per 60 s per IP</dd>
+<dt>Implemented by</dt><dd>Ory Kratos</dd>
+</dl>
+<h4>Purpose</h4>
+<p>Returns the session and the identity behind a token, without touching Adera's own data. Use it when you only want to know whether the token is alive and when it expires; use <code>GET /api/v1/me</code> when you also need the profile (it additionally enforces the account status, whoami does not).</p>
+<h4>Example request</h4>
+<pre><code>curl -s "$GATEWAY/kratos/sessions/whoami" -H "Authorization: Bearer $TOKEN"</code></pre>
+<h4>Example response</h4>
+<pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json; charset=utf-8
+
+{
+  "id": "a8309c7f-02b5-46bb-b718-9adb2d0025aa",
+  "active": true,
+  "expires_at": "2026-11-25T10:49:43.584653Z",
+  "authenticated_at": "2026-10-26T10:49:43.584653Z",
+  "authenticator_assurance_level": "aal1",
+  "authentication_methods": [
+    { "method": "code", "aal": "aal1", "completed_at": "2026-10-26T10:49:43.584652703Z" }
+  ],
+  "issued_at": "2026-10-26T10:49:43.584653Z",
+  "identity": {
+    "id": "5bc6d545-771d-44f5-91cb-55415b01e4e4",
+    "schema_id": "default",
+    "state": "active",
+    "traits": { "phone_number": "+2519******57" },
+    "created_at": "2026-10-26T10:49:43.578352Z"
+  },
+  "devices": [ { "id": "66f34abc-0ead-4852-bfe6-c8116b3f2aff", "ip_address": "172.18.0.1", "user_agent": "...", "location": "" } ]
+}</code></pre>
+<pre class="out"><code>HTTP/1.1 401 Unauthorized
+Content-Type: application/json
+
+{
+  "error": {
+    "code": 401,
+    "status": "Unauthorized",
+    "request": "acd97d0e-e1eb-4977-adc0-844d89bdb85e",
+    "reason": "No valid session credentials found in the request.",
+    "message": "The request could not be authorized"
+  }
+}</code></pre>
+<h4>Errors</h4>
+<div class="table-wrap"><table><thead><tr><th>Status</th><th>Body</th><th>When</th></tr></thead><tbody>
+<tr><td>401</td><td>Kratos JSON (above)</td><td>missing, garbage, expired or revoked token</td></tr>
+<tr><td>429</td><td>HTML page</td><td>gateway limit</td></tr>
+</tbody></table></div>
+<h4>Using it in the app</h4>
+<p>Note the error shape is Kratos' (<code>error</code> is an object), unlike Adera's <code>{"error":"code"}</code>. A suspended account still gets <code>200</code> here (verified): Kratos does not know about Adera's account status.</p>
+</div></details>
+<details class="endpoint" id="ep-sessions-list">
+<summary><span class="method m-get">GET</span><span class="path">/kratos/sessions</span><span class="sum">List my other sessions</span></summary>
+<div class="body"><dl class="meta">
+<dt>Who may call</dt><dd>a signed-in user</dd>
+<dt>Auth</dt><dd>Bearer token</dd>
+<dt>Rate limit</dt><dd>120 per 60 s per IP</dd>
+<dt>Implemented by</dt><dd>Ory Kratos</dd>
+</dl>
+<h4>Purpose</h4>
+<p>Lists the account's <strong>other</strong> active sessions (the one making the call is excluded), each with its device info (IP, user agent). It is the basis for a "signed-in devices" screen.</p>
+<h4>Example request</h4>
+<pre><code>curl -s "$GATEWAY/kratos/sessions" -H "Authorization: Bearer $TOKEN"</code></pre>
+<h4>Example response (one other session)</h4>
+<pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json; charset=utf-8
+
+[
+  {
+    "id": "563018c8-dbf5-4785-a0ae-de1876a0b1cb",
+    "active": true,
+    "expires_at": "2026-11-25T11:00:54.879779Z",
+    "authenticated_at": "2026-10-26T11:00:54.879779Z",
+    "authenticator_assurance_level": "aal1",
+    "authentication_methods": [ { "method": "code", "aal": "aal1", "completed_at": "2026-10-26T11:00:54.879488637Z" } ],
+    "issued_at": "2026-10-26T11:00:54.879779Z",
+    "identity": { "id": "7e2a27b3-2f89-41c5-9f50-e0bc98da755a", "traits": { "email": "d***@example.com" }, "...": "..." },
+    "devices": [ { "id": "5af2b213-...", "ip_address": "17x.x.x.x", "user_agent": "...", "location": "" } ]
+  }
+]</code></pre>
+<p>With only one session the answer is <code>[]</code> (verified).</p>
+<h4>Errors</h4>
+<div class="table-wrap"><table><thead><tr><th>Status</th><th>Body</th><th>When</th></tr></thead><tbody>
+<tr><td>401</td><td>Kratos JSON</td><td>invalid token</td></tr>
+<tr><td>429</td><td>HTML page</td><td>limit</td></tr>
+</tbody></table></div>
+</div></details>
+<details class="endpoint" id="ep-sessions-revoke-one">
+<summary><span class="method m-delete">DELETE</span><span class="path">/kratos/sessions/{id}</span><span class="sum">Sign one other session out</span></summary>
+<div class="body"><dl class="meta">
+<dt>Who may call</dt><dd>a signed-in user</dd>
+<dt>Auth</dt><dd>Bearer token</dd>
+<dt>Rate limit</dt><dd>120 per 60 s per IP</dd>
+<dt>Implemented by</dt><dd>Ory Kratos</dd>
+</dl>
+<h4>Purpose</h4>
+<p>Revokes one session by its <strong>session id</strong> (the <code>id</code> field of <code>GET /kratos/sessions</code>; not the token). The device that owned it gets <code>401</code> from then on. Use it behind a "sign out this device" button.</p>
+<h4>Parameters</h4>
+<div class="table-wrap"><table><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th><th>Why</th></tr></thead><tbody>
+<tr><td><code>id</code></td><td>path</td><td>UUID</td><td>yes</td><td>which session</td></tr>
+</tbody></table></div>
+<h4>Example</h4>
+<pre><code>curl -s -o /dev/null -w "%{http_code}\n" -X DELETE "$GATEWAY/kratos/sessions/$SESSION_ID" -H "Authorization: Bearer $TOKEN"</code></pre>
+<pre class="out"><code>204</code></pre>
+<p>The revoked token then answers <code>401</code> everywhere (verified). An id that is not one of your sessions also answered <code>204</code> in the test (a random UUID): do not rely on this call to prove that a session existed.</p>
+<h4>Errors</h4>
+<div class="table-wrap"><table><thead><tr><th>Status</th><th>Body</th><th>When</th></tr></thead><tbody>
+<tr><td>401</td><td>Kratos JSON</td><td>invalid token</td></tr>
+<tr><td>429</td><td>HTML page</td><td>limit</td></tr>
+</tbody></table></div>
+<h4>Gotcha</h4>
+<p>It signs the other device out of the API but does <strong>not</strong> remove that device's push token (the other phone does that when it logs out; otherwise the token is retired when FCM reports it dead).</p>
+</div></details>
+<details class="endpoint" id="ep-sessions-revoke-others">
+<summary><span class="method m-delete">DELETE</span><span class="path">/kratos/sessions</span><span class="sum">Sign out everywhere else</span></summary>
+<div class="body"><dl class="meta">
+<dt>Who may call</dt><dd>a signed-in user</dd>
+<dt>Auth</dt><dd>Bearer token</dd>
+<dt>Rate limit</dt><dd>120 per 60 s per IP</dd>
+<dt>Implemented by</dt><dd>Ory Kratos</dd>
+</dl>
+<h4>Purpose</h4>
+<p>Revokes all of the account's sessions except the current one. Use it after a lost phone or a suspected leak.</p>
+<h4>Example</h4>
+<pre><code>curl -s -X DELETE "$GATEWAY/kratos/sessions" -H "Authorization: Bearer $TOKEN"</code></pre>
+<pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json; charset=utf-8
+
+{ "count": 1 }</code></pre>
+<p>The current token keeps working (verified). The <code>count</code> was <code>1</code> in a test where the only other session had already been revoked a moment earlier, so treat it as informational and not as an exact number of live sessions.</p>
+<h4>Errors</h4>
+<div class="table-wrap"><table><thead><tr><th>Status</th><th>Body</th><th>When</th></tr></thead><tbody>
+<tr><td>401</td><td>Kratos JSON</td><td>invalid token</td></tr>
+<tr><td>429</td><td>HTML page</td><td>limit</td></tr>
+</tbody></table></div>
+</div></details>
+<details class="endpoint" id="ep-kratos-logout">
+<summary><span class="method m-delete">DELETE</span><span class="path">/kratos/self-service/logout/api</span><span class="sum">Log out with Kratos directly</span></summary>
+<div class="body"><dl class="meta">
+<dt>Who may call</dt><dd>anyone holding the token</dd>
+<dt>Auth</dt><dd>the token is in the JSON <strong>body</strong>, no header</dd>
+<dt>Rate limit</dt><dd>120 per 60 s per IP</dd>
+<dt>Implemented by</dt><dd>Ory Kratos</dd>
+</dl>
+<h4>Purpose</h4>
+<p>Revokes the session whose token is in the body. Idempotent: an already-dead token also answers <code>204</code> (verified). Use it when <code>POST /api/v1/me/logout</code> is refused (blocked account) or you only need the session gone.</p>
+<h4>Parameters</h4>
+<div class="table-wrap"><table><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th><th>Why</th></tr></thead><tbody>
+<tr><td><code>session_token</code></td><td>body</td><td>string</td><td>yes</td><td>the token to revoke</td></tr>
+</tbody></table></div>
+<h4>Example</h4>
+<pre><code>curl -s -X DELETE "$GATEWAY/kratos/self-service/logout/api" \
+  -H "Content-Type: application/json" \
+  -d '{"session_token":"'"$TOKEN"'"}'</code></pre>
+<pre class="out"><code>HTTP/1.1 204 No Content</code></pre>
+<h4>Errors</h4>
+<div class="table-wrap"><table><thead><tr><th>Status</th><th>Body</th><th>When</th></tr></thead><tbody>
+<tr><td>400</td><td>Kratos JSON</td><td>body missing or not JSON</td></tr>
+<tr><td>429</td><td>HTML page</td><td>limit</td></tr>
+</tbody></table></div>
+</div></details>
+<h2 id="account-status">When the account is suspended or deleted</h2>
+<p>Staff can set an account to <code>SUSPENDED</code> or <code>DELETED</code> in the dashboard (the status is also visible as <code>status</code> in the profile). What the app sees:</p>
+<div class="table-wrap"><table><thead><tr><th>Situation</th><th>What the client sees</th></tr></thead><tbody>
+<tr><td>Staff changes the status</td><td>The dashboard action also revokes all the user's Kratos sessions (code: <code>AdminUserService.setStatus</code> calls <code>revokeSessions</code>), so existing tokens turn into <strong>401</strong> on the next call. Push messages stop: the account is no longer reachable for delivery.</td></tr>
+<tr><td>The person signs in again</td><td>Kratos still lets them in (the identity is not deleted) and returns a session. But every call that goes through the gateway's user check is answered <code>403</code> with <code>{"error":"account_suspended"}</code> or <code>{"error":"account_deleted"}</code> (the body has <code>Content-Type: text/plain</code>, parse it as JSON anyway). This applies to <strong>all</strong> <code>/api/v1/me*</code> routes including <code>POST /api/v1/me/logout</code> and the device, avatar and location calls (verified for profile read and update and for logout).</td></tr>
+<tr><td>Same session, status changed in the database only</td><td><code>403</code> immediately, while Kratos' own <code>whoami</code> still answers <code>200</code> (verified). Always trust the <code>403</code> from the API over <code>whoami</code>.</td></tr>
+<tr><td>Back to ACTIVE</td><td>A suspended account can be re-activated by staff; the next sign-in works normally. <code>DELETED</code> is final (staff get <code>409 user_deleted</code> when they try to change it).</td></tr>
+</tbody></table></div>
+<p><strong>What the app should do on 403:</strong> show a blocking screen ("Your account is suspended. Contact support."), stop all background calls, and let the person sign out with <code>DELETE /kratos/self-service/logout/api</code> (the combined logout is refused). Do not retry. The two codes are stable and safe to switch on.</p>
+
+<div class="pager"><a class="prev" href="authentication.html"><small>Previous</small>Registration and login</a><a class="next" href="profile.html"><small>Next</small>Profile</a></div>
+<p class="footer">Adera super-app guide: sign-in and account &middot; verified against the dev stack on 2026-10-26</p>
+</main>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Errors | Admin: managing mini apps</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+<button id="menu-btn" type="button" aria-label="Toggle menu">Menu</button>
+<a class="brand" href="index.html">Admin: managing mini apps</a>
+<span class="spacer"></span>
+<button id="theme-btn" type="button" aria-label="Toggle light or dark theme">Theme</button>
+</header>
+<div class="layout">
+<nav class="sidebar" aria-label="Pages in this guide">
+<h4>This guide</h4>
+<ul><li><a href="index.html">Overview</a></li>
+<li><a href="roles-and-access.html">Roles and access</a></li>
+<li><a href="apps-create-and-edit.html">Create, edit, list apps</a></li>
+<li><a href="status-lifecycle.html">Status lifecycle</a></li>
+<li><a href="logo.html">Logo</a></li>
+<li><a href="capabilities.html">Capabilities</a></li>
+<li><a href="notification-limits.html">Notification limits</a></li>
+<li><a href="environments-and-ips.html">Environments and IPs</a></li>
+<li><a href="partner-keys.html">Partner keys</a></li>
+<li><a href="templates.html">Templates</a></li>
+<li><a href="payment-settings.html">Payment settings</a></li>
+<li><a href="notification-log-and-usage.html">Notification log and usage</a></li>
+<li><a href="reviews-reports-audit.html">Reviews, reports, audit</a></li>
+<li><a href="runbooks.html">Runbooks</a></li>
+<li><a href="errors.html" class="current">Errors</a><ul><li><a href="#shape">The error shape</a></li><li><a href="#access">Access and gateway errors</a></li><li><a href="#common">Errors on admin calls</a></li><li><a href="#fields">Common fields messages</a></li><li><a href="#partner-errors">Partner-facing errors you will meet in tickets</a></li></ul></li>
+<li><a href="known-issues.html">Known issues</a></li>
+</ul></nav>
+<main>
+<h1>Errors</h1>
+<p class="lead">Every error code the admin API and the partner API return in this area, and what to do about each.</p>
+<h2 id="shape">The error shape</h2>
+<p>Every admin API error is a JSON object with an <code>error</code> code and, where useful, more fields. Match on the <code>error</code> code, not on the message text.</p>
+<pre class="out nocopy"><code>HTTP 400
+{
+  "error": "validation_failed",
+  "fields": {
+    "extraField": "unknown field",
+    "code": "required: 2-60 chars of lowercase letters, digits, '_', '.', '-' (e.g. job-accepted)",
+    "kind": "required: DIRECT (SMS or email) or IN_APP (inbox + push)",
+    "category": "must be TRANSACTIONAL, REMINDER or PROMOTIONAL",
+    "params": "each name must be unique, start with a letter and use letters, digits or '_' (max 30)",
+    "content": "unsupported language 'fr' (use en, am, om)"
+  }
+}
+
+HTTP 409
+{
+  "error": "not_ready_for_live",
+  "fields": {
+    "missing": "logo,supportEmail"
+  }
+}
+
+HTTP 403
+{
+  "error": "insufficient_role"
+}</code></pre>
+<ul><li><code>fields</code> holds one message per bad field (validation errors), or details of a conflict (<code>not_ready_for_live</code>: <code>fields.missing</code>; <code>too_many_active_keys</code>: <code>fields.max</code>). Field keys use dots for nested places: <code>content.en.body</code>.</li><li>Errors from the notification service's admin endpoints (templates, log, usage) have the same shape.</li><li>Two answers do <strong>not</strong> use it: a gateway rate-limit 429 (the gateway writes its own body) and a path that does not exist (the framework's default JSON, below).</li></ul>
+<pre class="out nocopy"><code>GET /admin/api/v1/apps/$APP_ID/nope
+HTTP 404  {"timestamp": "2026-10-26T11:16:24.497Z", "status": 404, "error": "Not Found", "path": "/admin/api/v1/apps/ff6510a9-de00-4fb2-97a4-ce4ad6e377dd/nope"}</code></pre>
+<h2 id="access">Access and gateway errors</h2>
+<div class="table-wrap"><table><thead><tr><th>Status</th><th><code>error</code></th><th>Meaning</th><th>What to do</th></tr></thead><tbody><tr><td>401</td><td><code>unauthorized</code></td><td>No token, an unknown or expired session, or the staff member is disabled.</td><td>Sign in again (<a href="roles-and-access.html#sign-in">staff sign-in</a>).</td></tr><tr><td>403</td><td><code>mfa_required</code></td><td>The session is aal1 (authenticator step missing).</td><td>Complete the authenticator step.</td></tr><tr><td>403</td><td><code>not_staff</code></td><td>Signed in but not an active staff member.</td><td>A SUPER_ADMIN adds the person.</td></tr><tr><td>403</td><td><code>insufficient_role</code></td><td>Your role is too low.</td><td>Ask a higher role; see the matrix.</td></tr><tr><td>403</td><td><code>only_super_admin_can_revive_killed_app</code></td><td>ADMIN tried to leave KILLED.</td><td>A SUPER_ADMIN makes the call.</td></tr><tr><td>429</td><td>(gateway)</td><td>Over 300 requests per minute from one IP.</td><td>Slow down.</td></tr><tr><td>503</td><td><code>identity_service_unavailable</code> / gateway</td><td>The identity service or registry is unreachable while checking the token.</td><td>Retry; check service health.</td></tr></tbody></table></div>
+<h2 id="common">Errors on admin calls</h2>
+<div class="table-wrap"><table><thead><tr><th>Status</th><th><code>error</code></th><th>Where</th><th>Meaning</th><th>What to do</th></tr></thead><tbody><tr><td>400</td><td><code>validation_failed</code></td><td>Every write; list filters</td><td>A field breaks a rule. <code>fields</code> says which.</td><td>Fix the named fields.</td></tr><tr><td>400</td><td><code>invalid_request</code></td><td>Any call</td><td>The body is not valid JSON, or a path id / query id is not a UUID.</td><td>Check the JSON and the ids.</td></tr><tr><td>404</td><td><code>not_found</code></td><td>Any call with an id</td><td>No such app, key, template, notification, review or report.</td><td>List first; use the UUID.</td></tr><tr><td>409</td><td><code>slug_taken</code></td><td>Create app</td><td>The slug exists.</td><td>Choose another slug.</td></tr><tr><td>409</td><td><code>not_ready_for_live</code></td><td>Set status LIVE</td><td>A logo and/or a support email is missing (<code>fields.missing</code>).</td><td>Upload the logo; PATCH <code>supportEmail</code>.</td></tr><tr><td>409</td><td><code>too_many_active_keys</code></td><td>Register or generate key</td><td>5 ACTIVE keys already in that environment.</td><td>Revoke unused keys (expired ones count until revoked).</td></tr><tr><td>409</td><td><code>template_code_taken</code></td><td>Create template</td><td>The app already has this code.</td><td>Another code, or edit the template.</td></tr><tr><td>409</td><td><code>conflict</code></td><td>Edits</td><td>The database refused a value (for example a website over 300 characters).</td><td>Shorten the value.</td></tr><tr><td>413</td><td><code>file_too_large</code></td><td>Upload logo</td><td>Over 2 MiB (or over the request limit).</td><td>Export a smaller image.</td></tr></tbody></table></div>
+<h2 id="fields">Common <code>fields</code> messages</h2>
+<div class="table-wrap"><table><thead><tr><th>Where</th><th>Message (shortened)</th><th>Cause</th></tr></thead><tbody><tr><td>create app</td><td>slug: required: 2-40 chars, lowercase letters, digits and dashes</td><td>Bad slug.</td></tr><tr><td>any app write</td><td><em>field</em>: unknown field</td><td>A field name that does not exist (typo).</td></tr><tr><td>PATCH app</td><td>slug: the slug is permanent and cannot be changed</td><td>Slug sent on update.</td></tr><tr><td>name</td><td>an English ('en') name is required</td><td><code>name</code> without <code>en</code>.</td></tr><tr><td>status</td><td>must be DRAFT, LIVE, PAUSED or KILLED</td><td>Wrong or missing status.</td></tr><tr><td>capability</td><td>required for location.coarse: a plain-language English reason (min 10 chars) shown to users</td><td>Granting a capability that needs a reason.</td></tr><tr><td>limits</td><td>must be a whole number >= 0, or null for unlimited</td><td>Negative, fractional or text value.</td></tr><tr><td>allowedCidrs</td><td>'...' is not a valid IP address or range</td><td>A hostname, a typo, or a bad prefix.</td></tr><tr><td>allowedCidrs</td><td>a range that matches every address (/0) is not allowed for PROD</td><td><code>0.0.0.0/0</code> for PROD.</td></tr><tr><td>publicKeyPem</td><td>that is a PRIVATE key. Never send it...</td><td>A private key pasted into the register call.</td></tr><tr><td>publicKeyPem</td><td>must be a PEM public key starting with -----BEGIN PUBLIC KEY-----</td><td>Wrong format (for example RSA PUBLIC KEY or a certificate).</td></tr><tr><td>expiresAt</td><td>must be in the future</td><td>Key expiry or new template expiry in the past.</td></tr><tr><td>content.en.body</td><td>uses {x} which is not a declared param</td><td>A placeholder without a declared param.</td></tr><tr><td>content.en.title</td><td>an English title is required for IN_APP templates</td><td>IN_APP without an English title.</td></tr><tr><td>code, kind (PATCH template)</td><td>cannot be changed after creation</td><td>Immutable template fields sent on update.</td></tr></tbody></table></div>
+<h2 id="partner-errors">Partner-facing errors you will meet in tickets</h2>
+<p>These are returned to the partner's servers by the partner API (<code>/v1/*</code>), not to staff. Partners will quote them to you. Checks run in this order, top to bottom, so the first one that applies is the one the partner sees.</p>
+<div class="table-wrap"><table><thead><tr><th>Status</th><th><code>error</code></th><th>Meaning</th><th>Admin action that fixes it</th></tr></thead><tbody><tr><td>413</td><td><code>request_too_large</code></td><td>Body over 64 KB.</td><td>Tell the partner (no admin action).</td></tr><tr><td>401</td><td><code>missing_signature</code></td><td>Key id, timestamp or signature header missing.</td><td>Partner bug.</td></tr><tr><td>401</td><td><code>invalid_timestamp</code>, <code>stale_timestamp</code></td><td>Timestamp not a number, or more than 5 minutes off Adera's clock.</td><td>Partner must fix its clock.</td></tr><tr><td>401</td><td><code>unknown_key</code></td><td>No such key id.</td><td>Check that the key id is right and registered for this app (<a href="partner-keys.html">Partner keys</a>).</td></tr><tr><td>401</td><td><code>key_revoked_or_expired</code></td><td>The key was revoked or is past <code>expiresAt</code>.</td><td>Register a new key (rotation runbook).</td></tr><tr><td>401</td><td><code>invalid_signature</code></td><td>The signature does not match (wrong private key, changed body, wrong path).</td><td>Compare the fingerprint; the partner re-checks signing.</td></tr><tr><td>403</td><td><code>wrong_environment</code></td><td>A key of the other environment (a PROD key used on the dev deployment, or the reverse).</td><td>Register a key for the right environment.</td></tr><tr><td>401</td><td><code>unknown_app</code></td><td>The key's app no longer exists.</td><td>Data problem; check the app.</td></tr><tr><td>403</td><td><code>app_draft</code>, <code>app_paused</code>, <code>app_killed</code></td><td>The app status does not allow calls here (PROD needs LIVE; DEV refuses only KILLED).</td><td>Change the status if appropriate (<a href="status-lifecycle.html">Status lifecycle</a>).</td></tr><tr><td>403</td><td><code>ip_not_allowed</code></td><td>The caller's address is not in the allowed list for this environment.</td><td>Add the address (runbook 6).</td></tr><tr><td>503</td><td><code>service_unavailable</code></td><td>Adera could not reach its own registry or user service, or the two services disagree on <code>ADERA_ENV</code>.</td><td>Operations: check services and the environment setting.</td></tr><tr><td>400</td><td><code>validation_failed</code></td><td>The send request is malformed (<code>fields</code>).</td><td>Partner bug.</td></tr><tr><td>409</td><td><code>external_id_reused</code></td><td>The same <code>externalId</code> was used for a different request.</td><td>Partner must use unique ids.</td></tr><tr><td>404</td><td><code>template_not_found</code></td><td>Template id of another app or unknown.</td><td>Give the partner the right template id.</td></tr><tr><td>422</td><td><code>template_inactive</code>, <code>template_not_yet_valid</code>, <code>template_expired</code></td><td>The template is switched off or outside its window.</td><td>Activate or extend it (<a href="templates.html">Templates</a>).</td></tr><tr><td>422</td><td><code>param_invalid</code></td><td>A value is missing, too long, has a link, or is not declared (<code>fields</code>).</td><td>Partner bug, or change the template's params.</td></tr><tr><td>422</td><td><code>user_unreachable</code></td><td>The user is unknown to this app, deleted, suspended, or has no contact for the channel.</td><td>None; tell the partner.</td></tr><tr><td>422</td><td><code>synthetic_user_not_allowed</code></td><td>A <code>u_p_test_*</code> user in PROD.</td><td>Partner uses real user ids in PROD.</td></tr><tr><td>403</td><td><code>capability_not_granted</code></td><td>The channel needs a capability that is not GRANTED (<code>capability</code> says which).</td><td>Grant it (<a href="capabilities.html">Capabilities</a>).</td></tr><tr><td>429</td><td><code>quota_exceeded</code></td><td>A notification limit was hit (<code>limit</code>, <code>channel</code>).</td><td>Raise the limit (runbook 5), or wait.</td></tr></tbody></table></div>
+<p>Real examples from the test app:</p>
+<pre class="out nocopy"><code>ip_not_allowed:
+HTTP 403  {"error": "ip_not_allowed"}
+capability_not_granted:
+HTTP 403  {"error": "capability_not_granted", "capability": "notify.sms"}
+quota_exceeded:
+HTTP 429  {"error": "quota_exceeded", "limit": "max_per_user_per_day", "channel": "IN_APP"}
+key_revoked_or_expired:
+HTTP 401  {"error": "key_revoked_or_expired"}
+app_killed:
+HTTP 403  {"error": "app_killed"}
+param_invalid:
+HTTP 422  {"error": "param_invalid", "fields": {"name": "links are not allowed in this value"}}
+user_unreachable:
+HTTP 422  {"error": "user_unreachable"}
+template_expired:
+HTTP 422  {"error": "template_expired"}</code></pre>
+<p>The key and signature errors, captured the same way (a PROD key used on the dev deployment, an unknown key id, a timestamp an hour old, no headers, a body changed after signing):</p>
+<pre class="out nocopy"><code>wrong_environment:
+HTTP 403  {"error": "wrong_environment"}
+unknown_key:
+HTTP 401  {"error": "unknown_key"}
+stale_timestamp:
+HTTP 401  {"error": "stale_timestamp"}
+missing_signature:
+HTTP 401  {"error": "missing_signature"}
+invalid_signature:
+HTTP 401  {"error": "invalid_signature"}</code></pre>
+<div class="callout "><span class="label">Note</span><p>The PROD forms of <code>app_draft</code> and <code>app_paused</code> (and PROD <code>app_killed</code>) come from the code and its tests: this guide's captures were taken on a DEV deployment, where only <code>app_killed</code> occurs.</p></div>
+
+<div class="pager"><a class="prev" href="runbooks.html"><small>Previous</small>Runbooks</a><a class="next" href="known-issues.html"><small>Next</small>Known issues</a></div>
+<p class="footer">Admin guide: managing mini apps. Examples were captured from a running dev stack (ADERA_ENV=dev) with a throwaway app and a temporary staff account, both removed afterwards. Ids, timestamps and key ids differ on your system.</p>
+</main>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

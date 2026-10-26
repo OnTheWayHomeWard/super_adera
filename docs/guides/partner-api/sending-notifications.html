@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sending notifications | Adera partner API</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+<button id="menu-btn" type="button" aria-label="Toggle menu">Menu</button>
+<a class="brand" href="index.html">Adera partner API</a>
+<span class="spacer"></span>
+<button id="theme-btn" type="button" aria-label="Toggle light or dark theme">Theme</button>
+</header>
+<div class="layout">
+<nav class="sidebar" aria-label="Pages">
+<h4>Mini-app backend API</h4>
+<ul><li><a href="index.html">Overview and contents</a></li><li><a href="quickstart.html">Quick start</a></li><li><a href="signing.html">Signing requests (ADERA-SIG-1)</a></li><li><a href="environments-and-ips.html">Environments, IPs and keys</a></li><li><a href="user-ids.html">Pseudonymous user ids</a></li><li><a href="templates.html">Templates</a></li><li><a href="sending-notifications.html" class="current">Sending notifications</a><ul><li><a href="#overview">Overview</a></li><li><a href="#endpoint">Endpoint</a></li><li><a href="#order">What Adera checks, in order</a></li><li><a href="#channels">Channel selection</a></li><li><a href="#idempotency">Idempotency with externalId</a></li><li><a href="#callback-url">callbackUrl rules</a></li><li><a href="#capabilities">Capabilities</a></li></ul></li><li><a href="statuses-and-callbacks.html">Statuses, retries and callbacks</a></li><li><a href="limits-and-quotas.html">Limits and quotas</a></li><li><a href="sandbox-and-testing.html">Sandbox and testing checklist</a></li><li><a href="errors.html">Error codes</a></li><li><a href="data-available-to-mini-apps.html">What data a mini app gets</a></li><li><a href="known-issues.html">Known issues and not built yet</a></li></ul>
+</nav>
+<main>
+<h1>Sending notifications</h1>
+<p class="lead"><code>POST /v1/notifications</code>: ask Adera to reach one user with one approved template. Every field, how Adera picks the channel, idempotency with <code>externalId</code>, and the rules for <code>callbackUrl</code>.</p>
+
+<h2 id="overview">Overview</h2>
+<p>You tell Adera <em>who</em> (the user's pseudonymous id for your app), <em>what</em> (a template id and its values) and optionally <em>where to report</em> (a callback URL). Adera answers immediately whether it accepted the request, and delivers in the background. The answer <code>202 QUEUED</code> means "accepted and stored, we will deliver"; it does not mean delivered. The result comes by <a href="statuses-and-callbacks.html#callbacks">callback</a> or by <a href="statuses-and-callbacks.html#polling">polling</a>.</p>
+<div class="callout why"><span class="label">Why asynchronous</span><p>SMS gateways, email servers and Firebase are slow and sometimes down. Adera stores your request first (so it cannot be lost), then retries with backoff for as long as you allowed (<code>ttlSeconds</code>). Your request never waits for a telecom operator.</p></div>
+
+<h2 id="endpoint">Endpoint</h2>
+<details class="endpoint" id="ep-send" open><summary><span class="method m-post">POST</span><span class="path">/v1/notifications</span><span class="sum">Send a notification to one user</span></summary><div class="body">
+<dl class="meta">
+<dt>Who may call</dt><dd>A mini-app server: valid <a href="signing.html">ADERA-SIG-1 signature</a>, key of this deployment's environment, app status allowing calls, caller on the allowed address list.</dd>
+<dt>Headers</dt><dd><code>X-Adera-Key-Id</code>, <code>X-Adera-Timestamp</code>, <code>X-Adera-Signature</code>, <code>Content-Type: application/json</code></dd>
+<dt>Rate limit</dt><dd>600 requests per 60 s per client IP (gateway) and the per-app <a href="limits-and-quotas.html">quotas</a></dd>
+<dt>Body limit</dt><dd>64 KiB (<code>413 request_too_large</code>); a JSON object is required</dd>
+<dt>Idempotent</dt><dd>Yes, on <code>externalId</code></dd>
+</dl>
+<h4>Purpose</h4>
+<p>Tell a user something that matters about your service (a job was accepted, a ride arrived, a payment is due) in a way that reaches them whether or not they have your mini app open, without you holding their phone number or email address.</p>
+
+<h4>Request fields</h4>
+<div class="table-wrap"><table><thead><tr><th>Field</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why it exists</th></tr></thead><tbody>
+<tr><td><code>externalId</code></td><td>string</td><td>yes</td><td>1 to 100 characters from <code>A-Z a-z 0-9 . _ : -</code>. Unique per app and environment.</td><td>Your own id for this message. Makes the call <a href="#idempotency">idempotent</a> (safe to retry), and is how you poll: <code>GET /v1/notifications/{externalId}</code>. Use your own business id, e.g. <code>job-1001-accepted</code>.</td></tr>
+<tr><td><code>userId</code></td><td>string</td><td>yes</td><td><code>u_p_</code> + letters, digits or <code>_</code> (1 to 60). Must be an id issued to your app, see <a href="user-ids.html">User ids</a>.</td><td>Who gets the message, without revealing who they are.</td></tr>
+<tr><td><code>templateId</code></td><td>string (UUID)</td><td>yes</td><td>The <code>id</code> of one of <em>your</em> templates that is usable now.</td><td>What to say. Only approved wording can be sent.</td></tr>
+<tr><td><code>params</code></td><td>object</td><td>if the template has required params</td><td>Keys must be the template's declared params; values text, number or boolean, within <code>maxLength</code>, no control characters, no links unless allowed. Default <code>{}</code>.</td><td>The values for the placeholders (e.g. <code>{"name":"Abebe"}</code>). See <a href="templates.html#params">Templates</a>.</td></tr>
+<tr><td><code>callbackUrl</code></td><td>string</td><td>no</td><td>At most 500 characters; must start with <code>https://</code> (or <code>http://</code>, see the rules below). Surrounding spaces are trimmed.</td><td>Where Adera POSTs the final status, so you do not have to poll. See <a href="#callback-url">callback URL rules</a>.</td></tr>
+<tr><td><code>ttlSeconds</code></td><td>integer</td><td>no</td><td>A whole JSON number from <code>60</code> to <code>604800</code> (7 days). Default <code>86400</code> (24 hours). A string or a decimal is refused.</td><td>How long Adera keeps trying before giving up with status <code>EXPIRED</code>. A "your ride is here" message is worthless after 10 minutes (use <code>600</code>); a statement notice may wait a day.</td></tr>
+<tr><td><code>data</code></td><td>object</td><td>no</td><td>A JSON object whose serialized size is at most 2048 bytes. Default <code>{}</code>.</td><td>Machine-readable context delivered with an <code>IN_APP</code> notification: stored with the user's inbox entry and sent in the push payload (all values as strings, plus <code>notificationId</code> and <code>appId</code>) so the Adera app can open the right screen of your mini app. Not used for SMS or email. Put ids, not secrets or personal data.</td></tr>
+</tbody></table></div>
+<p>Unknown fields are refused (<code>validation_failed</code>, <code>"unknown field"</code>): a typo such as <code>callbackURL</code> does not pass silently. You never choose a channel or a language.</p>
+
+<h4>Example request</h4>
+<pre><code>printf '%s' '{"externalId":"doc-cb1","userId":"'$ABEBE'","templateId":"'$JOB'",
+ "params":{"name":"Abebe","reference":"J-1001"},
+ "callbackUrl":"https://partner.example/adera/hook","ttlSeconds":3600,"data":{"jobId":"1001","screen":"job"}}' &gt; body.json
+./adera_call.sh POST /v1/notifications body.json</code></pre>
+<p>(The captured run used a callback receiver on the developer machine instead of <code>partner.example</code>, which the dev stack allows.) Python and Node.js versions of the same call are in <a href="signing.html#python">Signing</a>: <code>call("POST", "/v1/notifications", {...})</code>.</p>
+
+<h4>Response: <code>202 Accepted</code></h4>
+<pre class="out"><code>HTTP 202
+{
+  "notificationId": "1d09ca65-422f-4e52-a0e6-2b23b775a333",
+  "externalId": "doc-cb1",
+  "status": "QUEUED",
+  "channel": "SMS",
+  "environment": "DEV",
+  "createdAt": "2026-10-26T10:54:27.677420Z",
+  "expiresAt": "2026-10-26T11:54:27.666071Z"
+}</code></pre>
+<div class="table-wrap"><table><thead><tr><th>Field</th><th>Meaning</th></tr></thead><tbody>
+<tr><td><code>notificationId</code></td><td>Adera's UUID for it. Quote it to Adera support.</td></tr>
+<tr><td><code>externalId</code></td><td>Echo of yours.</td></tr>
+<tr><td><code>status</code></td><td><code>QUEUED</code> on <code>202</code>; <code>SUPPRESSED</code> on the muted-user <code>200</code>; on a replay the current status. See <a href="statuses-and-callbacks.html#statuses">statuses</a>.</td></tr>
+<tr><td><code>channel</code></td><td>The channel Adera chose: <code>SMS</code>, <code>EMAIL</code> or <code>IN_APP</code>. Fixed at acceptance.</td></tr>
+<tr><td><code>reason</code></td><td>Only present when there is one (for example <code>recipient_opted_out</code>).</td></tr>
+<tr><td><code>environment</code></td><td><code>DEV</code> or <code>PROD</code>: the environment that handled it.</td></tr>
+<tr><td><code>createdAt</code>, <code>expiresAt</code></td><td>When it was stored, and when Adera stops trying (<code>createdAt + ttlSeconds</code>).</td></tr>
+<tr><td><code>completedAt</code></td><td>Only present once the notification reached a final status.</td></tr>
+<tr><td><code>replayed</code></td><td>Only present, as <code>true</code>, on a repeat of an earlier identical request.</td></tr>
+</tbody></table></div>
+<p>Use the answer: store <code>notificationId</code> and <code>channel</code> next to your own record; mark your record "notification requested", not "user informed"; wait for the callback or poll for the final status.</p>
+
+<h4>Answers</h4>
+<div class="table-wrap"><table><thead><tr><th>Status</th><th><code>error</code> / meaning</th><th>When</th><th>What to do</th></tr></thead><tbody>
+<tr><td>202</td><td><code>QUEUED</code></td><td>Accepted and stored.</td><td>Wait for the callback / poll.</td></tr>
+<tr><td>200</td><td><code>replayed: true</code></td><td>Same <code>externalId</code> and the same request seen before.</td><td>Treat as success; the <code>status</code> shows where it is now.</td></tr>
+<tr><td>200</td><td><code>SUPPRESSED</code></td><td>The user muted this channel for your app.</td><td>Nothing: it is final. See <a href="limits-and-quotas.html#muted">muted users</a>.</td></tr>
+<tr><td>400</td><td><code>validation_failed</code> (+ <code>fields</code>)</td><td>A field is missing, unknown or malformed.</td><td>Fix the fields named; never retry unchanged.</td></tr>
+<tr><td>400</td><td><code>invalid_request</code></td><td>Body is not valid JSON or not a JSON object.</td><td>Send a JSON object.</td></tr>
+<tr><td>401 / 403</td><td>signature, key, status, address codes</td><td>See <a href="errors.html#auth-errors">authentication errors</a>.</td><td>As listed there.</td></tr>
+<tr><td>403</td><td><code>capability_not_granted</code> (+ <code>capability</code>)</td><td>The channel Adera chose needs a capability your app lacks.</td><td>Ask Adera staff for it (<a href="#capabilities">below</a>).</td></tr>
+<tr><td>404</td><td><code>template_not_found</code></td><td>Unknown template, or one of another app.</td><td>List your templates.</td></tr>
+<tr><td>409</td><td><code>external_id_reused</code></td><td>Same <code>externalId</code>, different request.</td><td>Use a new <code>externalId</code> for a different message.</td></tr>
+<tr><td>413</td><td><code>request_too_large</code></td><td>Body over 64 KiB.</td><td>Send less.</td></tr>
+<tr><td>422</td><td><code>param_invalid</code>, <code>template_inactive</code>, <code>template_not_yet_valid</code>, <code>template_expired</code>, <code>user_unreachable</code>, <code>synthetic_user_not_allowed</code></td><td>See <a href="errors.html">Error codes</a>.</td><td>As listed there.</td></tr>
+<tr><td>429</td><td><code>quota_exceeded</code> (+ <code>limit</code>, <code>channel</code>)</td><td>An app quota is used up.</td><td><a href="limits-and-quotas.html">Limits and quotas</a></td></tr>
+<tr><td>503</td><td><code>service_unavailable</code></td><td>A dependency of Adera is down.</td><td>Retry the same request later (same <code>externalId</code>).</td></tr>
+</tbody></table></div>
+<p>A rejected request (any <code>4xx</code> or <code>503</code>) stores nothing and uses no quota, so you can fix it and send again, even with the same <code>externalId</code>.</p>
+</div></details>
+
+<h2 id="order">What Adera checks, in order</h2>
+<ol>
+<li>Signature, key, environment, app status and caller address (<a href="signing.html#order">Signing</a>).</li>
+<li>Body shape and every field (<code>400</code>), all problems reported together in <code>fields</code>.</li>
+<li><strong>Replay check:</strong> if this <code>externalId</code> exists, answer <code>200 replayed</code> (same request) or <code>409</code> (different). Nothing below runs for a replay.</li>
+<li>Template: exists for your app (<code>404</code>), active and inside its window (<code>422 template_*</code>).</li>
+<li><code>params</code> against the template (<code>422 param_invalid</code>).</li>
+<li>User: synthetic-user rule (PROD), the id resolves to an active user (<code>422 user_unreachable</code>).</li>
+<li>Channel choice and capability (<code>403 capability_not_granted</code> or <code>422 user_unreachable</code>).</li>
+<li>Mute check: a muted channel is stored as <code>SUPPRESSED</code> and answered <code>200</code> (no quota used).</li>
+<li>Quota (<code>429</code>): the request is counted and stored atomically.</li>
+<li>Stored as <code>QUEUED</code>, <code>202</code>.</li>
+</ol>
+
+<h2 id="channels">Channel selection</h2>
+<p>You never name a channel. The <strong>template kind</strong> and the <strong>user's contact data</strong> decide, and your app's <strong>capabilities</strong> must allow it:</p>
+<div class="table-wrap"><table><thead><tr><th>Template kind</th><th>Rule</th><th>Capability needed</th></tr></thead><tbody>
+<tr><td><code>DIRECT</code></td><td>1. <strong>SMS</strong> if the user has a phone number and your app may send SMS. 2. Otherwise <strong>email</strong> if the user has an email address and your app may send email. 3. If the user has a phone but your app lacks <code>notify.sms</code> (and no usable email), or has only an email but your app lacks <code>notify.email</code>: <code>403 capability_not_granted</code> naming the missing capability. 4. The user has neither phone nor email: <code>422 user_unreachable</code>.</td><td><code>notify.sms</code> or <code>notify.email</code></td></tr>
+<tr><td><code>IN_APP</code></td><td>The user's <strong>inbox</strong> inside the Adera app, plus a <strong>push</strong> notification to each of their registered devices. Always this channel, whatever contact data the user has.</td><td><code>notify.inapp</code></td></tr>
+</tbody></table></div>
+<p>Observed on the dev stack with the throwaway app (all <code>DIRECT</code> unless noted):</p>
+<div class="table-wrap"><table><thead><tr><th>User</th><th>App capabilities</th><th>Result</th></tr></thead><tbody>
+<tr><td>phone and email</td><td>SMS and email granted</td><td><code>202</code>, channel <code>SMS</code></td></tr>
+<tr><td>phone and email</td><td><code>notify.sms</code> DENIED</td><td><code>202</code>, channel <code>EMAIL</code> (falls back)</td></tr>
+<tr><td>phone only</td><td><code>notify.sms</code> DENIED</td><td><code>403 {"error":"capability_not_granted","capability":"notify.sms"}</code></td></tr>
+<tr><td>email only</td><td>email granted</td><td><code>202</code>, channel <code>EMAIL</code></td></tr>
+<tr><td>email only</td><td><code>notify.email</code> SUSPENDED</td><td><code>403 {"error":"capability_not_granted","capability":"notify.email"}</code></td></tr>
+<tr><td>phone and email</td><td><code>notify.email</code> SUSPENDED, SMS granted</td><td><code>202</code>, channel <code>SMS</code></td></tr>
+<tr><td>any (IN_APP template)</td><td><code>notify.inapp</code> DENIED</td><td><code>403 {"error":"capability_not_granted","capability":"notify.inapp"}</code></td></tr>
+</tbody></table></div>
+<ul>
+<li><strong>There is no fallback after acceptance.</strong> If the chosen channel is muted by the user, the request is <code>SUPPRESSED</code>, it is not re-sent by another channel. If an SMS fails permanently, it is <code>FAILED</code>, not re-sent by email.</li>
+<li>The contact data are read again at delivery time. If the user removed their phone or email between acceptance and delivery, the notification ends as <code>UNREACHABLE</code> with reason <code>no_phone</code> or <code>no_email</code>.</li>
+<li>Whoever needs to know which channel was used reads <code>channel</code> in the answer.</li>
+<li>If you need a message to reach a user by <em>every</em> channel, send one request per template kind with different <code>externalId</code>s.</li>
+</ul>
+
+<h3 id="rendered">What the user receives (dev stack)</h3>
+<p>For the <code>job-accepted</code> template with <code>{"name":"Abebe"}</code>:</p>
+<div class="table-wrap"><table><thead><tr><th>Channel</th><th>What was delivered (dev provider)</th></tr></thead><tbody>
+<tr><td>SMS</td><td>Console log line: <code>[SMS console] to=+2519******01 body=Hi Abebe, your Adera job was accepted. Thank you!</code></td></tr>
+<tr><td>Email</td><td>Message in the local mail catcher: from <code>Adera &lt;no-reply@adera.local&gt;</code>, subject <em>Job accepted</em>, text <em>Hi Hana, your job was accepted</em> and HTML part <code>&lt;p&gt;Hi Hana, your job was accepted.&lt;/p&gt;</code></td></tr>
+<tr><td>IN_APP</td><td>Inbox entry <code>title "Hello Abebe"</code>, <code>body "Your ride is here"</code>, <code>data {"rideId": "77"}</code>, plus one push attempt per registered device (fake push provider in dev: <code>fcm-fake</code>, outcome OK for each of the user's two devices)</td></tr>
+</tbody></table></div>
+
+<h2 id="idempotency">Idempotency with <code>externalId</code></h2>
+<p>Networks fail. If your request times out you cannot know whether Adera stored it. Send it again <strong>with the same <code>externalId</code> and the same content</strong>: you get the stored result and nothing is sent twice.</p>
+<pre class="out nocopy"><code>first request                          -> 202 {"notificationId":"464e21b3-...","externalId":"doc-i1","status":"QUEUED",...}
+same request again                     -> 200 {"notificationId":"464e21b3-...","externalId":"doc-i1","status":"QUEUED",...,"replayed":true}
+same externalId, params changed        -> 409 {"error":"external_id_reused"}
+same request, JSON keys in another order -> 200 {... "replayed":true}</code></pre>
+<ul>
+<li>"The same request" means the same <code>templateId</code>, <code>userId</code>, <code>params</code>, <code>data</code>, <code>callbackUrl</code> and <code>ttlSeconds</code> (key order and whitespace do not matter; an omitted <code>ttlSeconds</code> equals <code>86400</code>). Changing any of them is <code>409</code>.</li>
+<li>The replay answer shows the <strong>current</strong> status (it may be <code>SENT</code> by now), so a replay doubles as a status read.</li>
+<li><code>externalId</code> is unique per app <em>and environment</em>: the same value in DEV and PROD are unrelated notifications.</li>
+<li>A request that was refused (4xx, 429, 503) was not stored; after fixing the cause you may reuse its <code>externalId</code>.</li>
+<li>Two identical requests arriving at the same moment: one is accepted, the other is answered as a replay.</li>
+<li>Replays do not use quota. The stored record is kept: there is no expiry of <code>externalId</code>s today (no clean-up job exists), so choose ids that are unique over time (include your own business id, not only a counter you might reset).</li>
+</ul>
+<div class="callout"><span class="label">Choosing the id</span><p>Make it the id of the <em>event</em>, not of a request attempt: <code>job-1001-accepted</code>, not a random UUID per HTTP call. Then retries after crashes are safe, and two workers that both react to the same event cannot notify twice.</p></div>
+
+<h2 id="callback-url"><code>callbackUrl</code> rules</h2>
+<p>If you give a callback URL Adera POSTs the final status there (<a href="statuses-and-callbacks.html#callbacks">payload, headers, retries</a>). The URL is chosen by the partner, so Adera protects its own network from being attacked through it (SSRF: server-side request forgery). The rules, from the code:</p>
+<div class="table-wrap"><table><thead><tr><th>Rule</th><th>Checked when</th><th>Result of breaking it</th></tr></thead><tbody>
+<tr><td>At most 500 characters, begins with <code>https://</code> or <code>http://</code></td><td>when you send</td><td><code>400 validation_failed</code> on <code>callbackUrl</code> (<code>ftp://</code>, a missing scheme or 501+ characters were refused in testing)</td></tr>
+<tr><td>Scheme must be <strong>https</strong></td><td>when Adera sends the callback</td><td>Callback refused (<code>scheme_not_https</code>), not retried. <code>http://</code> is accepted at the door and works only on deployments where Adera enabled private callbacks for local testing (the dev stack here).</td></tr>
+<tr><td>No credentials in the URL (<code>https://user:pass@host/</code>)</td><td>when sending</td><td>Callback refused (<code>invalid_url</code>), not retried</td></tr>
+<tr><td>Port: default (443) or <code>8443</code> only</td><td>when sending</td><td>Callback refused (<code>port_not_allowed</code>)</td></tr>
+<tr><td>The host name must resolve, and <strong>every</strong> address it resolves to must be a public internet address</td><td>when sending (each time, so DNS changes are noticed)</td><td>Callback refused (<code>host_not_resolvable</code> or <code>address_not_public</code>). Refused ranges: loopback (127.0.0.0/8, ::1), private (10/8, 172.16/12, 192.168/16, fc00::/7), link-local and cloud metadata (169.254.0.0/16, fe80::/10), carrier-grade NAT (100.64/10), "this network" (0/8), documentation and benchmark ranges (192.0.2/24, 198.51.100/24, 203.0.113/24, 198.18/15, 192.0.0/24), multicast, and reserved 240/4.</td></tr>
+<tr><td>Redirects are <strong>never followed</strong></td><td>when sending</td><td>A <code>3xx</code> answer counts as a failure (not 2xx) and is retried; make the callback URL final</td></tr>
+<tr><td>Timeouts</td><td>when sending</td><td>5 s to connect, 8 s total; slower answers count as failures and are retried</td></tr>
+</tbody></table></div>
+<div class="callout danger"><span class="label">Gotcha: a bad callback URL is accepted</span><p>The refusals marked "when sending" happen later, in the background, <strong>after</strong> <code>202</code>. A callback URL pointing at a private address, at port 8080, or using <code>http://</code> in production is accepted by <code>POST /v1/notifications</code> and the callback is then silently dropped (nothing is reported to you; the callback is marked failed on Adera's side without retries). Poll the <a href="statuses-and-callbacks.html#polling">status endpoint</a> if in doubt, and test your callback URL in DEV. The dev stack documented here relaxes the address and scheme rules (<code>PARTNER_ALLOW_PRIVATE_CALLBACKS</code>) so that callbacks to a developer machine work; production does not, so the refusals could not be shown live on this stack (from the code, not reproduced). See <a href="known-issues.html">known issues</a>.</p></div>
+<p>Practical advice: use a stable <code>https</code> URL with a certificate from a public authority on port 443, accept <code>POST</code> only, verify the signature, and answer <code>2xx</code> quickly (do the work after answering). You may put a query string in the URL (it is signed as part of the path), for example <code>?tenant=7</code>; do not put secrets in it, it appears in your and Adera's logs.</p>
+
+<h2 id="capabilities">Capabilities</h2>
+<p>A capability is a permission staff grant per app: <code>notify.sms</code>, <code>notify.email</code>, <code>notify.inapp</code>. States: <code>GRANTED</code>, <code>DENIED</code>, <code>SUSPENDED</code>. Only <code>GRANTED</code> counts. Without it, a request that would need the channel is refused:</p>
+<pre class="out nocopy"><code>HTTP 403
+{"error": "capability_not_granted", "capability": "notify.sms"}</code></pre>
+<p>Fix: ask Adera staff to grant the capability named in <code>capability</code>. A change takes effect within about 15 seconds. (Other capabilities exist for features that are not available to partners yet, such as <code>user.contact</code> or <code>pay.request</code>; see <a href="data-available-to-mini-apps.html">data available</a>.)</p>
+
+<div class="pager"><a class="prev" href="templates.html"><small>Previous</small>Templates</a><a class="next" href="statuses-and-callbacks.html"><small>Next</small>Statuses, retries and callbacks</a></div>
+<p class="footer">Adera mini-app backend API guide &middot; verified against the dev deployment on 2026-10-26</p>
+</main>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

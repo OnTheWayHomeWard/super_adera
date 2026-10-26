@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mute preferences | Mini-app catalog guide</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<header class="topbar">
+<button id="menu-btn" type="button" aria-label="Toggle menu">Menu</button>
+<a class="brand" href="index.html">Mini-app catalog guide</a>
+<span class="spacer"></span>
+<button id="theme-btn" type="button" aria-label="Toggle light or dark theme">Theme</button>
+</header>
+<div class="layout">
+<nav class="sidebar" aria-label="Pages">
+<h4>Mini-app catalog</h4><ul><li><a href="index.html">Overview</a></li><li><a href="list-apps.html">List the mini apps</a></li><li><a href="app-details.html">App details</a></li><li><a href="capabilities-and-permissions.html">Capabilities and permissions</a></li><li><a href="reviews-and-ratings.html">Reviews and ratings</a></li><li><a href="reporting.html">Reporting an app</a></li><li><a href="mute-preferences.html" class="current">Mute preferences</a></li><li><a href="building-the-store-screen.html">Building the store screen</a></li><li><a href="errors.html">Error codes</a></li><li><a href="known-issues.html">Known issues</a></li></ul>
+</nav>
+<main>
+<h1>Mute preferences</h1>
+<p class="lead">The three per-app mute switches (in-app, SMS, email): how to read and change them and what each one does to partner notifications.</p>
+
+<h2 id="overview">Overview</h2>
+<p>Mini apps can send users messages through Adera (the partner notification API): in-app messages (inbox plus push), SMS and email. The user keeps control with three switches <strong>per app</strong>: mute in-app, mute SMS, mute email. This is the "mute" item behind the three-dot menu of an app, and the "Manage" row on the store page. The state is stored per user and per app id and is read by the notification service on every send.</p>
+<h2 id="effects">What each switch does</h2>
+<div class="table-wrap"><table><thead><tr><th>Switch</th><th>Which partner messages it stops</th><th>What the partner sees</th><th>What stays unaffected</th></tr></thead><tbody><tr><td><code>muteInApp</code></td><td>Messages the partner sends with an <strong>in-app</strong> template: no inbox item and no push notification is created.</td><td>The send request is answered <code>200</code> with status <code>SUPPRESSED</code> and reason <code>recipient_opted_out</code> (instead of <code>202</code> queued). It does not count against the app's limits.</td><td>SMS and email from the same app; any in-app messages already in the inbox (muting does not delete them).</td></tr><tr><td><code>muteSms</code></td><td>Direct messages that Adera would deliver as an <strong>SMS</strong>.</td><td>Same: <code>SUPPRESSED</code> / <code>recipient_opted_out</code>.</td><td>In-app and email.</td></tr><tr><td><code>muteEmail</code></td><td>Direct messages that Adera would deliver as an <strong>email</strong>.</td><td>Same.</td><td>In-app and SMS.</td></tr></tbody></table></div>
+<ul>
+<li><strong>Scope: one app.</strong> Muting <code>demo-food</code> does not affect <code>demo-ride</code>. There is no global mute.</li>
+<li><strong>No fallback to another channel.</strong> For a direct message Adera first picks the channel (SMS if the user has a phone and the app has <code>notify.sms</code>; otherwise email if the user has an address and the app has <code>notify.email</code>) and only then applies the mute. If the user muted SMS, the message is suppressed; it is <strong>not</strong> re-sent as an email. To silence a chatty app completely, a user must switch off every channel the app uses. A good default for the UI is a single "Mute everything from this app" action that sets all three to <code>true</code>.</li>
+<li><strong>Checked twice.</strong> At the moment the partner asks (instant suppression) and again just before delivery, so muting right after a message was queued still stops it.</li>
+<li>Mute applies to partner notifications only. Nothing else in the user API consults these switches. Muting does not remove the app's permissions from its public view.</li>
+<li>Whether a user can be reached at all (suspended or deleted accounts, missing phone) is a different mechanism: the partner gets <code>422 user_unreachable</code> then.</li>
+</ul>
+<h2 id="ui">UI recommendations</h2>
+<ul>
+<li>On the store page, show "Notifications" only for the channels the app is granted: <code>notify.inapp</code> gives a "Notifications" toggle, <code>notify.sms</code> "Text messages", <code>notify.email</code> "Emails" (see <a href="capabilities-and-permissions.html">Capabilities and permissions</a>). The server accepts all three switches regardless, but a switch for a channel the app cannot use is confusing.</li>
+<li>The toggle is "on = receive". Show it inverted from the field: <code>muteSms == true</code> means the toggle is off.</li>
+<li>Load with GET when the sheet opens; PUT on every toggle change; keep the toggle in a loading state until the response arrives; on failure revert it.</li>
+<li>There is no endpoint that lists all of the user's mute settings: you can only read an app at a time.</li>
+</ul>
+<h2 id="notbuilt">Not built yet</h2>
+<ul><li>A global do-not-disturb or quiet hours; per-message-kind switches (only the three channels exist).</li><li>A list of all apps the user muted; a way to find out which apps ever messaged the user.</li><li>Validation that the app exists or is LIVE.</li></ul>
+<h2 id="endpoints">Endpoints</h2>
+<details class="endpoint" id="ep-pref-get"><summary><span class="method m-get">GET</span><span class="path">/api/v1/me/apps/{appId}/preferences</span><span class="sum">Get my mute switches for one app</span></summary><div class="body"><dl class="meta"><dt>Who may call</dt><dd>Signed-in end user. The user id comes from the session, so a user can only read and change their own switches.</dd><dt>Client path</dt><dd><code>/api/v1/me/apps/{appId}/preferences</code> (gateway route <code>me</code>, 300 requests per 60 s per client IP, served by user-service).</dd><dt>Headers</dt><dd><code>Authorization: Bearer $TOKEN</code>; <code>Content-Type: application/json</code> on PUT.</dd><dt>Implemented in</dt><dd><code>user-service: PreferenceController#get, PreferenceService#get</code></dd></dl>
+<h4>Purpose</h4><p>Reads the three per-app mute switches so the "Notifications from this app" settings can show their current state. If the user never changed anything for this app, all three are <code>false</code> (nothing muted).</p>
+<h4>Request parameters</h4><div class="table-wrap"><table><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why it exists</th></tr></thead><tbody><tr><td><code>appId</code></td><td>path</td><td>string (UUID)</td><td>yes</td><td>The app's <strong>id</strong>. The slug is not accepted here. The server does not check that the app exists or is LIVE.</td><td>Preferences are stored per user and app id.</td></tr></tbody></table></div>
+<h4>Example request</h4><pre><code>curl -s "$GATEWAY/api/v1/me/apps/$APP_ID/preferences" -H "Authorization: Bearer $TOKEN"</code></pre>
+<h4>Example response (200)</h4><pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+
+{
+  "muteInApp": false,
+  "muteSms": false,
+  "muteEmail": false
+}</code></pre>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th>Error code</th><th>When it happens</th><th>What the caller should do</th></tr></thead><tbody><tr><td><strong>400</strong></td><td>(framework body)</td><td><code>appId</code> is not a UUID, for example the slug <code>demo-ride</code>. Answer shape: <code>{{"timestamp":...,"status":400,"error":"Bad Request","path":...}}</code>, not <code>{{"error":code}}</code>.</td><td>Always use the app <code>id</code> from the catalog.</td></tr><tr><td><strong>401</strong></td><td>(empty body)</td><td>Missing or invalid session.</td><td>Sign in again.</td></tr><tr><td><strong>429</strong></td><td>(HTML page)</td><td>Gateway rate limit (300 per 60 s per IP).</td><td>Back off.</td></tr></tbody></table></div>
+</div></details><details class="endpoint" id="ep-pref-put"><summary><span class="method m-put">PUT</span><span class="path">/api/v1/me/apps/{appId}/preferences</span><span class="sum">Change my mute switches for one app</span></summary><div class="body"><dl class="meta"><dt>Who may call</dt><dd>Signed-in end user. The user id comes from the session, so a user can only read and change their own switches.</dd><dt>Client path</dt><dd><code>/api/v1/me/apps/{appId}/preferences</code> (gateway route <code>me</code>, 300 requests per 60 s per client IP, served by user-service).</dd><dt>Headers</dt><dd><code>Authorization: Bearer $TOKEN</code>; <code>Content-Type: application/json</code> on PUT.</dd><dt>Implemented in</dt><dd><code>user-service: PreferenceController#update, PreferenceService#update</code></dd></dl>
+<h4>Purpose</h4><p>Turns channels on or off for one app. It is a <strong>partial update</strong>: only the switches you send change, the others keep their stored value. The response is the full state after the change.</p>
+<h4>Request body</h4><div class="table-wrap"><table><thead><tr><th>Name</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why it exists</th></tr></thead><tbody><tr><td><code>muteInApp</code></td><td>boolean</td><td>no</td><td>Literal <code>true</code> or <code>false</code>; strings and numbers are rejected.</td><td>Stop in-app messages (inbox plus push) from this app.</td></tr><tr><td><code>muteSms</code></td><td>boolean</td><td>no</td><td>same</td><td>Stop text messages from this app.</td></tr><tr><td><code>muteEmail</code></td><td>boolean</td><td>no</td><td>same</td><td>Stop emails from this app.</td></tr></tbody></table></div>
+<p>Unknown keys are rejected. An empty object <code>{}</code> is accepted and changes nothing (answers the current state).</p>
+<h4>Example request</h4><pre><code>curl -s -X PUT "$GATEWAY/api/v1/me/apps/$APP_ID/preferences" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"muteSms": true}'</code></pre>
+<h4>Example responses</h4><pre class="out"><code>HTTP/1.1 200 OK
+
+{
+  "muteInApp": false,
+  "muteSms": true,
+  "muteEmail": false
+}</code></pre>
+<p>Then <code>{"muteInApp": true, "muteSms": false}</code> gave (verified): <code>muteInApp</code> true, <code>muteSms</code> false, <code>muteEmail</code> false (the earlier SMS mute was lifted, the untouched email switch stayed).</p>
+<pre class="out"><code># body: {"muteSms": "yes", "foo": 1}
+HTTP/1.1 400 Bad Request
+
+{
+  "error": "validation_failed",
+  "fields": {
+    "muteSms": "must be true or false"
+  }
+}</code></pre>
+<p class="masked">Only the first problem is reported (here <code>foo</code>'s "unknown field" was not listed), so fix one and resubmit.</p>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th>Error code</th><th>When it happens</th><th>What the caller should do</th></tr></thead><tbody><tr><td><strong>400</strong></td><td><code>validation_failed</code></td><td>An unknown key, or a value that is not a boolean. <code>fields</code> has the first offending key.</td><td>Client bug.</td></tr><tr><td><strong>400</strong></td><td><code>invalid_json</code></td><td>Body is not valid JSON or not an object. (This service uses <code>invalid_json</code>; the registry endpoints use <code>invalid_request</code> for the same mistake.)</td><td>Client bug.</td></tr><tr><td><strong>400</strong></td><td>(framework body)</td><td><code>appId</code> not a UUID.</td><td>Use the app id.</td></tr><tr><td><strong>415</strong></td><td>(framework body)</td><td>Missing <code>Content-Type: application/json</code>.</td><td>Client bug.</td></tr><tr><td><strong>401</strong></td><td>(empty body)</td><td>Missing or invalid session.</td><td>Sign in again.</td></tr><tr><td><strong>429</strong></td><td>(HTML page)</td><td>Gateway rate limit (300 per 60 s per IP).</td><td>Back off.</td></tr></tbody></table></div>
+<h4>How to use it</h4><ul><li>Bind each switch to one toggle; send only the toggled key.</li><li>Update the UI from the response, not from your guess.</li><li>The call succeeds for any UUID, including apps that are paused or do not exist (see <a href="known-issues.html">Known issues</a>), so make sure the id comes from the catalog.</li></ul>
+</div></details>
+
+<div class="pager"><a class="prev" href="reporting.html"><small>Previous</small>Reporting an app</a><a class="next" href="building-the-store-screen.html"><small>Next</small>Building the store screen</a></div>
+<p class="footer">Adera super-app guides &middot; mini-app catalog &middot; last verified against the running dev stack on 2026-10-26</p>
+</main>
+</div>
+<script src="assets/app.js"></script>
+</body>
+</html>

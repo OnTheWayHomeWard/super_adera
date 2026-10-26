@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Moderation: reports | Admin: users, staff, moderation and audit</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+<button id="menu-btn" type="button" aria-label="Toggle menu">Menu</button>
+<span class="brand">Admin: users, staff, moderation and audit</span>
+<span class="spacer"></span>
+<button id="theme-btn" type="button" aria-label="Toggle light or dark theme">Theme</button>
+</header>
+<div class="layout">
+<nav class="sidebar" aria-label="Pages in this guide"><h4>Admin: users, staff, moderation and audit</h4><ul><li><a href="index.html">Overview and conventions</a></li>
+<li><a href="roles-and-access.html">Staff sign-in, roles and permissions</a></li>
+<li><a href="dashboard.html">Dashboard, system and health</a></li>
+<li><a href="users.html">Registered users</a></li>
+<li><a href="moderation-reviews.html">Moderation: reviews</a></li>
+<li><a href="moderation-reports.html" class="current">Moderation: reports</a><ul><li><a href="#overview">Overview</a></li><li><a href="#filing">How a report is created</a></li><li><a href="#ep-reports-list">GET /reports</a></li><li><a href="#ep-report-handle">PATCH /reports/{id}</a></li><li><a href="#statuses">Statuses and reopen rules</a></li><li><a href="#scenarios">Worked scenario</a></li><li><a href="#errors">Errors</a></li><li><a href="#notbuilt">Not built yet</a></li></ul></li>
+<li><a href="staff.html">Staff management</a></li>
+<li><a href="audit-log.html">Audit log</a></li>
+<li><a href="notifications-overview.html">Notification visibility</a></li>
+<li><a href="runbooks.html">Runbooks</a></li>
+<li><a href="errors.html">Error codes</a></li>
+<li><a href="known-issues.html">Known issues and not built yet</a></li>
+</ul></nav>
+<main>
+<h1>Moderation: reports</h1>
+<p class="lead">Work the queue of user reports about mini apps: list and filter, mark REVIEWED or DISMISSED, reopen, and see who handled what.</p>
+<section><h2 id="overview">Overview</h2>
+<p>A <strong>report</strong> is a user telling Adera that a mini app is a problem (from the three-dot menu in the app window). Staff work the reports queue: read the reason and details, decide, and mark the report. In the backoffice: <strong>Moderation</strong>, tab <em>Reports</em> (default filter OPEN), the tab <em>Reports</em> of an app, and the Open reports panel on the Dashboard.</p>
+<div class="callout why"><span class="label">What a report does and does not do</span><p>A report is a signal to a human. It does not pause, hide or kill the app by itself. To act on the app (pause or kill it) use the app status control in the mini-app administration guide; then record the outcome here.</p></div></section>
+<section><h2 id="filing">How a report is created (user side, for context)</h2>
+<p><code>POST /api/v1/apps/{idOrSlug}/report</code> with a user session and a body <code>{"reason":"SPAM|SCAM|INAPPROPRIATE|BROKEN|OTHER","details":"up to 2000 characters"}</code>. The app must be LIVE. If the same user already has an <strong>OPEN</strong> report for the same app, a new request returns that report instead of adding another (verified: a second report with a different reason returned the same <code>reportId</code>), so a user cannot pile up reports; once staff marked it REVIEWED or DISMISSED the user can file a new one.</p>
+<pre class="out"><code>HTTP/1.1 200 OK
+
+{
+  "status": "received",
+  "reportId": "347e2491-c20e-402e-b881-6773d4a744be"
+}</code></pre></section>
+<section><h2 id="list">List reports</h2>
+<details class="endpoint" id="ep-reports-list"><summary><span class="method m-get">GET</span><span class="path">/admin/api/v1/reports</span><span class="sum">Every user report across all apps, newest first</span></summary><div class="body"><dl class="meta"><dt>Why</dt><dd>The moderation work queue.</dd><dt>Auth</dt><dd>Staff aal2 Bearer, any role (read)</dd><dt>Rate limit</dt><dd>300/min/IP</dd><dt>Backoffice</dt><dd>Moderation > Reports; Dashboard: Open reports</dd></dl><h4>Query parameters</h4><div class="table-wrap"><table><thead><tr><th>Name</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why it exists</th></tr></thead><tbody><tr><td><code>status</code></td><td>string</td><td>no</td><td><code>OPEN</code>, <code>REVIEWED</code>, <code>DISMISSED</code> (any case). <strong>Any other value is not an error: it matches nothing and returns <code>[]</code></strong> (verified).</td><td>Show the queue (OPEN) or the history.</td></tr><tr><td><code>appId</code></td><td>uuid</td><td>no</td><td>Not a UUID: <code>400 invalid_request</code></td><td>Reports about one app.</td></tr><tr><td><code>page</code></td><td>integer</td><td>no (0)</td><td>Zero-based</td><td>Paging.</td></tr><tr><td><code>size</code></td><td>integer</td><td>no (50)</td><td>1 to 100</td><td>Page size.</td></tr></tbody></table></div><h4>Request</h4><pre><code>curl -sS -i "$GATEWAY/admin/api/v1/reports?status=OPEN&amp;appId=$APP_ID" -H "Authorization: Bearer $TOKEN"</code></pre><h4>Response 200</h4><pre class="out"><code>HTTP/1.1 200 OK
+
+[
+  {
+    "id": "347e2491-c20e-402e-b881-6773d4a744be",
+    "appId": "4eae7304-b8b1-43d6-a9c4-adee75af06c6",
+    "appSlug": "doc-tmp-mod",
+    "userId": "a5529687-ddd2-421f-867d-b6b5cf82d1fc",
+    "reason": "SPAM",
+    "details": "doc-tmp: example report",
+    "status": "OPEN",
+    "handledBy": null,
+    "handledAt": null,
+    "createdAt": "2026-10-26T10:56:44.627339Z"
+  }
+]</code></pre><p>Array, newest first. Total matches in <code>X-Total-Count</code> (as for reviews).</p>
+<div class="table-wrap"><table><thead><tr><th>Field</th><th>Meaning</th></tr></thead><tbody><tr><td><code>id</code></td><td>Report id, the key for PATCH and for the audit filter.</td></tr><tr><td><code>appId</code>, <code>appSlug</code></td><td>The reported app.</td></tr><tr><td><code>userId</code></td><td>Who reported (not masked; look up in Users).</td></tr><tr><td><code>reason</code></td><td><code>SPAM</code>, <code>SCAM</code>, <code>INAPPROPRIATE</code>, <code>BROKEN</code> or <code>OTHER</code>.</td></tr><tr><td><code>details</code></td><td>Free text from the user (up to 2000 chars) or null. Untrusted input.</td></tr><tr><td><code>status</code></td><td><code>OPEN</code>, <code>REVIEWED</code> or <code>DISMISSED</code>.</td></tr><tr><td><code>handledBy</code>, <code>handledAt</code></td><td>The staff id (join with the staff list or the audit log to get an email) and time of the <strong>last status change</strong>; both null for a report nobody touched.</td></tr><tr><td><code>createdAt</code></td><td>When the user filed it.</td></tr></tbody></table></div><h4>Errors</h4><pre class="out"><code>HTTP/1.1 200 OK
+
+[]</code></pre><p>(An unknown <code>status</code> filter returns an empty array, so a typo looks like an empty queue.)</p>
+</div></details>
+</section>
+<section><h2 id="handle">Handle a report</h2>
+<details class="endpoint" id="ep-report-handle"><summary><span class="method m-patch">PATCH</span><span class="path">/admin/api/v1/reports/{reportId}</span><span class="sum">Mark a report REVIEWED, DISMISSED, or reopen it (OPEN)</span></summary><div class="body"><dl class="meta"><dt>Why</dt><dd>Close the loop: tell the team that someone looked at it and what the outcome was.</dd><dt>Auth</dt><dd>Staff aal2 Bearer, role <strong>ADMIN</strong> or SUPER_ADMIN</dd><dt>Audit action</dt><dd><code>report.handle</code> (target type <code>app_report</code>, meta <code>{status, appId}</code>)</dd><dt>Reversible</dt><dd>Yes: any status can be set from any status</dd><dt>Backoffice</dt><dd>Moderation > Reports: <em>Resolve</em> (REVIEWED), <em>Dismiss</em> (DISMISSED, asks for confirmation), <em>Reopen</em> (OPEN)</dd></dl><h4>Body</h4><div class="table-wrap"><table><thead><tr><th>Field</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why it exists</th></tr></thead><tbody><tr><td><code>status</code></td><td>string</td><td>yes</td><td><code>OPEN</code>, <code>REVIEWED</code>, <code>DISMISSED</code> (any case)</td><td>The outcome.</td></tr></tbody></table></div><p>Like reviews, there is no field for a comment or reason; other fields are ignored.</p>
+<h4>Request</h4><pre><code>curl -sS -X PATCH "$GATEWAY/admin/api/v1/reports/$REPORT_ID" \
+  -H "Authorization: Bearer $ADMIN_TOKEN" -H "Content-Type: application/json" \
+  -d '{"status":"REVIEWED"}'</code></pre><h4>Response 200 (REVIEWED)</h4><pre class="out"><code>HTTP/1.1 200 OK
+
+{
+  "appId": "4eae7304-b8b1-43d6-a9c4-adee75af06c6",
+  "userId": "a5529687-ddd2-421f-867d-b6b5cf82d1fc",
+  "reason": "SPAM",
+  "details": "doc-tmp: example report",
+  "createdAt": "2026-10-26T10:56:44.627339Z",
+  "handledAt": "2026-10-26T10:56:44.776180399Z",
+  "handledBy": "a44fc404-7813-4fce-8fe4-dde4c455ece4",
+  "id": "347e2491-c20e-402e-b881-6773d4a744be",
+  "status": "REVIEWED"
+}</code></pre><h4>Response 200 (reopen: OPEN)</h4><pre class="out"><code>HTTP/1.1 200 OK
+
+{
+  "appId": "4eae7304-b8b1-43d6-a9c4-adee75af06c6",
+  "userId": "a5529687-ddd2-421f-867d-b6b5cf82d1fc",
+  "reason": "SPAM",
+  "details": "doc-tmp: example report",
+  "createdAt": "2026-10-26T10:56:44.627339Z",
+  "handledAt": "2026-10-26T10:56:44.786507315Z",
+  "handledBy": "a44fc404-7813-4fce-8fe4-dde4c455ece4",
+  "id": "347e2491-c20e-402e-b881-6773d4a744be",
+  "status": "OPEN"
+}</code></pre><div class="callout warn"><span class="label">Reopened reports keep a handler</span><p>Setting OPEN does <strong>not</strong> clear <code>handledBy</code>/<code>handledAt</code>: they now name the person who reopened it and the time. An OPEN report can therefore show a handler (the seeded data has such rows). Treat <code>status</code> as the truth and <code>handledBy</code> as "last person to touch it".</p></div><h4>Errors (verified)</h4><pre class="out"><code>HTTP/1.1 400 Bad Request
+
+{
+  "error": "validation_failed",
+  "fields": {
+    "status": "must be OPEN, REVIEWED or DISMISSED"
+  }
+}</code></pre><p><code>403 insufficient_role</code> for a viewer, <code>404 not_found</code> for an unknown id, <code>400 invalid_request</code> for a non-UUID id.</p>
+<h4>Side effects</h4><p>The report row is updated (<code>status</code>, <code>handledBy</code> = your staff id, <code>handledAt</code> = now) and one audit row is written. Setting the same status again re-stamps the handler and writes another audit row. The reporting user and the app's publisher are not notified; the app itself is not changed.</p>
+</div></details>
+</section>
+<section><h2 id="statuses">Statuses and reopen rules</h2>
+<div class="table-wrap"><table><thead><tr><th>Status</th><th>Meaning</th><th>Set by</th><th>Counted as work?</th></tr></thead><tbody><tr><td><code>OPEN</code></td><td>Filed and waiting (also what a reopened report becomes)</td><td>The system when the user files it; staff by reopening</td><td>Yes: Dashboard <code>reports.open</code></td></tr><tr><td><code>REVIEWED</code></td><td>Staff looked and <strong>acted</strong> (or confirmed the problem)</td><td>ADMIN or SUPER_ADMIN</td><td>No</td></tr><tr><td><code>DISMISSED</code></td><td>Staff looked and <strong>no action</strong> was needed</td><td>ADMIN or SUPER_ADMIN</td><td>No</td></tr></tbody></table></div><p>There is no workflow: staff may move a report between any two statuses at any time (verified OPEN to REVIEWED to OPEN to DISMISSED on one report). Each move is audited, so the audit log is the history. A user whose report is OPEN cannot add a second one for the same app; once it is REVIEWED or DISMISSED they can.</p>
+<pre class="out"><code>HTTP/1.1 200 OK
+
+[
+  {
+    "id": "347e2491-c20e-402e-b881-6773d4a744be",
+    "appId": "4eae7304-b8b1-43d6-a9c4-adee75af06c6",
+    "appSlug": "doc-tmp-mod",
+    "userId": "a5529687-ddd2-421f-867d-b6b5cf82d1fc",
+    "reason": "SPAM",
+    "details": "doc-tmp: example report",
+    "status": "DISMISSED",
+    "handledBy": "a44fc404-7813-4fce-8fe4-dde4c455ece4",
+    "handledAt": "2026-10-26T10:56:44.796999Z",
+    "createdAt": "2026-10-26T10:56:44.627339Z"
+  }
+]</code></pre></section>
+<section><h2 id="scenarios">Worked scenario</h2>
+<p>Three open reports arrive for the same app with reason SCAM. In Moderation > Reports you open the app (link) and decide it is a real scam: you pause or kill the app in the app administration (the guide for mini-app administration), then press <em>Resolve</em> on each report. If a report turns out to be a user mistake, press <em>Dismiss</em>. The Dashboard's Open reports counter drops accordingly.</p>
+</section>
+<section><h2 id="errors">Errors</h2>
+<p>See each endpoint above and the error codes page.</p>
+</section>
+<section><h2 id="notbuilt">Not built yet</h2>
+<ul><li>No comment or outcome text on a report, no assignment to a person, no SLA timer.</li><li>No notification to the reporter or the app publisher.</li><li>No automatic action when several reports arrive (no auto-pause).</li><li>No filter by reporter or by reason in the API (only status and app).</li></ul>
+</section>
+
+<div class="pager"><a class="prev" href="moderation-reviews.html"><small>Previous</small>Moderation: reviews</a><a class="next" href="staff.html"><small>Next</small>Staff management</a></div>
+<p class="footer">Adera admin guide &middot; verified against the running dev stack on 2026-10-26</p>
+</main>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

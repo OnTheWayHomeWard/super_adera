@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Avatar: upload, read, delete | Adera guide</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+<button id="menu-btn" type="button" aria-label="Toggle menu">Menu</button>
+<span class="brand">Adera guide: sign-in and account</span>
+<span class="spacer"></span>
+<button id="theme-btn" type="button" aria-label="Toggle light or dark theme">Theme</button>
+</header>
+<div class="layout">
+<nav class="sidebar" aria-label="Pages in this guide">
+<h4>Super app: sign-in and account</h4>
+<ul><li><a href="index.html">Overview</a></li>
+<li><a href="quickstart.html">Quick start</a></li>
+<li><a href="authentication.html">Registration and login</a></li>
+<li><a href="session-and-logout.html">Session and logout</a></li>
+<li><a href="profile.html">Profile</a></li>
+<li><a href="extra-data.html">Extra data</a></li>
+<li><a href="location.html">Location</a></li>
+<li><a href="avatar.html" class="current">Avatar</a><ul><li><a href="#overview">Overview</a></li><li><a href="#processing">What the server does with the picture</a></li><li><a href="#endpoints">Endpoints</a></li><li><a href="#reading">Showing the avatar: the signed URL</a></li></ul></li>
+<li><a href="devices-and-push-tokens.html">Devices and push tokens</a></li>
+<li><a href="errors.html">Error table</a></li>
+<li><a href="known-issues.html">Known issues and not built yet</a></li></ul>
+</nav>
+<main>
+<h1>Avatar: upload, read, delete</h1>
+<p class="lead">Upload, display and delete the profile picture: accepted files, the limits, what the server does to the image, and how the signed link works.</p>
+<h2 id="overview">Overview</h2>
+<p>Each person can have one profile picture. The app uploads any normal photo; the server turns it into one small, safe square JPEG, stores it in object storage, and the profile then carries a <strong>short-lived signed link</strong> that the app uses to display it. Image bytes never travel through the API for reading: the app fetches the picture straight from storage with the link.</p>
+<div class="table-wrap"><table><thead><tr><th>Method and path</th><th>Purpose</th></tr></thead><tbody>
+<tr><td><code>POST /api/v1/me/avatar</code> (multipart)</td><td>upload or replace the picture</td></tr>
+<tr><td><code>DELETE /api/v1/me/avatar</code></td><td>remove it</td></tr>
+<tr><td><code>GET /api/v1/me</code></td><td>read <code>avatarImageId</code> and <code>avatarUrl</code></td></tr>
+</tbody></table></div>
+<p>The upload has its own, stricter gateway limit: <strong>20 per 60 s per IP</strong> (route <code>me-avatar</code>); the delete and the profile read use the normal 300 per minute.</p>
+<h2 id="processing">What the server does with the picture</h2>
+<div class="table-wrap"><table><thead><tr><th>Step</th><th>Detail</th></tr></thead><tbody>
+<tr><td>Accepted formats</td><td><strong>JPEG, PNG, GIF, BMP</strong>. The server decodes the bytes; the file name and the declared <code>Content-Type</code> are ignored (a JPEG sent as <code>image/png</code> works, an HTML file labelled <code>image/png</code> is refused). <strong>WebP and HEIC/HEIF are not accepted</strong> (verified for WebP): convert iPhone HEIC photos to JPEG on the device before uploading</td></tr>
+<tr><td>Size limit</td><td>the file may be at most <strong>5 MiB</strong> (5242880 bytes) &rarr; <code>413 file_too_large</code>. A hard transport limit of 6 MB per file / 7 MB per request also answers <code>413 file_too_large</code> (verified with 5 MB + 1000 bytes and with 7 MB)</td></tr>
+<tr><td>Dimension limits</td><td>at most 12000 pixels per side and 40 million pixels in total (protection against files that are tiny but decode to enormous bitmaps) &rarr; <code>400</code> "image dimensions are too large" (verified with a 13000x1 PNG)</td></tr>
+<tr><td>Crop and resize</td><td>centre-cropped to a square, then scaled <strong>down</strong> so the side is at most <strong>512 px</strong>. Smaller images are never enlarged. Verified: 900x600 gives 512x512; 300x900 gives 300x300; 100x100 stays 100x100</td></tr>
+<tr><td>Re-encoding</td><td>always stored as <code>image/jpeg</code>, quality 85. Transparent PNG areas are flattened onto <strong>white</strong>. All metadata (EXIF location, camera, timestamps) is dropped. A multi-frame GIF keeps its first frame only</td></tr>
+<tr><td>Orientation</td><td>the server does not read or apply the EXIF rotation flag and the flag is dropped with the other metadata. Make sure the pixels are upright before uploading (image pickers normally do). Not tested with a rotated sample</td></tr>
+<tr><td>Replacing</td><td>a new upload gets a new <code>avatarImageId</code>; the previous file is deleted from storage after the new one is saved</td></tr>
+<tr><td>Storage key</td><td><code>avatars/&lt;user id&gt;/&lt;image id&gt;.jpg</code> in the <code>adera-media</code> bucket. The bucket is private</td></tr>
+</tbody></table></div>
+<h2 id="endpoints">Endpoints</h2>
+<details class="endpoint" id="ep-avatar-post">
+<summary><span class="method m-post">POST</span><span class="path">/api/v1/me/avatar</span><span class="sum">Upload or replace my avatar</span></summary>
+<div class="body"><dl class="meta">
+<dt>Who may call</dt><dd>signed-in user, account not blocked</dd>
+<dt>Auth</dt><dd><code>Authorization: Bearer $TOKEN</code></dd>
+<dt>Headers</dt><dd><code>Content-Type: multipart/form-data; boundary=...</code> (your HTTP client sets it when you use form upload)</dd>
+<dt>Rate limit</dt><dd><strong>20 per 60 s per IP</strong> (route <code>me-avatar</code>)</dd>
+<dt>Implemented by</dt><dd><code>ProfileController#uploadAvatar</code>, <code>AvatarService</code>, <code>AvatarImageProcessor</code></dd>
+</dl>
+<h4>Purpose</h4>
+<p>Sets the profile picture. Why multipart: it is the standard way for mobile HTTP clients to send a file, and it lets the server enforce the size before reading the body.</p>
+<h4>Parameters</h4>
+<div class="table-wrap"><table><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why</th></tr></thead><tbody>
+<tr><td><code>file</code></td><td>multipart form field</td><td>binary</td><td>yes</td><td>field name exactly <code>file</code>; non-empty; JPEG, PNG, GIF or BMP; at most 5 MiB</td><td>the picture</td></tr>
+</tbody></table></div>
+<h4>Example request</h4>
+<pre><code>curl -s -X POST "$GATEWAY/api/v1/me/avatar" \
+  -H "Authorization: Bearer $TOKEN" \
+  -F "file=@me.jpg"</code></pre>
+<h4>Example response</h4>
+<pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+
+{
+  "...": "all profile fields",
+  "avatarImageId": "2a9568e4-b7bb-4a5d-ba54-e98139bace33",
+  "avatarUrl": "http://127.0.0.1:9000/adera-media/avatars/5bc6d545-771d-44f5-91cb-55415b01e4e4/2a9568e4-b7bb-4a5d-ba54-e98139bace33.jpg?X-Amz-Algorithm=AWS4-HMAC-SHA256&amp;X-Amz-Date=20261026T105006Z&amp;X-Amz-SignedHeaders=host&amp;X-Amz-Credential=&lt;access-key&gt;%2F20261026%2Fus-east-1%2Fs3%2Faws4_request&amp;X-Amz-Expires=3600&amp;X-Amz-Signature=&lt;signature&gt;",
+  "updatedAt": "2026-10-26T10:50:06.369381710Z"
+}</code></pre>
+<p>The credential and signature in <code>avatarUrl</code> are masked here. The whole profile is returned, so the app can update its cache in one step.</p>
+<h4>Errors</h4>
+<div class="table-wrap"><table><thead><tr><th>Status</th><th>Body</th><th>When</th><th>What to do</th></tr></thead><tbody>
+<tr><td>400</td><td><code>validation_failed</code>, <code>fields.file</code> = "a file is required (multipart field 'file')"</td><td>no part named <code>file</code>, wrong field name, or an empty file</td><td>fix the client</td></tr>
+<tr><td>400</td><td><code>fields.file</code> = "not a supported image (use JPEG, PNG, GIF or BMP)"</td><td>bytes are not one of the four formats (HTML, WebP, HEIC, PDF...)</td><td>convert to JPEG, or tell the user</td></tr>
+<tr><td>400</td><td><code>fields.file</code> = "could not read the image, it may be corrupt"</td><td>truncated or damaged image</td><td>ask for another picture</td></tr>
+<tr><td>400</td><td><code>fields.file</code> = "image dimensions are too large"</td><td>more than 12000 px a side or 40 megapixels</td><td>downscale on the device first</td></tr>
+<tr><td>413</td><td><code>{"error":"file_too_large"}</code></td><td>over 5 MiB (or over the 6 MB transport limit)</td><td>compress or downscale on the device first (a 1024 px JPEG is far below the limit)</td></tr>
+<tr><td>415</td><td>framework default JSON <code>{"timestamp":...,"status":415,"error":"Unsupported Media Type","path":"/api/v1/me/avatar"}</code></td><td>the request was not <code>multipart/form-data</code> (for example JSON)</td><td>fix the client; note the body does not have the <code>error</code> code shape</td></tr>
+<tr><td>401 / 403 / 429 / 503</td><td>see the Error table</td><td>limit is 20 uploads per minute per IP</td><td></td></tr>
+</tbody></table></div>
+<h4>Using it in the app</h4>
+<ul><li>Downscale and compress on the device before uploading (long side about 1024 px, JPEG): less data on slow mobile networks, and no chance of hitting the size or dimension limits.</li><li>Show the upload progress, then replace the displayed picture with the new <code>avatarUrl</code>.</li><li>A failed upload leaves the old picture in place.</li></ul>
+</div></details>
+<details class="endpoint" id="ep-avatar-delete">
+<summary><span class="method m-delete">DELETE</span><span class="path">/api/v1/me/avatar</span><span class="sum">Remove my avatar</span></summary>
+<div class="body"><dl class="meta">
+<dt>Who may call</dt><dd>signed-in user, account not blocked</dd>
+<dt>Auth</dt><dd><code>Authorization: Bearer $TOKEN</code></dd>
+<dt>Rate limit</dt><dd>20 per 60 s per IP (same route as the upload)</dd>
+<dt>Implemented by</dt><dd><code>ProfileController#removeAvatar</code></dd>
+</dl>
+<h4>Purpose</h4>
+<p>Deletes the stored picture and clears <code>avatarImageId</code> and <code>avatarUrl</code>. Idempotent: removing when there is no avatar answers <code>200</code> too.</p>
+<h4>Example request</h4>
+<pre><code>curl -s -X DELETE "$GATEWAY/api/v1/me/avatar" -H "Authorization: Bearer $TOKEN"</code></pre>
+<h4>Example response</h4>
+<pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+
+{
+  "...": "all profile fields",
+  "avatarImageId": null,
+  "avatarUrl": null,
+  "updatedAt": "2026-10-26T10:50:06.732999866Z"
+}</code></pre>
+<h4>Errors</h4>
+<div class="table-wrap"><table><thead><tr><th>Status</th><th>Body</th><th>When</th></tr></thead><tbody>
+<tr><td>401 / 403 / 429 / 503</td><td>see the Error table</td><td>as for every profile call</td></tr>
+</tbody></table></div>
+</div></details>
+<h2 id="reading">Showing the avatar: the signed URL</h2>
+<p>The profile's <code>avatarUrl</code> is an <strong>S3 pre-signed GET link</strong> to the object storage. What the app needs to know:</p>
+<div class="table-wrap"><table><thead><tr><th>Topic</th><th>Detail</th></tr></thead><tbody>
+<tr><td>Shape</td><td><code>&lt;storage host&gt;/adera-media/avatars/&lt;user id&gt;/&lt;image id&gt;.jpg?X-Amz-Algorithm=...&amp;X-Amz-Expires=3600&amp;X-Amz-Signature=...</code>. In the dev stack the host is <code>http://127.0.0.1:9000</code> (RustFS); in a deployment it is the public storage address that phones can reach. Always use the URL exactly as returned (the host is part of the signature)</td></tr>
+<tr><td>Expiry</td><td><strong>60 minutes</strong> (<code>X-Amz-Expires=3600</code>; server setting <code>STORAGE_PRESIGN_MINUTES</code>). After that the storage answers <code>403</code></td></tr>
+<tr><td>No auth header</td><td>fetch it with a plain GET and <strong>do not</strong> add the <code>Authorization</code> header (it is not an API call, and the session token must never go to the storage host). Verified: the link returned <code>200</code>, <code>Content-Type: image/jpeg</code>, 4726 bytes for a 512x512 picture</td></tr>
+<tr><td>Not public</td><td>the same path without the query string answers <code>403</code> (verified): only a fresh signed link works</td></tr>
+<tr><td>Changes on every read</td><td>each profile answer contains a newly signed URL (different date and signature) for the same picture. Do <strong>not</strong> use the URL as a cache key; use <code>avatarImageId</code> (it changes only when the picture changes)</td></tr>
+<tr><td>When the URL has expired</td><td>if loading fails with <code>403</code>, call <code>GET /api/v1/me</code> once to get a fresh link and retry; do not loop</td></tr>
+<tr><td>Whose picture</td><td>only your own avatar is exposed through this API; there is no endpoint to fetch another user's avatar</td></tr>
+</tbody></table></div>
+<p>A good pattern: keep the picture in the image cache keyed by <code>avatarImageId</code>; show it from the cache; only when the id changes (or the cache is empty) use the current <code>avatarUrl</code> to download it once.</p>
+
+<div class="pager"><a class="prev" href="location.html"><small>Previous</small>Location</a><a class="next" href="devices-and-push-tokens.html"><small>Next</small>Devices and push tokens</a></div>
+<p class="footer">Adera super-app guide: sign-in and account &middot; verified against the dev stack on 2026-10-26</p>
+</main>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

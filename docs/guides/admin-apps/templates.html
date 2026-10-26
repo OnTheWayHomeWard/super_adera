@@ -1,0 +1,375 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Notification templates | Admin: managing mini apps</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+<button id="menu-btn" type="button" aria-label="Toggle menu">Menu</button>
+<a class="brand" href="index.html">Admin: managing mini apps</a>
+<span class="spacer"></span>
+<button id="theme-btn" type="button" aria-label="Toggle light or dark theme">Theme</button>
+</header>
+<div class="layout">
+<nav class="sidebar" aria-label="Pages in this guide">
+<h4>This guide</h4>
+<ul><li><a href="index.html">Overview</a></li>
+<li><a href="roles-and-access.html">Roles and access</a></li>
+<li><a href="apps-create-and-edit.html">Create, edit, list apps</a></li>
+<li><a href="status-lifecycle.html">Status lifecycle</a></li>
+<li><a href="logo.html">Logo</a></li>
+<li><a href="capabilities.html">Capabilities</a></li>
+<li><a href="notification-limits.html">Notification limits</a></li>
+<li><a href="environments-and-ips.html">Environments and IPs</a></li>
+<li><a href="partner-keys.html">Partner keys</a></li>
+<li><a href="templates.html" class="current">Templates</a><ul><li><a href="#overview">Overview</a></li><li><a href="#anatomy">Anatomy of a template</a></li><li><a href="#endpoints">Endpoints</a></li><li><a href="#partner-view">What partners can do with templates</a></li><li><a href="#not-built">Not built yet</a></li></ul></li>
+<li><a href="payment-settings.html">Payment settings</a></li>
+<li><a href="notification-log-and-usage.html">Notification log and usage</a></li>
+<li><a href="reviews-reports-audit.html">Reviews, reports, audit</a></li>
+<li><a href="runbooks.html">Runbooks</a></li>
+<li><a href="errors.html">Errors</a></li>
+<li><a href="known-issues.html">Known issues</a></li>
+</ul></nav>
+<main>
+<h1>Notification templates</h1>
+<p class="lead">The only messages a partner may send: how staff create, edit, activate and expire them.</p>
+<h2 id="overview">Overview</h2>
+<p>A <strong>template</strong> is a message a partner is allowed to send: the words in up to three languages, plus a short list of <em>declared values</em> the partner fills in (a name, a code, an order number). <strong>Only staff create and change templates.</strong> A partner's request says "send template X to user Y with these values"; it can never send free text.</p>
+<div class="callout why"><span class="label">Why this exists</span>Notifications arrive under Adera's name, by SMS, email and push, to real people. If partners could write the text, an app could send phishing links or spam in an official voice. Admin approval means every sentence that can be sent was written or reviewed by Adera staff, in the right languages, and the only things a partner controls are small, length-limited, link-checked values. It also makes costs predictable (an SMS template has a known maximum length).</div>
+<h2 id="anatomy">Anatomy of a template</h2>
+<div class="table-wrap"><table><thead><tr><th>Field</th><th>Type</th><th>Rules</th><th>Why</th></tr></thead><tbody><tr><td><code>appId</code></td><td>UUID</td><td>create only; the app must exist.</td><td>A template belongs to one app; partners see only their own.</td></tr><tr><td><code>code</code></td><td>string</td><td>create only, then permanent. 2 to 60 characters: lowercase letters, digits, <code>_</code> <code>.</code> <code>-</code>, starting and ending with a letter or digit (<code>job-accepted</code>). Unique per app (<code>409 template_code_taken</code>).</td><td>A readable name for staff and logs. Partners address a template by its <code>id</code>.</td></tr><tr><td><code>kind</code></td><td>string</td><td>create only, then permanent. <code>DIRECT</code> (SMS or email, chosen by Adera) or <code>IN_APP</code> (inbox entry plus push). Any letter case.</td><td>Decides which capability is needed and where the message goes (see below).</td></tr><tr><td><code>category</code></td><td>string</td><td><code>TRANSACTIONAL</code>, <code>REMINDER</code> or <code>PROMOTIONAL</code>. Changeable.</td><td>Classifies the message. <strong>It has no effect on delivery today</strong>; it is recorded so stricter rules for promotions can be added.</td></tr><tr><td><code>params</code></td><td>list of up to 10 objects</td><td>Each: <code>name</code> (letter first, then letters, digits, <code>_</code>; max 30; unique), <code>maxLength</code> (1 to 500, default 100), <code>required</code> (default <code>true</code>), <code>allowLinks</code> (default <code>false</code>).</td><td>The only places a partner can put its own text, kept small and checked.</td></tr><tr><td><code>content</code></td><td>object</td><td>Languages <code>en</code>, <code>am</code>, <code>om</code>; per language any of the five texts below. <strong>English with a <code>body</code> is required</strong>; IN_APP also needs an English <code>title</code>. Blank texts are dropped. At least one language.</td><td>What the user reads.</td></tr><tr><td><code>active</code></td><td>boolean</td><td>Default <code>true</code> on create.</td><td>The on/off switch.</td></tr><tr><td><code>validFrom</code>, <code>expiresAt</code></td><td>ISO-8601 or null</td><td>The window in which the template may be used. <code>expiresAt</code> must be after <code>validFrom</code>; on create it must be in the future. <code>null</code> means no bound.</td><td>Campaign messages that start and stop by themselves.</td></tr></tbody></table></div>
+<div class="table-wrap"><table><thead><tr><th>Text key</th><th>Used for</th><th>Max length</th></tr></thead><tbody><tr><td><code>title</code></td><td>IN_APP: the notification title (also the email subject if no <code>emailSubject</code>).</td><td>100</td></tr><tr><td><code>body</code></td><td>IN_APP: the message text. DIRECT: the plain-text email body, and the SMS text when there is no <code>sms</code>.</td><td>1000</td></tr><tr><td><code>sms</code></td><td>DIRECT, SMS only. Keep it short: one SMS segment is about 160 characters.</td><td>320</td></tr><tr><td><code>emailSubject</code></td><td>DIRECT, email subject. Default: the title, else the first 60 characters of the body.</td><td>150</td></tr><tr><td><code>emailHtml</code></td><td>DIRECT, the HTML version of the email. Values are HTML-escaped when inserted.</td><td>20000</td></tr></tbody></table></div>
+<h4>Placeholders and values</h4>
+<ul><li>In any text, <code>{name}</code> is replaced by the partner's value for the declared param <code>name</code>. Using <code>{x}</code> without declaring <code>x</code> in <code>params</code> is refused when you save.</li><li>A value must be text, a number or a boolean; it is trimmed; it may not be longer than its <code>maxLength</code>; it may not contain control characters; a <code>required</code> value may not be empty. Sending a value that is not declared is refused too.</li><li><strong>Links are refused</strong> inside values unless the param has <code>allowLinks: true</code>. The check looks for <code>http:</code>, <code>https:</code>, <code>www.</code>, <code>://</code> and domain-like words ending in common endings (<code>.com</code>, <code>.et</code>, <code>.app</code>, ...). This stops a "name" field from carrying a phishing link. The template's own text (which you write) may contain links.</li><li>The user's language is chosen from the user profile; any text missing in that language falls back to the English text <em>text by text</em> (so an Amharic template with only a title still gets the English body).</li></ul>
+<p>What a refused value looks like to the partner (their call, checked at acceptance, <code>422</code>):</p>
+<pre class="out nocopy"><code>HTTP 422  {"error": "param_invalid", "fields": {"name": "links are not allowed in this value"}}</code></pre>
+<h4>Which channel and capability</h4>
+<div class="table-wrap"><table><thead><tr><th>Kind</th><th>Delivered as</th><th>Capability required</th></tr></thead><tbody><tr><td><code>IN_APP</code></td><td>An inbox entry in the Adera app plus a push to the user's devices (the inbox is the reliable part, push is best effort).</td><td><code>notify.inapp</code></td></tr><tr><td><code>DIRECT</code></td><td>SMS (the <code>sms</code> text) if the user has a phone and <code>notify.sms</code> is granted; otherwise email if the user has an email and <code>notify.email</code> is granted.</td><td><code>notify.sms</code> and/or <code>notify.email</code></td></tr></tbody></table></div>
+<h4>Usability, version, retiring</h4>
+<ul><li>A template is <strong>usable now</strong> when it is active and the current time is inside its window. The views show <code>usableNow</code> and, when not usable, <code>unusableReason</code>: <code>template_inactive</code>, <code>template_not_yet_valid</code> or <code>template_expired</code>. A partner who sends an unusable template gets that code as <code>422</code>.</li><li><code>version</code> starts at 1 and goes up by one every time <code>params</code> or <code>content</code> change (not for active, category or window changes). Each notification records the version it was accepted with. The words used at delivery time are the template's <em>current</em> words, so an edit also changes messages that are accepted but not yet delivered.</li><li>There is <strong>no delete</strong>. To retire a template: set <code>active: false</code> (switch off, easy to undo) or set <code>expiresAt</code> to a time in the past or the end date of a campaign. See the retire runbook.</li></ul>
+<div class="callout warn"><span class="label">Watch out</span><p><strong>Template changes are not written to the audit log</strong> (the notification service has no audit writer). Keep your own record of who changed which template; see Known issues.</p></div>
+<h2 id="endpoints">Endpoints</h2>
+<details class="endpoint" id="ep-tpl-list" open><summary><span class="method m-get">GET</span><span class="path">/admin/api/v1/notification/templates</span><span class="sum">List the templates of an app</span></summary><div class="body"><dl class="meta"><dt>Who may call</dt><dd>Any staff role</dd><dt>Auth</dt><dd>Staff session Bearer token at assurance level aal2 (<code>Authorization: Bearer $TOKEN</code>)</dd><dt>Rate limit</dt><dd>300 requests per minute per client IP at the gateway (HTTP 429 beyond that)</dd><dt>Backoffice</dt><dd>App &gt; <em>Templates</em> (table with Edit and Deactivate/Activate per row; "why this template cannot be used right now" tooltips)</dd><dt>Audit name</dt><dd>none (read)</dd><dt>Reversible</dt><dd>n/a</dd></dl>
+<p><strong>Purpose.</strong> All templates of one app, ordered by code. <strong>When to use it.</strong> To find a template id for a partner, to see what is switched on, to review wording.</p>
+<h4>Query</h4>
+<div class="table-wrap"><table><thead><tr><th>Name</th><th>Type</th><th>Required</th><th>Meaning</th></tr></thead><tbody><tr><td><code>appId</code></td><td>UUID</td><td>yes</td><td>The app. (Missing or malformed: <code>400 invalid_request</code>.)</td></tr></tbody></table></div>
+<pre><code>curl -sS -X GET "$GATEWAY/admin/api/v1/notification/templates?appId=$APP_ID" \
+  -H "Authorization: Bearer $TOKEN"</code></pre>
+<pre class="out"><code>HTTP 200 OK
+
+[
+  {
+    "id": "17669204-b6b9-49bb-aa61-6f114db54748",
+    "appId": "ff6510a9-de00-4fb2-97a4-ce4ad6e377dd",
+    "code": "code-reminder",
+    "kind": "DIRECT",
+    "category": "REMINDER",
+    "params": [
+      {
+        "name": "code",
+        "required": true,
+        "maxLength": 8,
+        "allowLinks": false
+      }
+    ],
+    "content": {
+      "en": {
+        "sms": "Your code is {code}",
+        "body": "Your verification code is {code}.",
+        "emailHtml": "&lt;p&gt;Your code is &lt;b&gt;{code}&lt;/b&gt;&lt;/p&gt;",
+        "emailSubject": "Your code"
+      }
+    },
+    "active": true,
+    "validFrom": null,
+    "expiresAt": null,
+    "version": 1,
+    "usableNow": true,
+    "unusableReason": null,
+    "createdAt": "2026-10-26T11:05:21.552046Z",
+    "updatedAt": "2026-10-26T11:05:21.552046Z"
+  }
+]</code></pre>
+<p>Trimmed to the first of two templates. The shape is the same as the single-template call below.</p>
+</div></details>
+<details class="endpoint" id="ep-tpl-get" open><summary><span class="method m-get">GET</span><span class="path">/admin/api/v1/notification/templates/{id}</span><span class="sum">Read one template</span></summary><div class="body"><dl class="meta"><dt>Who may call</dt><dd>Any staff role</dd><dt>Auth</dt><dd>Staff session Bearer token at assurance level aal2 (<code>Authorization: Bearer $TOKEN</code>)</dd><dt>Rate limit</dt><dd>300 requests per minute per client IP at the gateway (HTTP 429 beyond that)</dd><dt>Backoffice</dt><dd>App &gt; Templates &gt; Edit (opens it)</dd><dt>Audit name</dt><dd>none (read)</dd><dt>Reversible</dt><dd>n/a</dd></dl>
+<p><strong>Purpose.</strong> One template in full. <strong>When to use it.</strong> Before editing, and to check <code>usableNow</code>.</p>
+<pre><code>curl -sS -X GET "$GATEWAY/admin/api/v1/notification/templates/$TEMPLATE_ID" \
+  -H "Authorization: Bearer $TOKEN"</code></pre>
+<pre class="out"><code>HTTP 200 OK
+
+{
+  "id": "17669204-b6b9-49bb-aa61-6f114db54748",
+  "appId": "ff6510a9-de00-4fb2-97a4-ce4ad6e377dd",
+  "code": "code-reminder",
+  "kind": "DIRECT",
+  "category": "REMINDER",
+  "params": [
+    {
+      "name": "code",
+      "required": true,
+      "maxLength": 8,
+      "allowLinks": false
+    }
+  ],
+  "content": {
+    "en": {
+      "sms": "Your code is {code}",
+      "body": "Your verification code is {code}.",
+      "emailHtml": "&lt;p&gt;Your code is &lt;b&gt;{code}&lt;/b&gt;&lt;/p&gt;",
+      "emailSubject": "Your code"
+    }
+  },
+  "active": true,
+  "validFrom": null,
+  "expiresAt": null,
+  "version": 1,
+  "usableNow": true,
+  "unusableReason": null,
+  "createdAt": "2026-10-26T11:05:21.552046Z",
+  "updatedAt": "2026-10-26T11:05:21.552046Z"
+}</code></pre>
+<div class="table-wrap"><table><thead><tr><th>Status</th><th><code>error</code></th><th>When it happens</th><th>What to do</th></tr></thead><tbody><tr><td>404</td><td><code>not_found</code></td><td>No such template.</td><td>Check the id.</td></tr><tr><td>400</td><td><code>invalid_request</code></td><td>The id is not a UUID.</td><td>Use the UUID.</td></tr></tbody></table></div>
+<pre class="out nocopy"><code>GET /admin/api/v1/notification/templates/$TEMPLATE_ID
+HTTP 404  {"error": "not_found"}</code></pre>
+</div></details>
+<details class="endpoint" id="ep-tpl-create" open><summary><span class="method m-post">POST</span><span class="path">/admin/api/v1/notification/templates</span><span class="sum">Create a template</span></summary><div class="body"><dl class="meta"><dt>Who may call</dt><dd>ADMIN or SUPER_ADMIN</dd><dt>Auth</dt><dd>Staff session Bearer token at assurance level aal2 (<code>Authorization: Bearer $TOKEN</code>)</dd><dt>Rate limit</dt><dd>300 requests per minute per client IP at the gateway (HTTP 429 beyond that)</dd><dt>Backoffice</dt><dd>App &gt; Templates &gt; <em>New template</em> (Code, Kind, Category, Active, Valid from, Expires, declared values, texts per language)</dd><dt>Audit name</dt><dd>none: template changes are NOT audited (see Known issues)</dd><dt>Reversible</dt><dd>Deactivate it; there is no delete</dd></dl>
+<p><strong>Purpose.</strong> Creates a template for an app. <strong>When to use it.</strong> When a partner needs a new kind of message and you have agreed the wording.</p>
+<h4>Body</h4>
+<p>The fields of the anatomy table; <code>appId</code>, <code>code</code>, <code>kind</code>, <code>category</code> and <code>content</code> are required; <code>params</code> defaults to none, <code>active</code> to true.</p>
+<p>An IN_APP template with two languages, two optional values and a validity window:</p>
+<pre><code>curl -sS -X POST "$GATEWAY/admin/api/v1/notification/templates" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+  "appId": "ff6510a9-de00-4fb2-97a4-ce4ad6e377dd",
+  "code": "job-accepted",
+  "kind": "IN_APP",
+  "category": "TRANSACTIONAL",
+  "params": [
+    {
+      "name": "name",
+      "maxLength": 40
+    },
+    {
+      "name": "job",
+      "maxLength": 60,
+      "required": false
+    },
+    {
+      "name": "link",
+      "maxLength": 100,
+      "allowLinks": true,
+      "required": false
+    }
+  ],
+  "content": {
+    "en": {
+      "title": "Job accepted",
+      "body": "Hi {name}, your job {job} was accepted."
+    },
+    "am": {
+      "title": "ስራ ተቀባይነት አገኘ",
+      "body": "ሰላም {name}፣ ስራዎ {job} ተቀባይነት አግኝቷል።"
+    }
+  },
+  "validFrom": "2026-10-01T00:00:00Z",
+  "expiresAt": "2027-12-31T00:00:00Z"
+}'</code></pre>
+<h4>Response (HTTP 200)</h4>
+<p>The template with its id, <code>version: 1</code> and the computed <code>usableNow</code>:</p>
+<pre class="out"><code>HTTP 200 OK
+
+{
+  "id": "6a93b9c4-21a6-4a14-ae90-8db963fc52fb",
+  "appId": "ff6510a9-de00-4fb2-97a4-ce4ad6e377dd",
+  "code": "job-accepted",
+  "kind": "IN_APP",
+  "category": "TRANSACTIONAL",
+  "params": [
+    {
+      "name": "name",
+      "maxLength": 40,
+      "required": true,
+      "allowLinks": false
+    },
+    {
+      "name": "job",
+      "maxLength": 60,
+      "required": false,
+      "allowLinks": false
+    },
+    {
+      "name": "link",
+      "maxLength": 100,
+      "required": false,
+      "allowLinks": true
+    }
+  ],
+  "content": {
+    "en": {
+      "title": "Job accepted",
+      "body": "Hi {name}, your job {job} was accepted."
+    },
+    "am": {
+      "title": "ስራ ተቀባይነት አገኘ",
+      "body": "ሰላም {name}፣ ስራዎ {job} ተቀባይነት አግኝቷል።"
+    }
+  },
+  "active": true,
+  "validFrom": "2026-10-01T00:00:00Z",
+  "expiresAt": "2027-12-31T00:00:00Z",
+  "version": 1,
+  "usableNow": true,
+  "unusableReason": null,
+  "createdAt": "2026-10-26T11:05:21.536467113Z",
+  "updatedAt": "2026-10-26T11:05:21.536467113Z"
+}</code></pre>
+<p>A DIRECT template (note: <code>kind</code> and <code>category</code> were sent in lower case and stored upper case):</p>
+<pre><code>{
+  "appId": "ff6510a9-de00-4fb2-97a4-ce4ad6e377dd",
+  "code": "code-reminder",
+  "kind": "direct",
+  "category": "reminder",
+  "params": [
+    {
+      "name": "code",
+      "maxLength": 8
+    }
+  ],
+  "content": {
+    "en": {
+      "sms": "Your code is {code}",
+      "body": "Your verification code is {code}.",
+      "emailSubject": "Your code",
+      "emailHtml": "&lt;p&gt;Your code is &lt;b&gt;{code}&lt;/b&gt;&lt;/p&gt;"
+    }
+  }
+}</code></pre>
+<h4>Errors</h4>
+<div class="table-wrap"><table><thead><tr><th>Status</th><th><code>error</code></th><th>When it happens</th><th>What to do</th></tr></thead><tbody><tr><td>400</td><td><code>validation_failed</code></td><td>Bad or missing code/kind/category, bad params, an undeclared <code>{placeholder}</code>, unsupported language or text key, a text over its maximum, no English body (or no English title for IN_APP), bad dates, an unknown field, or the <code>appId</code> does not exist (<code>fields.appId</code>: no such mini app).</td><td>Read <code>fields</code>; the key shows the place, e.g. <code>content.en.body</code>.</td></tr><tr><td>403</td><td><code>insufficient_role</code></td><td>VIEWER.</td><td>Use an ADMIN.</td></tr><tr><td>409</td><td><code>template_code_taken</code></td><td>The app already has a template with this code.</td><td>Pick another code (or edit the existing template).</td></tr></tbody></table></div>
+<pre class="out nocopy"><code>POST /admin/api/v1/notification/templates  {"appId":"ff6510a9-de00-4fb2-97a4-ce4ad6e377dd","code":"Job Accepted","kind":"SMS","category":"URGENT","params":[{"name":"1bad"}],"content":{"fr":{...
+HTTP 400  {"error": "validation_failed", "fields": {"extraField": "unknown field", "code": "required: 2-60 chars of lowercase letters, digits, '_', '.', '-' (e.g. job-accepted)", "kind": "required: DIRECT (SMS or email) or IN_APP (inbox + push)", "category": "must be TRANSACTIONAL, REMINDER or PROMOTIONAL", "params": "each name must be unique, start with a letter and use letters, digits or '_' (max 30)", "content": "unsupported language 'fr' (use en, am, om)"}}
+
+POST /admin/api/v1/notification/templates  {"appId":"ff6510a9-de00-4fb2-97a4-ce4ad6e377dd","code":"job-accepted","kind":"IN_APP","category":"TRANSACTIONAL","params":[{"name":"name"}],"conten...
+HTTP 400  {"error": "validation_failed", "fields": {"content.en.body": "uses {nmae} which is not a declared param"}}
+
+POST /admin/api/v1/notification/templates  {"appId":"ff6510a9-de00-4fb2-97a4-ce4ad6e377dd","code":"job-accepted","kind":"IN_APP","category":"TRANSACTIONAL","content":{"en":{"body":"Hello"}}}
+HTTP 400  {"error": "validation_failed", "fields": {"content.en.title": "an English title is required for IN_APP templates"}}
+
+POST /admin/api/v1/notification/templates  {"appId":"00000000-0000-0000-0000-000000000000","code":"job-accepted","kind":"IN_APP","category":"TRANSACTIONAL","content":{"en":{"title":"t","body...
+HTTP 400  {"error": "validation_failed", "fields": {"appId": "no such mini app"}}
+
+POST /admin/api/v1/notification/templates  {"appId":"ff6510a9-de00-4fb2-97a4-ce4ad6e377dd","code":"job-accepted","kind":"IN_APP","category":"TRANSACTIONAL","params":[{"name":"name","maxLengt...
+HTTP 409  {"error": "template_code_taken"}
+
+POST /admin/api/v1/notification/templates  {"appId":"ff6510a9-de00-4fb2-97a4-ce4ad6e377dd","code":"code-reminder","kind":"direct","category":"reminder","params":[{"name":"code","maxLength":8...
+HTTP 403  {"error": "insufficient_role"}</code></pre>
+<h4>Effects, audit</h4>
+<ul><li>The template is usable immediately if it is active and inside its window.</li><li>Not audited. Reversible: deactivate it (no delete).</li></ul>
+<h4>Scenario</h4>
+<p>A food partner wants "Your order {orderNo} is on its way" in English and Amharic. You create <code>order-on-the-way</code> as IN_APP, TRANSACTIONAL, with the declared value <code>orderNo</code> (maxLength 20), check the wording with the partner, and give them the template id.</p>
+</div></details>
+<details class="endpoint" id="ep-tpl-patch" open><summary><span class="method m-patch">PATCH</span><span class="path">/admin/api/v1/notification/templates/{id}</span><span class="sum">Edit, activate, deactivate or expire a template</span></summary><div class="body"><dl class="meta"><dt>Who may call</dt><dd>ADMIN or SUPER_ADMIN</dd><dt>Auth</dt><dd>Staff session Bearer token at assurance level aal2 (<code>Authorization: Bearer $TOKEN</code>)</dd><dt>Rate limit</dt><dd>300 requests per minute per client IP at the gateway (HTTP 429 beyond that)</dd><dt>Backoffice</dt><dd>App &gt; Templates &gt; <em>Edit</em>, and <em>Deactivate</em> / <em>Activate</em> on the row (confirmation: "Partner sends using this template are refused (template_inactive) until it is activated again")</dd><dt>Audit name</dt><dd>none: template changes are NOT audited (see Known issues)</dd><dt>Reversible</dt><dd>Yes: patch the old values back</dd></dl>
+<p><strong>Purpose.</strong> Changes a template: the words, the declared values, the category, the validity window, or switches it on or off. <strong>When to use it.</strong> To fix wording, add a translation, start or stop a campaign, retire a template.</p>
+<h4>Body (all optional, but at least one)</h4>
+<div class="table-wrap"><table><thead><tr><th>Field</th><th>Rules</th></tr></thead><tbody><tr><td><code>content</code></td><td>Replaces <strong>all</strong> languages and texts at once (send everything you want to keep). Validated against the current (or the newly sent) <code>params</code>. Bumps <code>version</code>.</td></tr><tr><td><code>params</code></td><td>Replaces the whole list. Every <code>{placeholder}</code> in the stored texts must still be declared, otherwise the change is refused. Bumps <code>version</code>.</td></tr><tr><td><code>category</code></td><td>One of the three.</td></tr><tr><td><code>active</code></td><td><code>true</code> or <code>false</code>.</td></tr><tr><td><code>validFrom</code>, <code>expiresAt</code></td><td>ISO-8601 instants; <code>null</code> clears the bound. A past <code>expiresAt</code> is accepted here (that is how you retire a template at once). <code>expiresAt</code> must be after <code>validFrom</code>.</td></tr><tr><td><code>code</code>, <code>kind</code>, <code>appId</code></td><td>Always refused: <em>cannot be changed after creation</em>.</td></tr></tbody></table></div>
+<p>Change the words (version goes 1 to 2):</p>
+<pre><code>curl -sS -X PATCH "$GATEWAY/admin/api/v1/notification/templates/$TEMPLATE_ID" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+  "content": {
+    "en": {
+      "title": "Job accepted",
+      "body": "Hi {name}, {job} was accepted. Thank you!"
+    }
+  }
+}'</code></pre>
+<pre class="out"><code>HTTP 200 OK
+
+{
+  "id": "6a93b9c4-21a6-4a14-ae90-8db963fc52fb",
+  "code": "job-accepted",
+  "content": {
+    "en": {
+      "title": "Job accepted",
+      "body": "Hi {name}, {job} was accepted. Thank you!"
+    }
+  },
+  "version": 2,
+  "usableNow": true,
+  "updatedAt": "2026-10-26T11:05:21.620403539Z"
+}</code></pre>
+<p>Switch a template off:</p>
+<pre><code>curl -sS -X PATCH "$GATEWAY/admin/api/v1/notification/templates/$TEMPLATE_ID" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+  "active": false
+}'</code></pre>
+<pre class="out"><code>HTTP 200 OK
+
+{
+  "id": "17669204-b6b9-49bb-aa61-6f114db54748",
+  "code": "code-reminder",
+  "active": false,
+  "version": 1,
+  "usableNow": false,
+  "unusableReason": "template_inactive"
+}</code></pre>
+<p>Retire at once by expiring it (<code>expiresAt</code> in the past):</p>
+<pre><code>curl -sS -X PATCH "$GATEWAY/admin/api/v1/notification/templates/$TEMPLATE_ID" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+  "expiresAt": "2026-10-01T00:00:01Z"
+}'</code></pre>
+<pre class="out"><code>HTTP 200 OK
+
+{
+  "id": "6a93b9c4-21a6-4a14-ae90-8db963fc52fb",
+  "code": "job-accepted",
+  "active": true,
+  "validFrom": "2026-10-01T00:00:00Z",
+  "expiresAt": "2026-10-01T00:00:01Z",
+  "version": 2,
+  "usableNow": false,
+  "unusableReason": "template_expired"
+}</code></pre>
+<h4>Errors</h4>
+<div class="table-wrap"><table><thead><tr><th>Status</th><th><code>error</code></th><th>When it happens</th><th>What to do</th></tr></thead><tbody><tr><td>400</td><td><code>validation_failed</code></td><td>Any rule above is broken (including a removed param that a text still uses).</td><td>Read <code>fields</code>.</td></tr><tr><td>403</td><td><code>insufficient_role</code></td><td>VIEWER.</td><td>Use an ADMIN.</td></tr><tr><td>404</td><td><code>not_found</code></td><td>No such template.</td><td>Check the id.</td></tr></tbody></table></div>
+<pre class="out nocopy"><code>PATCH /admin/api/v1/notification/templates/$TEMPLATE_ID  {"code":"other","kind":"DIRECT"}
+HTTP 400  {"error": "validation_failed", "fields": {"code": "cannot be changed after creation", "kind": "cannot be changed after creation"}}
+
+PATCH /admin/api/v1/notification/templates/$TEMPLATE_ID  {"params":[{"name":"name"}]}
+HTTP 400  {"error": "validation_failed", "fields": {"content.en.body": "uses {job} which is not a declared param"}}
+
+PATCH /admin/api/v1/notification/templates/$TEMPLATE_ID  {"validFrom":"2027-01-01T00:00:00Z","expiresAt":"2026-12-01T00:00:00Z"}
+HTTP 400  {"error": "validation_failed", "fields": {"expiresAt": "must be after validFrom"}}</code></pre>
+<h4>What the partner sees</h4>
+<pre class="out nocopy"><code>template expired:
+HTTP 422  {"error": "template_expired"}
+
+template deactivated:
+HTTP 422  {"error": "template_inactive"}</code></pre>
+<h4>Effects, audit</h4>
+<ul><li>Not audited. Takes effect at once for new sends (templates are read from the database when a request is accepted and again when it is delivered).</li><li>Reversible: patch the previous values back (there is no history of old wording; keep it in your own ticket).</li><li>Messages that were already accepted use the new wording when they are delivered; deactivating or expiring a template does <em>not</em> cancel them (the delivery path does not check the template's active flag or window).</li></ul>
+<h4>Scenario</h4>
+<p>A partner's "promo" template is sending the wrong discount code. You deactivate it (one PATCH), tell the partner, fix the words, and activate it again. Details: the retire runbook.</p>
+</div></details>
+<h2 id="partner-view">What partners can do with templates</h2>
+<p>A partner can only <em>read</em> its own templates (<code>GET /v1/templates</code>, <code>GET /v1/templates/{id}</code>, signed like any partner call) to learn the ids, params and <code>usableNow</code>, and name one in a send request. Anyone else's template id answers <code>404 template_not_found</code>.</p>
+<h2 id="not-built">Not built yet</h2>
+<ul><li>Deleting a template, or a version history of old wording.</li><li>Audit events for template changes.</li><li>A "send a test" button that renders a template to a staff member.</li><li>Different behaviour per category (for instance a stricter limit for PROMOTIONAL).</li></ul>
+
+<div class="pager"><a class="prev" href="partner-keys.html"><small>Previous</small>Partner keys</a><a class="next" href="payment-settings.html"><small>Next</small>Payment settings</a></div>
+<p class="footer">Admin guide: managing mini apps. Examples were captured from a running dev stack (ADERA_ENV=dev) with a throwaway app and a temporary staff account, both removed afterwards. Ids, timestamps and key ids differ on your system.</p>
+</main>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

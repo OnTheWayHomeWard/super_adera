@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Statuses, retries and callbacks | Adera partner API</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+<button id="menu-btn" type="button" aria-label="Toggle menu">Menu</button>
+<a class="brand" href="index.html">Adera partner API</a>
+<span class="spacer"></span>
+<button id="theme-btn" type="button" aria-label="Toggle light or dark theme">Theme</button>
+</header>
+<div class="layout">
+<nav class="sidebar" aria-label="Pages">
+<h4>Mini-app backend API</h4>
+<ul><li><a href="index.html">Overview and contents</a></li><li><a href="quickstart.html">Quick start</a></li><li><a href="signing.html">Signing requests (ADERA-SIG-1)</a></li><li><a href="environments-and-ips.html">Environments, IPs and keys</a></li><li><a href="user-ids.html">Pseudonymous user ids</a></li><li><a href="templates.html">Templates</a></li><li><a href="sending-notifications.html">Sending notifications</a></li><li><a href="statuses-and-callbacks.html" class="current">Statuses, retries and callbacks</a><ul><li><a href="#overview">Overview</a></li><li><a href="#statuses">Statuses</a></li><li><a href="#polling">Polling the status</a></li><li><a href="#retries">Retries, backoff and expiry</a></li><li><a href="#callbacks">Callbacks: Adera calls you</a></li></ul></li><li><a href="limits-and-quotas.html">Limits and quotas</a></li><li><a href="sandbox-and-testing.html">Sandbox and testing checklist</a></li><li><a href="errors.html">Error codes</a></li><li><a href="data-available-to-mini-apps.html">What data a mini app gets</a></li><li><a href="known-issues.html">Known issues and not built yet</a></li></ul>
+</nav>
+<main>
+<h1>Statuses, retries and callbacks</h1>
+<p class="lead">What happens to a notification after <code>202</code>: the statuses and what each means, how retries and expiry work, how to poll, and the signed callback Adera sends you when the notification is finished.</p>
+
+<h2 id="overview">Overview</h2>
+<p>Delivery is done by background workers. A notification starts as <code>QUEUED</code>, is picked up within about a second, and ends in exactly one <strong>final</strong> status. You learn the final status in two ways: Adera <a href="#callbacks">calls your <code>callbackUrl</code></a>, or you <a href="#polling">poll</a> <code>GET /v1/notifications/{externalId}</code>. Use the callback as the main path and polling as a safety net.</p>
+<div class="callout warn"><span class="label">What SENT means</span><p><code>SENT</code> means the provider <em>accepted</em> the message (the SMS gateway, the mail server, or for <code>IN_APP</code> the inbox entry was written and pushes were attempted). Adera does not track handset delivery receipts, email opens, or whether the user read the inbox entry. Do not tell your own user "delivered"; say "sent".</p></div>
+
+<h2 id="statuses">Statuses</h2>
+<div class="table-wrap"><table><thead><tr><th>Status</th><th>Final?</th><th>Meaning</th><th><code>reason</code> values</th><th>Seen on the dev stack</th></tr></thead><tbody>
+<tr><td><code>QUEUED</code></td><td>no</td><td>Accepted and stored, waiting for a worker (normally under a second). The answer of <code>202</code>.</td><td>none</td><td>yes</td></tr>
+<tr><td><code>PROCESSING</code></td><td>no</td><td>A worker has claimed it and is delivering right now. If the worker dies, the claim expires after 60 seconds and another worker takes over.</td><td>none</td><td>not observed (too short-lived)</td></tr>
+<tr><td><code>RETRYING</code></td><td>no</td><td>An attempt failed for a temporary reason; the next attempt is scheduled (see <a href="#retries">retries</a>).</td><td>the last error code, e.g. <code>twilio_http_503</code>, <code>twilio_unreachable</code>, <code>resend_http_500</code>, <code>user_directory_unavailable</code></td><td>no: the dev providers do not fail</td></tr>
+<tr><td><code>SENT</code></td><td>yes</td><td>Handed to the provider (SMS, email) or written to the inbox (IN_APP). Success.</td><td>none</td><td>yes</td></tr>
+<tr><td><code>FAILED</code></td><td>yes</td><td>Could not be delivered and will not be tried again: the provider said the request itself is wrong (invalid number, bad address, rejected sender; any HTTP <code>4xx</code> except <code>408</code> and <code>429</code>), or all 8 attempts failed.</td><td><code>twilio_http_4xx</code>, <code>resend_http_4xx</code>, or <code>max_attempts:&lt;last error&gt;</code></td><td>no (from the code)</td></tr>
+<tr><td><code>UNREACHABLE</code></td><td>yes</td><td>Between acceptance and delivery the user became unreachable: account deleted or suspended, or the phone number or email address the channel needs was removed.</td><td><code>user_unreachable</code>, <code>no_phone</code>, <code>no_email</code></td><td>yes (reproduced by editing the throwaway row, see below)</td></tr>
+<tr><td><code>SUPPRESSED</code></td><td>yes</td><td>Not sent on purpose: the user muted this channel for your app (<code>recipient_opted_out</code>); or, on a deployment that restricts real sending to an allow-list (pre-production), the recipient is not on it (<code>not_allowlisted</code>).</td><td><code>recipient_opted_out</code>, <code>not_allowlisted</code></td><td>yes (<code>recipient_opted_out</code>)</td></tr>
+<tr><td><code>EXPIRED</code></td><td>yes</td><td>The deadline (<code>expiresAt</code> = <code>createdAt + ttlSeconds</code>) passed before delivery succeeded.</td><td>the last error code, or <code>expired</code></td><td>yes (reproduced by editing the throwaway row)</td></tr>
+</tbody></table></div>
+<p>Final statuses carry <code>completedAt</code>. <code>FAILED</code>, <code>UNREACHABLE</code>, <code>SUPPRESSED</code> and <code>EXPIRED</code> never change again. Treat any status string you do not know as non-final until it is one you do (the list may grow).</p>
+<div class="callout"><span class="label">How the rarer statuses were reproduced</span><p>The dev providers (console SMS, local mail catcher, fake push) never fail, so <code>EXPIRED</code> and <code>UNREACHABLE</code> were produced by editing the throwaway notification rows in the dev database (moving the deadline into the past, pointing a row at a suspended user, pointing an email notification at a phone-only user) and letting the real worker process them; the answers and callbacks below are what the real worker produced. <code>RETRYING</code> and <code>FAILED</code> need a failing provider and are described from the code.</p></div>
+
+<h2 id="polling">Polling the status</h2>
+<details class="endpoint" id="ep-status" open><summary><span class="method m-get">GET</span><span class="path">/v1/notifications/{externalId}</span><span class="sum">Where is my notification?</span></summary><div class="body">
+<dl class="meta"><dt>Auth</dt><dd>Partner signature, allowed address (see <a href="signing.html">Signing</a>)</dd>
+<dt>Path parameter</dt><dd><code>externalId</code>: the id you chose when sending. Only notifications of <em>your app in this environment</em> are visible.</dd>
+<dt>Rate limit</dt><dd>600 per 60 s per client IP (gateway)</dd></dl>
+<h4>Purpose</h4>
+<p>Reconcile when a callback did not arrive, or when you did not give a <code>callbackUrl</code>. It is the same object as the send answer plus <code>attempts</code> (how many delivery attempts have been started).</p>
+<h4>Example</h4>
+<pre><code>./adera_call.sh GET /v1/notifications/doc-first</code></pre>
+<pre class="out"><code>HTTP 200
+{
+  "notificationId": "6f3c68db-8e7d-483a-b14d-6abaf484c35f",
+  "externalId": "doc-first",
+  "status": "SENT",
+  "channel": "SMS",
+  "environment": "DEV",
+  "createdAt": "2026-10-26T10:52:46.960692Z",
+  "expiresAt": "2026-10-27T10:52:46.949846Z",
+  "completedAt": "2026-10-26T10:52:47.566544Z",
+  "attempts": 1
+}</code></pre>
+<p>Other real answers:</p>
+<pre class="out nocopy"><code>EXPIRED     {"notificationId":"adea30e0-...","externalId":"doc-exp1","status":"EXPIRED","channel":"EMAIL","reason":"provider_timeout","environment":"DEV","createdAt":"2026-10-26T11:06:27.862526Z","expiresAt":"2026-10-26T11:05:32.030615Z","completedAt":"2026-10-26T11:06:32.658149Z","attempts":2}
+UNREACHABLE {"notificationId":"4e06b2c1-...","externalId":"doc-unr1","status":"UNREACHABLE","channel":"EMAIL","reason":"user_unreachable","environment":"DEV", ... ,"attempts":2}
+UNREACHABLE {"notificationId":"f49c1cbf-...","externalId":"doc-unr2","status":"UNREACHABLE","channel":"EMAIL","reason":"no_email","environment":"DEV", ... ,"attempts":2}
+SUPPRESSED  {"notificationId":"73967a09-...","externalId":"doc-mutecb","status":"SUPPRESSED","channel":"SMS","reason":"recipient_opted_out","environment":"DEV","createdAt":"...","expiresAt":"...","completedAt":"..."}  (no "attempts" key on the send answer; a poll adds "attempts": 0)
+no such externalId  -> 404 {"error": "not_found"}</code></pre>
+<h4>Errors</h4>
+<div class="table-wrap"><table><thead><tr><th>Status</th><th><code>error</code></th><th>When</th></tr></thead><tbody>
+<tr><td>404</td><td><code>not_found</code></td><td>No notification with this <code>externalId</code> for your app in this environment (a typo, another environment, or the original request was refused and never stored).</td></tr>
+<tr><td>405</td><td>framework body</td><td>Wrong method (<code>GET</code> only). There is no list endpoint and no cancel endpoint.</td></tr>
+</tbody></table></div>
+<h4>How to poll</h4>
+<ul>
+<li>Poll only when you must: after the callback is overdue. A sensible schedule is 5 s, 15 s, 1 min, then every few minutes until a final status or until <code>expiresAt</code> has passed.</li>
+<li>An <code>externalId</code> that contains characters outside <code>A-Z a-z 0-9 . _ : -</code> cannot have been accepted; the path uses it as is, so no encoding is needed for valid ids.</li>
+<li>The <code>createdAt</code>/<code>expiresAt</code>/<code>completedAt</code> values are UTC.</li>
+</ul>
+</div></details>
+
+<h2 id="retries">Retries, backoff and expiry</h2>
+<div class="table-wrap"><table><thead><tr><th>What</th><th>Rule</th></tr></thead><tbody>
+<tr><td>Permanent errors</td><td>If the provider rejects the request itself (HTTP <code>4xx</code> except <code>408</code> and <code>429</code>: an invalid number, an invalid address, a rejected sender) the notification is <code>FAILED</code> at once and never retried.</td></tr>
+<tr><td>Temporary errors</td><td>Timeouts, <code>5xx</code>, <code>429</code>, network errors, or Adera's own user directory being down: status <code>RETRYING</code> and a new attempt later.</td></tr>
+<tr><td>Backoff</td><td>After attempt <em>n</em> fails, wait <code>30 s x 2^(n-1)</code>: 30 s, 1 min, 2 min, 4 min, 8 min, 16 min, 32 min, capped at 1 hour, each randomly shifted by +-10% so a burst of failures does not retry in lockstep.</td></tr>
+<tr><td>Maximum attempts</td><td><strong>8</strong>. After the 8th failure: <code>FAILED</code> with reason <code>max_attempts:&lt;last error&gt;</code>. The seven waits add up to about 64 minutes, so a notification that keeps failing ends within roughly an hour regardless of <code>ttlSeconds</code>.</td></tr>
+<tr><td>Expiry</td><td>When the next retry would fall after <code>expiresAt</code> (or a notification is picked up after it), it becomes <code>EXPIRED</code> instead. A short <code>ttlSeconds</code> therefore means fewer retries: with <code>ttlSeconds: 60</code>, one retry after 30 s and then <code>EXPIRED</code>. Pick it to match how long the message is still useful.</td></tr>
+<tr><td>Re-checks at delivery</td><td>Before every attempt Adera re-reads the user (still active? phone/email still present? still not muted?). A user who muted your app after you sent gets <code>SUPPRESSED</code>; a deleted user gets <code>UNREACHABLE</code>.</td></tr>
+<tr><td>At least once</td><td>Delivery is at-least-once: if an Adera worker crashes after the provider accepted a message but before it was recorded, the claim expires after 60 seconds and the message may be sent a second time. This is rare; the alternative (never retrying after a crash) would lose messages.</td></tr>
+<tr><td>Push</td><td>For <code>IN_APP</code> the inbox entry is written first and is idempotent per notification (a retry never shows it twice). Push is best effort: a token that Firebase reports as unregistered is retired, a transient push failure is recorded but does not fail the notification. A user with no registered device still gets the inbox entry, and the notification is <code>SENT</code>.</td></tr>
+</tbody></table></div>
+
+<h2 id="callbacks">Callbacks: Adera calls you</h2>
+<div class="callout why"><span class="label">Why callbacks</span><p>Delivery takes seconds to hours. A callback tells your server the moment a notification is finished, so you can update your own records (for example, offer the user another way to reach them if it ended <code>FAILED</code> or <code>UNREACHABLE</code>) without polling.</p></div>
+<p><strong>When:</strong> once per notification, when it reaches a <strong>final</strong> status (<code>SENT</code>, <code>FAILED</code>, <code>UNREACHABLE</code>, <code>SUPPRESSED</code>, <code>EXPIRED</code>), if you gave a <code>callbackUrl</code>. There are no callbacks for <code>QUEUED</code>, <code>PROCESSING</code> or <code>RETRYING</code>. A request answered <code>200 SUPPRESSED</code> (muted user) also produces a callback, and it can reach your server before you have processed the <code>200</code>. <strong>Not</strong> sent for: replays, requests refused with an error, notifications without <code>callbackUrl</code>.</p>
+
+<h3 id="callback-request">The request Adera sends</h3>
+<p>Real capture (the receiver was on the developer machine; the signature is shortened):</p>
+<pre class="out nocopy"><code>POST /adera/hook?src=capture HTTP/1.1
+Host: 172.18.0.1:8096
+Content-Type: application/json
+Content-Length: 235
+User-Agent: Adera-Callbacks/1
+X-Adera-Event: notification.status
+X-Adera-Key-Id: adera-sig-202610
+X-Adera-Timestamp: 1793012822
+X-Adera-Signature: Nye4HJjS38Q5X30uwrETT4REQSg4CMwqsmNdyXwVCEsPn+uYd0Hr7mc93Viy... (base64)
+Idempotency-Key: 09efa312-8940-4609-89e0-8c80162087cc
+
+{"at": "2026-10-26T11:07:01.743063014Z", "event": "notification.status", "reason": null, "status": "SENT", "channel": "EMAIL", "externalId": "doc-capture", "environment": "DEV", "notificationId": "f18ccf87-86f1-443e-bb59-24024909fc1e"}</code></pre>
+<div class="table-wrap"><table><thead><tr><th>Header</th><th>Meaning</th></tr></thead><tbody>
+<tr><td><code>X-Adera-Event</code></td><td>Always <code>notification.status</code> today. Check it, new event types may be added later.</td></tr>
+<tr><td><code>X-Adera-Key-Id</code>, <code>X-Adera-Timestamp</code>, <code>X-Adera-Signature</code></td><td>Adera's signature over the request canonical string, see <a href="signing.html#callbacks">Signing</a>. Verify them.</td></tr>
+<tr><td><code>Idempotency-Key</code></td><td>A UUID identifying <em>this callback</em>. It is the <strong>same value on every retry</strong> of the same callback (observed), and different from <code>notificationId</code>. Use it to de-duplicate.</td></tr>
+<tr><td><code>User-Agent</code></td><td><code>Adera-Callbacks/1</code></td></tr>
+</tbody></table></div>
+<div class="table-wrap"><table><thead><tr><th>Body field</th><th>Meaning</th></tr></thead><tbody>
+<tr><td><code>event</code></td><td><code>notification.status</code></td></tr>
+<tr><td><code>notificationId</code></td><td>Adera's UUID (as in the send answer)</td></tr>
+<tr><td><code>externalId</code></td><td>Your id: use this to find your record</td></tr>
+<tr><td><code>status</code></td><td>The final status</td></tr>
+<tr><td><code>channel</code></td><td><code>SMS</code>, <code>EMAIL</code> or <code>IN_APP</code></td></tr>
+<tr><td><code>reason</code></td><td>The <a href="#statuses">reason</a> or <code>null</code></td></tr>
+<tr><td><code>environment</code></td><td><code>DEV</code> or <code>PROD</code></td></tr>
+<tr><td><code>at</code></td><td>When the notification finished (UTC, nanosecond precision)</td></tr>
+</tbody></table></div>
+<ul>
+<li>The order of keys in the JSON is <strong>not</strong> fixed and spaces may appear after <code>:</code> and <code>,</code>. Never re-serialize before verifying: verify the <strong>raw bytes</strong>, then parse. Ignore fields you do not know (more may be added).</li>
+<li>The signed path is the path plus query of <em>your</em> callback URL exactly as Adera sent it (<code>/adera/hook?src=capture</code> above). If a proxy in front of your app rewrites the path, verify with the path as Adera sent it.</li>
+<li>Timestamps are fresh (signed when sent, also on retries), so apply the same 5-minute tolerance you apply to your own clock.</li>
+</ul>
+
+<h3 id="callback-reply">What your endpoint must do</h3>
+<ol>
+<li>Read the raw body. Verify the signature (reject with <code>401</code> if it is wrong: Adera retries, so a wrong rejection only delays, but never accept an unverified callback).</li>
+<li>De-duplicate on <code>Idempotency-Key</code> (and apply updates in a way that is harmless if repeated, e.g. "set status to SENT" rather than "add one").</li>
+<li>Answer <strong>any <code>2xx</code></strong> quickly (Adera waits at most 8 seconds, connecting 5 seconds). Do slow work after answering. The response body is ignored.</li>
+</ol>
+<h3 id="callback-retries">Callback retries</h3>
+<div class="table-wrap"><table><thead><tr><th>Situation</th><th>What Adera does</th></tr></thead><tbody>
+<tr><td>You answer 2xx</td><td>Done.</td></tr>
+<tr><td>Anything else (non-2xx, redirect, timeout, connection error)</td><td>Retries with backoff: after attempt <em>n</em> wait <code>1 min x 2^(n-1)</code> (1, 2, 4, 8, 16, 32, 64 minutes), each +-10%, up to <strong>8 attempts</strong>. All eight attempts are spread over about <strong>2 hours</strong> (127 minutes before jitter). The delays up to 6 hours that the code allows are never reached with eight attempts.</td></tr>
+<tr><td>URL refused by Adera's address rules</td><td>Failed at once, no retry (see <a href="sending-notifications.html#callback-url">callback URL rules</a>).</td></tr>
+<tr><td>All attempts failed</td><td>The callback is given up on. The notification itself is unaffected: poll <code>GET /v1/notifications/{externalId}</code> to learn its status. Adera has no replay endpoint for callbacks.</td></tr>
+</tbody></table></div>
+<p>Observed on the dev stack with a receiver that answered <code>500</code> twice and then <code>204</code>:</p>
+<pre class="out nocopy"><code>14:06:17 attempt 1  Idempotency-Key 1050c4be-34de-4425-bcd2-0569f7caad96   (answered 500)
+14:07:14 attempt 2  Idempotency-Key 1050c4be-34de-4425-bcd2-0569f7caad96   (answered 500; 57 s later = 1 min -10%)
+14:09:26 attempt 3  Idempotency-Key 1050c4be-34de-4425-bcd2-0569f7caad96   (answered 204; 132 s later = 2 min +10%)</code></pre>
+<p>Callbacks for different notifications are independent and their order is not guaranteed.</p>
+
+<h3 id="receivers">Ready-to-run callback receivers</h3>
+<p>Both verify the signature with Adera's public key, de-duplicate on <code>Idempotency-Key</code> and answer <code>204</code>. They use the client files from <a href="signing.html">Signing</a>. Python (<a href="examples/callback_receiver.py"><code>examples/callback_receiver.py</code></a>):</p>
+<pre><code>&quot;&quot;&quot;A callback endpoint: verifies Adera&#x27;s signature, de-duplicates on Idempotency-Key, answers 2xx.
+Run: ADERA_BASE=... ADERA_KEY_ID=x ADERA_PRIVATE_KEY_FILE=... python callback_receiver.py 8099&quot;&quot;&quot;
+import json, sys
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from adera_client import verify_callback
+
+seen = set()          # use a database or cache with expiry in production
+
+
+class Hook(BaseHTTPRequestHandler):
+    def do_POST(self):
+        raw = self.rfile.read(int(self.headers.get(&quot;Content-Length&quot;, 0)))
+        try:
+            verify_callback(self.path, raw, self.headers)       # self.path = path + query exactly as received
+        except Exception as e:
+            print(&quot;REJECTED:&quot;, e); self.send_response(401); self.end_headers(); return
+        key = self.headers[&quot;Idempotency-Key&quot;]
+        if key in seen:
+            print(&quot;duplicate delivery ignored&quot;, key)
+        else:
+            seen.add(key)
+            event = json.loads(raw)
+            print(&quot;callback&quot;, self.headers[&quot;X-Adera-Event&quot;], json.dumps(event))
+        self.send_response(204); self.end_headers()          # any 2xx means &quot;received&quot;
+
+    def log_message(self, *a):
+        pass
+
+
+HTTPServer((&quot;0.0.0.0&quot;, int(sys.argv[1])), Hook).serve_forever()</code></pre>
+<p>Node.js (<a href="examples/callback-receiver.js"><code>examples/callback-receiver.js</code></a>):</p>
+<pre><code>// A callback endpoint: verifies Adera&#x27;s signature, de-duplicates on Idempotency-Key, answers 2xx.
+// Run: ADERA_BASE=... ADERA_KEY_ID=x ADERA_PRIVATE_KEY_FILE=... node callback-receiver.js 8098
+const http = require(&quot;node:http&quot;);
+const { verifyCallback } = require(&quot;./adera-client&quot;);
+
+const seen = new Set(); // use a database or cache with expiry in production
+
+http.createServer((req, res) =&gt; {
+  const chunks = [];
+  req.on(&quot;data&quot;, (c) =&gt; chunks.push(c));
+  req.on(&quot;end&quot;, async () =&gt; {
+    const raw = Buffer.concat(chunks);                       // the raw bytes: verify BEFORE parsing
+    try {
+      await verifyCallback(req.url, raw, req.headers);       // req.url = path + query exactly as received
+    } catch (e) {
+      console.log(&quot;REJECTED:&quot;, e.message);
+      res.writeHead(401).end();
+      return;
+    }
+    const key = req.headers[&quot;idempotency-key&quot;];
+    if (seen.has(key)) console.log(&quot;duplicate delivery ignored&quot;, key);
+    else { seen.add(key); console.log(&quot;callback&quot;, req.headers[&quot;x-adera-event&quot;], raw.toString()); }
+    res.writeHead(204).end();                                // any 2xx means &quot;received&quot;
+  });
+}).listen(Number(process.argv[2]), &quot;0.0.0.0&quot;);</code></pre>
+<p>Both were run against the dev stack. Output of the Python receiver for real callbacks, and for forged ones (no signature headers, and a bogus signature):</p>
+<pre class="out nocopy"><code>callback notification.status {"at": "2026-10-26T10:54:28.691981738Z", "event": "notification.status", "reason": null, "status": "SENT", "channel": "SMS", "externalId": "doc-cb1", "environment": "DEV", "notificationId": "1d09ca65-..."}
+callback notification.status {"at": "2026-10-26T11:06:32.658149406Z", "event": "notification.status", "reason": "provider_timeout", "status": "EXPIRED", "channel": "EMAIL", "externalId": "doc-exp1", "environment": "DEV", "notificationId": "adea30e0-..."}
+callback notification.status {"at": "2026-10-26T11:11:32.941125727Z", "event": "notification.status", "reason": "recipient_opted_out", "status": "SUPPRESSED", "channel": "SMS", "externalId": "doc-mutecb", ...}
+REJECTED: (missing headers)        -> HTTP 401
+REJECTED: (invalid signature)      -> HTTP 401</code></pre>
+<p>The Node receiver printed the same for a callback sent to <code>/adera/hook?src=node</code>, which shows that a query string in the callback URL is part of the signed path.</p>
+<div class="callout"><span class="label">Test locally</span><p>On Adera's dev stack the receiver can run on your laptop: pass <code>callbackUrl: "http://&lt;your-lan-or-docker-bridge-ip&gt;:8099/adera/hook"</code>. Production requires public <code>https</code>; to test that path, expose your receiver through a TLS tunnel or a staging host.</p></div>
+
+<div class="pager"><a class="prev" href="sending-notifications.html"><small>Previous</small>Sending notifications</a><a class="next" href="limits-and-quotas.html"><small>Next</small>Limits and quotas</a></div>
+<p class="footer">Adera mini-app backend API guide &middot; verified against the dev deployment on 2026-10-26</p>
+</main>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

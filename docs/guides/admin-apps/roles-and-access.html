@@ -1,0 +1,245 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Roles and access | Admin: managing mini apps</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+<button id="menu-btn" type="button" aria-label="Toggle menu">Menu</button>
+<a class="brand" href="index.html">Admin: managing mini apps</a>
+<span class="spacer"></span>
+<button id="theme-btn" type="button" aria-label="Toggle light or dark theme">Theme</button>
+</header>
+<div class="layout">
+<nav class="sidebar" aria-label="Pages in this guide">
+<h4>This guide</h4>
+<ul><li><a href="index.html">Overview</a></li>
+<li><a href="roles-and-access.html" class="current">Roles and access</a><ul><li><a href="#overview">Overview</a></li><li><a href="#sign-in">Staff sign-in for API use</a></li><li><a href="#roles">Roles</a></li><li><a href="#matrix">Permission matrix for mini-app actions</a></li><li><a href="#endpoints">Helper endpoints</a></li><li><a href="#not-built">Not built yet</a></li></ul></li>
+<li><a href="apps-create-and-edit.html">Create, edit, list apps</a></li>
+<li><a href="status-lifecycle.html">Status lifecycle</a></li>
+<li><a href="logo.html">Logo</a></li>
+<li><a href="capabilities.html">Capabilities</a></li>
+<li><a href="notification-limits.html">Notification limits</a></li>
+<li><a href="environments-and-ips.html">Environments and IPs</a></li>
+<li><a href="partner-keys.html">Partner keys</a></li>
+<li><a href="templates.html">Templates</a></li>
+<li><a href="payment-settings.html">Payment settings</a></li>
+<li><a href="notification-log-and-usage.html">Notification log and usage</a></li>
+<li><a href="reviews-reports-audit.html">Reviews, reports, audit</a></li>
+<li><a href="runbooks.html">Runbooks</a></li>
+<li><a href="errors.html">Errors</a></li>
+<li><a href="known-issues.html">Known issues</a></li>
+</ul></nav>
+<main>
+<h1>Roles and access</h1>
+<p class="lead">How staff sign in for API use, the three roles, and who may do what.</p>
+<h2 id="overview">Overview</h2>
+<p>Every call in this guide is made by a staff member. A staff member proves who they are twice (an emailed one-time code and an authenticator-app code), and then has one of three roles. This page explains how to get a working token for API use, what each role may do on mini apps, and what you see when something is missing.</p>
+<div class="callout why"><span class="label">Why this exists</span>Mini apps decide what partners may send to real people and what data they may see. Two proofs of identity plus three simple roles keep that power with a few people, and every change is written to the audit log with the actor's name, role and IP address.</div>
+<h2 id="sign-in">Staff sign-in for API use</h2>
+<p>Staff accounts use the same identity service as end users (Kratos, reached through the gateway at <code>$GATEWAY/kratos/...</code>), but with a second step. The result is a <strong>session token</strong>. You send it as <code>Authorization: Bearer $TOKEN</code> on every admin call. The gateway asks the registry service on every request whether the token belongs to an <em>active</em> staff member at <strong>aal2</strong>, and passes the staff id and role on to the service that handles the call. A person who is not staff, or whose account was disabled, gets <code>403 not_staff</code> or <code>401 unauthorized</code>.</p>
+<div class="table-wrap"><table><thead><tr><th>Step</th><th>What happens</th><th>Result</th></tr></thead><tbody><tr><td>1. Email code</td><td>You ask for a one-time code for your staff email address and submit it.</td><td>A session at <strong>aal1</strong>. The admin API still answers <code>403 mfa_required</code>.</td></tr><tr><td>2. Authenticator app (first time only)</td><td>You enrol an authenticator app (TOTP) on the aal1 session. This needs a recent login (the identity service wants a "privileged session", at most 15 minutes old).</td><td>Right after enrolment the session is already <strong>aal2</strong>.</td></tr><tr><td>3. Authenticator app (every later login)</td><td>After the emailed code you upgrade the session with the current 6-digit code from the app.</td><td>A session at <strong>aal2</strong>: the admin API works.</td></tr></tbody></table></div>
+<p>Facts that matter when you script this:</p>
+<ul><li>The emailed code is valid for 5 minutes; a login flow lives 10 minutes. A session lasts 30 days, but each new login needs both proofs again.</li><li>The gateway allows only <strong>10 login-code submissions per minute per client IP</strong>, and the notification service limits one-time-code emails to about 10 per hour per address. Log in once and reuse the token; do not log in per request.</li><li>An authenticator code can be used only once: if you need two logins in the same 30-second window, wait for the next code.</li><li>In the dev stack nothing is emailed: the code is shown at <code>http://127.0.0.1:8085/dev/messages</code> (and in the Mailpit inbox at <code>http://127.0.0.1:8025</code>). On a real deployment it arrives by email.</li><li>Only a SUPER_ADMIN can make someone staff (<code>POST /admin/api/v1/staff</code> with an email and a role). The very first super admin is created from the <code>BOOTSTRAP_SUPER_ADMIN_EMAIL</code> setting when the registry service starts.</li></ul>
+<h4>The calls (real shapes, captured from the dev stack with a temporary staff account)</h4>
+<p>Step 1, start a login flow and ask for the emailed code:</p>
+<pre><code># start a flow (public call, no token)
+FLOW=$(curl -sS "$GATEWAY/kratos/self-service/login/api" | jq -r .id)
+
+# ask for the code to be emailed (the identity service answers HTTP 400 with state "sent_email": that is normal)
+curl -sS -X POST "$GATEWAY/kratos/self-service/login?flow=$FLOW" \
+  -H "Content-Type: application/json" \
+  -d '{"method": "code", "identifier": "you@example.com"}'</code></pre>
+<pre class="out"><code>HTTP 400  (trimmed)
+
+{
+  "id": "f4d2365f-...",
+  "type": "api",
+  "state": "sent_email",
+  "requested_aal": "aal1",
+  "ui": {
+    "nodes": [
+      {
+        "group": "default",
+        "name": "identifier",
+        "type": "hidden"
+      },
+      {
+        "group": "code",
+        "name": "method",
+        "type": "hidden"
+      },
+      {
+        "group": "code",
+        "name": "code",
+        "type": "text"
+      },
+      {
+        "group": "code",
+        "name": "method",
+        "type": "submit"
+      },
+      {
+        "group": "code",
+        "name": "resend",
+        "type": "submit"
+      }
+    ],
+    "messages": [
+      "A code was sent to the address you provided. If you didn't receive it, please check the spelling of the address and try again."
+    ]
+  }
+}</code></pre>
+<p>Submit the code from the email:</p>
+<pre><code>curl -sS -X POST "$GATEWAY/kratos/self-service/login?flow=$FLOW" \
+  -H "Content-Type: application/json" \
+  -d '{"method": "code", "identifier": "you@example.com", "code": "123456"}'</code></pre>
+<pre class="out"><code>HTTP 200  (trimmed; the token is a secret, never paste it into chat or tickets)
+
+{
+  "session_token": "&lt;SESSION_TOKEN&gt;",
+  "session": {
+    "authenticator_assurance_level": "aal1",
+    "authentication_methods": [
+      "code"
+    ],
+    "active": true
+  }
+}</code></pre>
+<p>That token is aal1. The admin API refuses it:</p>
+<pre class="out nocopy"><code>GET /admin/api/v1/me
+HTTP 403  {"error": "mfa_required"}</code></pre>
+<p><strong>First login only</strong>: enrol the authenticator app. Open a settings flow with the aal1 token, show the secret or QR code to the person, and submit the first code their app produces:</p>
+<pre><code>SFLOW=$(curl -sS "$GATEWAY/kratos/self-service/settings/api" -H "Authorization: Bearer $TOKEN_AAL1" | jq -r .id)
+# the flow contains the nodes totp_qr (an image) and totp_secret_key (the text secret): show one of them to the person
+curl -sS -X POST "$GATEWAY/kratos/self-service/settings?flow=$SFLOW" \
+  -H "Authorization: Bearer $TOKEN_AAL1" -H "Content-Type: application/json" \
+  -d '{"method": "totp", "totp_code": "123456"}'</code></pre>
+<pre class="out"><code>HTTP 200  (the flow nodes, trimmed)
+
+{
+  "nodes": [
+    {
+      "group": "default",
+      "name": "csrf_token",
+      "type": "hidden"
+    },
+    {
+      "group": "profile",
+      "name": "traits.email",
+      "type": "email"
+    },
+    {
+      "group": "profile",
+      "name": "traits.phone_number",
+      "type": "tel"
+    },
+    {
+      "group": "profile",
+      "name": "method",
+      "type": "submit"
+    },
+    {
+      "group": "totp",
+      "name": "totp_qr",
+      "type": "img"
+    },
+    {
+      "group": "totp",
+      "name": "totp_secret_key",
+      "type": "text"
+    },
+    {
+      "group": "totp",
+      "name": "totp_code",
+      "type": "text"
+    },
+    {
+      "group": "totp",
+      "name": "method",
+      "type": "submit"
+    }
+  ]
+}
+
+after the POST:
+{
+  "state": "success"
+}</code></pre>
+<p><strong>Every later login</strong>: after step 1 (emailed code) upgrade the session with the authenticator code. Note the <code>X-Session-Token</code> header (not <code>Authorization</code>) on these two calls:</p>
+<pre><code>F2=$(curl -sS "$GATEWAY/kratos/self-service/login/api?aal=aal2&amp;refresh=false" -H "X-Session-Token: $TOKEN_AAL1" | jq -r .id)
+curl -sS -X POST "$GATEWAY/kratos/self-service/login?flow=$F2" \
+  -H "X-Session-Token: $TOKEN_AAL1" -H "Content-Type: application/json" \
+  -d '{"method": "totp", "totp_code": "123456"}'
+# the answer contains the new "session_token": that is $TOKEN for the admin API</code></pre>
+<pre class="out"><code>HTTP 200  (trimmed)
+
+{
+  "session_token": "&lt;SESSION_TOKEN&gt;",
+  "session": {
+    "authenticator_assurance_level": "aal2",
+    "authentication_methods": [
+      "code",
+      "totp"
+    ]
+  }
+}</code></pre>
+<p>Test the token:</p>
+<pre><code>curl -sS "$GATEWAY/admin/api/v1/me" -H "Authorization: Bearer $TOKEN"</code></pre>
+<div class="callout warn"><span class="label">Watch out</span><p>Never use another person's account for scripts, and never put a session token or an authenticator secret into a repository. For tests, the repository ships a helper (<code>tests/e2e/tempstaff.py</code>) that creates a temporary staff account in the dev stack and deletes it again. There are no API keys or service accounts for staff: automation needs a real staff session.</p></div>
+<h2 id="roles">Roles</h2>
+<div class="table-wrap"><table><thead><tr><th>Role</th><th>What it is for</th><th>Can do on mini apps</th></tr></thead><tbody><tr><td><code>VIEWER</code></td><td>Read-only access: support, partners' account managers, auditors of the product (not of the audit log).</td><td>Read everything about apps, keys (fingerprints only), templates, usage, the notification log, reviews and reports. Cannot change anything. <strong>Cannot read the audit log.</strong></td></tr><tr><td><code>ADMIN</code></td><td>Runs the platform day to day.</td><td>Everything a VIEWER can, plus every change on apps, keys, limits, addresses, templates, payment settings, moderation, and the audit log. Can set any status, but <strong>cannot move an app out of KILLED</strong>.</td></tr><tr><td><code>SUPER_ADMIN</code></td><td>The owner and the people the owner trusts most.</td><td>Everything an ADMIN can, plus reviving a KILLED app and managing staff (add, change role, disable).</td></tr></tbody></table></div>
+<p>A higher role includes everything below it. The server decides on every request; the backoffice only hides or greys out what the server would refuse. If you force a forbidden call anyway the answer is <code>403 insufficient_role</code>.</p>
+<div class="callout "><span class="label">Note</span><p>Apps, keys, templates and the notification log carry no personal data of end users, so a VIEWER sees them in full. (Masking of phone numbers and emails applies to the <em>Users</em> screens, which are not part of this guide.)</p></div>
+<h2 id="matrix">Permission matrix for mini-app actions</h2>
+<div class="table-wrap"><table><thead><tr><th>Action</th><th>VIEWER</th><th>ADMIN</th><th>SUPER_ADMIN</th></tr></thead><tbody><tr><td>List and read apps, detail, capability catalog, dashboard, system</td><td>yes</td><td>yes</td><td>yes</td></tr><tr><td>Read keys (fingerprint, status), templates, usage, notification log and detail</td><td>yes</td><td>yes</td><td>yes</td></tr><tr><td>Read reviews and reports</td><td>yes</td><td>yes</td><td>yes</td></tr><tr><td>Read the audit log (<code>GET /audit</code>)</td><td>no</td><td>yes</td><td>yes</td></tr><tr><td>Create an app; edit it; upload or remove the logo</td><td>no</td><td>yes</td><td>yes</td></tr><tr><td>Set status DRAFT, LIVE, PAUSED, KILLED</td><td>no</td><td>yes</td><td>yes</td></tr><tr><td>Move an app <em>out of</em> KILLED (revive)</td><td>no</td><td>no</td><td>yes</td></tr><tr><td>Capabilities, notification limits, allowed IPs, payment settings</td><td>no</td><td>yes</td><td>yes</td></tr><tr><td>Register, generate or revoke partner keys</td><td>no</td><td>yes</td><td>yes</td></tr><tr><td>Create or edit templates (activate, deactivate, expire)</td><td>no</td><td>yes</td><td>yes</td></tr><tr><td>Hide or restore a review; resolve or dismiss a report</td><td>no</td><td>yes</td><td>yes</td></tr><tr><td>Staff: list, add, change role, disable (<code>/staff</code>)</td><td>no</td><td>no</td><td>yes</td></tr></tbody></table></div>
+<p>The same table in the backoffice: VIEWER sees every screen read-only (the Audit screen shows a note instead), ADMIN gets the buttons for changes, SUPER_ADMIN additionally gets the Staff screen and can use the status buttons on a KILLED app.</p>
+<h4>What you see when it fails</h4>
+<pre class="out nocopy"><code>GET /admin/api/v1/me
+HTTP 401  {"error": "unauthorized"}
+
+GET /admin/api/v1/me
+HTTP 401  {"error": "unauthorized"}
+
+GET /admin/api/v1/me
+HTTP 403  {"error": "mfa_required"}
+
+POST /admin/api/v1/apps  {"slug":"doc-tmp-admin","name":{"en":"x"}}
+HTTP 403  {"error": "insufficient_role"}
+
+POST /admin/api/v1/apps/$APP_ID/status  {"status":"PAUSED"}
+HTTP 403  {"error": "only_super_admin_can_revive_killed_app"}</code></pre>
+<div class="table-wrap"><table><thead><tr><th>Status</th><th><code>error</code></th><th>Meaning</th><th>What to do</th></tr></thead><tbody><tr><td>401</td><td><code>unauthorized</code></td><td>No token, an unknown or expired session, or the staff member was disabled.</td><td>Sign in again. If it keeps failing for a known good account, ask a SUPER_ADMIN whether it was disabled.</td></tr><tr><td>403</td><td><code>mfa_required</code></td><td>The session is aal1: the authenticator step is missing.</td><td>Do step 2 or 3 above and retry with the new token.</td></tr><tr><td>403</td><td><code>not_staff</code></td><td>The person signed in, but is not an active staff member (or has no role).</td><td>A SUPER_ADMIN adds them as staff.</td></tr><tr><td>403</td><td><code>insufficient_role</code></td><td>The role is too low for this action.</td><td>Ask someone with the needed role; see the matrix.</td></tr><tr><td>403</td><td><code>only_super_admin_can_revive_killed_app</code></td><td>An ADMIN tried to move an app out of KILLED.</td><td>A SUPER_ADMIN does it.</td></tr><tr><td>429</td><td>(gateway body)</td><td>More than 300 admin requests per minute from one IP.</td><td>Slow down; the body comes from the gateway, not from the API.</td></tr><tr><td>503</td><td><code>identity_service_unavailable</code> or a gateway 503</td><td>The identity service or the registry could not be reached while checking the token.</td><td>Retry in a moment; check the System page for service health.</td></tr></tbody></table></div>
+<h2 id="endpoints">Helper endpoints</h2>
+<details class="endpoint" id="ep-me" open><summary><span class="method m-get">GET</span><span class="path">/admin/api/v1/me</span><span class="sum">Who am I?</span></summary><div class="body"><dl class="meta"><dt>Who may call</dt><dd>Any staff role</dd><dt>Auth</dt><dd>Staff session Bearer token at assurance level aal2 (<code>Authorization: Bearer $TOKEN</code>)</dd><dt>Rate limit</dt><dd>300 requests per minute per client IP at the gateway (HTTP 429 beyond that)</dd><dt>Backoffice</dt><dd>Top bar of the backoffice (name and role)</dd><dt>Audit name</dt><dd>none (read)</dd><dt>Reversible</dt><dd>n/a (read only)</dd></dl>
+<p><strong>Purpose.</strong> Returns the staff member's id and role as the API sees them. <strong>When to use it.</strong> Right after login, to show who is signed in, to decide which buttons to show, and as the cheapest check that a token really is aal2.</p>
+<h4>Request</h4>
+<p>No parameters.</p>
+<pre><code>curl -sS -X GET "$GATEWAY/admin/api/v1/me" \
+  -H "Authorization: Bearer $TOKEN"</code></pre>
+<h4>Response</h4>
+<pre class="out"><code>HTTP 200 OK
+
+{
+  "role": "ADMIN",
+  "id": "0e5171f6-687c-4312-9212-971e28305d8d"
+}</code></pre>
+<h4>Errors</h4>
+<div class="table-wrap"><table><thead><tr><th>Status</th><th><code>error</code></th><th>When it happens</th><th>What to do</th></tr></thead><tbody><tr><td>401</td><td><code>unauthorized</code></td><td>No token or an invalid one.</td><td>Sign in again.</td></tr><tr><td>403</td><td><code>mfa_required</code></td><td>aal1 token.</td><td>Finish the authenticator step.</td></tr><tr><td>403</td><td><code>not_staff</code></td><td>Not an active staff member.</td><td>Ask a SUPER_ADMIN.</td></tr></tbody></table></div>
+<h4>How to use the result</h4>
+<ul><li>Cache the role in the client; the server re-checks it on every call anyway, so a stale cache can only make a button appear that is then refused.</li><li>The <code>id</code> is the staff id used as the <code>actorId</code> in audit events and as the <code>actor</code> audit filter.</li></ul>
+</div></details>
+<p>Reading a few more facts about this deployment, any role: <code>GET /admin/api/v1/system</code> (which environment it runs, see <a href="environments-and-ips.html#ep-system">Environments and IPs</a>) and <code>GET /admin/api/v1/dashboard</code> (counts, see <a href="apps-create-and-edit.html#ep-dashboard">Create, edit and list apps</a>).</p>
+<h2 id="not-built">Not built yet</h2>
+<ul><li>Per-app roles (a partner manager who may only touch one app).</li><li>Staff API keys or service accounts for automation.</li><li>A "last signed in" or session list for staff accounts in the API.</li></ul>
+
+<div class="pager"><a class="prev" href="index.html"><small>Previous</small>Overview</a><a class="next" href="apps-create-and-edit.html"><small>Next</small>Create, edit, list apps</a></div>
+<p class="footer">Admin guide: managing mini apps. Examples were captured from a running dev stack (ADERA_ENV=dev) with a throwaway app and a temporary staff account, both removed afterwards. Ids, timestamps and key ids differ on your system.</p>
+</main>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

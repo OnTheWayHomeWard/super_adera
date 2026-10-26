@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Payment settings | Admin: managing mini apps</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+<button id="menu-btn" type="button" aria-label="Toggle menu">Menu</button>
+<a class="brand" href="index.html">Admin: managing mini apps</a>
+<span class="spacer"></span>
+<button id="theme-btn" type="button" aria-label="Toggle light or dark theme">Theme</button>
+</header>
+<div class="layout">
+<nav class="sidebar" aria-label="Pages in this guide">
+<h4>This guide</h4>
+<ul><li><a href="index.html">Overview</a></li>
+<li><a href="roles-and-access.html">Roles and access</a></li>
+<li><a href="apps-create-and-edit.html">Create, edit, list apps</a></li>
+<li><a href="status-lifecycle.html">Status lifecycle</a></li>
+<li><a href="logo.html">Logo</a></li>
+<li><a href="capabilities.html">Capabilities</a></li>
+<li><a href="notification-limits.html">Notification limits</a></li>
+<li><a href="environments-and-ips.html">Environments and IPs</a></li>
+<li><a href="partner-keys.html">Partner keys</a></li>
+<li><a href="templates.html">Templates</a></li>
+<li><a href="payment-settings.html" class="current">Payment settings</a><ul><li><a href="#overview">Overview</a></li><li><a href="#fields">Fields</a></li><li><a href="#endpoint">Endpoint</a></li><li><a href="#not-built">Not built yet</a></li></ul></li>
+<li><a href="notification-log-and-usage.html">Notification log and usage</a></li>
+<li><a href="reviews-reports-audit.html">Reviews, reports, audit</a></li>
+<li><a href="runbooks.html">Runbooks</a></li>
+<li><a href="errors.html">Errors</a></li>
+<li><a href="known-issues.html">Known issues</a></li>
+</ul></nav>
+<main>
+<h1>Payment settings</h1>
+<p class="lead">Which currencies and amounts a mini app may charge (policy only until payments are built).</p>
+<h2 id="overview">Overview</h2>
+<p>Payment settings say which currencies a mini app may charge in, whether it may place a <em>hold</em> (reserve money now, charge later), and the smallest and largest single amount it may ask for.</p>
+<div class="callout warn"><span class="label">Policy only for now</span><p>The payment feature itself (the <code>pay.request</code> capability and the flow that asks a user to pay) is <strong>not built yet</strong>. These settings are stored, audited and shown in the backoffice so the policy is already in place when payments ship, but no service enforces them today. Do not promise partners that a limit set here stops anything yet.</p></div>
+<div class="callout why"><span class="label">Why this exists</span>Money limits belong to the platform, not to the partner: a small pilot partner should be able to charge only in ETB and only between 10 and 5,000, and only a trusted one may use holds. Putting these rules next to the capability decision means they are reviewed by the same people.</div>
+<h2 id="fields">Fields</h2>
+<div class="table-wrap"><table><thead><tr><th>Field</th><th>Type</th><th>Required</th><th>Rules</th><th>Why</th></tr></thead><tbody><tr><td><code>allowedCurrencies</code></td><td>list of strings</td><td>yes</td><td>Each <code>ETB</code> or <code>USD</code> (any letter case, stored upper case, duplicates removed). An empty list means no currency.</td><td>A partner charging in the wrong currency is a support problem.</td></tr><tr><td><code>allowHold</code></td><td>boolean</td><td>no</td><td><code>true</code> allows authorise-now-capture-later; anything else, or absent, is <code>false</code>.</td><td>Holds tie up the user's money; enable them deliberately.</td></tr><tr><td><code>minAmountMinor</code></td><td>integer &ge; 0 or null</td><td>no</td><td>In <strong>minor units</strong> (cents or santim): 1000 = 10.00. Absent or <code>null</code> = no minimum.</td><td>Avoid dust payments.</td></tr><tr><td><code>maxAmountMinor</code></td><td>integer &ge; 0 or null</td><td>no</td><td>Same units. Absent or <code>null</code> = no maximum. <code>minAmountMinor</code> must not exceed it.</td><td>Cap on a single payment.</td></tr></tbody></table></div>
+<div class="callout warn"><span class="label">Watch out</span><p>The PUT replaces all four fields. Leaving out <code>minAmountMinor</code> or <code>maxAmountMinor</code> clears it, and leaving out <code>allowHold</code> turns holds off. Read the current values first (<code>payment</code> in <code>GET /admin/api/v1/apps/{appId}</code>; it is <code>null</code> until settings were saved once).</p></div>
+<h2 id="endpoint">Endpoint</h2>
+<details class="endpoint" id="ep-payment-set" open><summary><span class="method m-put">PUT</span><span class="path">/admin/api/v1/apps/{appId}/payment-settings</span><span class="sum">Set payment settings</span></summary><div class="body"><dl class="meta"><dt>Who may call</dt><dd>ADMIN or SUPER_ADMIN</dd><dt>Auth</dt><dd>Staff session Bearer token at assurance level aal2 (<code>Authorization: Bearer $TOKEN</code>)</dd><dt>Rate limit</dt><dd>300 requests per minute per client IP at the gateway (HTTP 429 beyond that)</dd><dt>Backoffice</dt><dd>App &gt; <em>Payment</em> (Allowed currencies, "Allow holds", Minimum and Maximum amount in minor units; a note says it is policy only)</dd><dt>Audit name</dt><dd><code>payment.set</code> (meta: currencies, allowHold)</dd><dt>Reversible</dt><dd>Yes: send the previous values</dd></dl>
+<p><strong>Purpose.</strong> Creates or replaces the payment settings of one app. <strong>When to use it.</strong> When you grant <code>pay.request</code> to a partner, or change what it may charge.</p>
+<pre><code>curl -sS -X PUT "$GATEWAY/admin/api/v1/apps/$APP_ID/payment-settings" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+  "allowedCurrencies": [
+    "etb",
+    "USD",
+    "ETB"
+  ],
+  "allowHold": true,
+  "minAmountMinor": 1000,
+  "maxAmountMinor": 5000000
+}'</code></pre>
+<h4>Response (HTTP 200)</h4>
+<p>The saved settings (currencies normalised):</p>
+<pre class="out"><code>HTTP 200 OK
+
+{
+  "allowedCurrencies": [
+    "ETB",
+    "USD"
+  ],
+  "allowHold": true,
+  "minAmountMinor": 1000,
+  "maxAmountMinor": 5000000
+}</code></pre>
+<h4>Errors</h4>
+<div class="table-wrap"><table><thead><tr><th>Status</th><th><code>error</code></th><th>When it happens</th><th>What to do</th></tr></thead><tbody><tr><td>400</td><td><code>validation_failed</code></td><td><code>allowedCurrencies</code> missing, not a list, or has a currency other than ETB/USD; an amount is negative or not a whole number; min greater than max; an unknown field.</td><td>Read <code>fields</code>.</td></tr><tr><td>403</td><td><code>insufficient_role</code></td><td>VIEWER.</td><td>Use an ADMIN.</td></tr><tr><td>404</td><td><code>not_found</code></td><td>No such app.</td><td>Check the id.</td></tr></tbody></table></div>
+<pre class="out nocopy"><code>PUT /admin/api/v1/apps/$APP_ID/payment-settings  {"allowedCurrencies":["EUR"],"minAmountMinor":500,"maxAmountMinor":100,"tip":1}
+HTTP 400  {"error": "validation_failed", "fields": {"tip": "unknown field", "allowedCurrencies": "supported currencies: ETB, USD", "minAmountMinor": "must not be greater than maxAmountMinor"}}</code></pre>
+<h4>Effects, audit</h4>
+<ul><li>Audit: <code>payment.set</code>, meta <code>{"currencies": [...], "allowHold": true}</code> (the amounts are not in the event).</li><li>No other service reads these settings yet (see the box above). Reversible: send the previous values.</li><li>Setting payment settings does <strong>not</strong> grant <code>pay.request</code>: that is a separate decision on the <a href="capabilities.html">Capabilities</a> page.</li></ul>
+<h4>Scenario</h4>
+<p>A ticketing partner is approved to take payments. You grant <code>pay.request</code> with the reason "To pay for tickets you choose", then set ETB only, min 1000 (10.00), max 5,000,000 (50,000.00), holds off.</p>
+</div></details>
+<h2 id="not-built">Not built yet</h2>
+<ul><li>The payment flow itself (<code>pay.request</code>): nothing reads or enforces these settings yet.</li><li>Currencies other than ETB and USD.</li><li>Clearing the settings (there is no delete; send an empty currency list).</li></ul>
+
+<div class="pager"><a class="prev" href="templates.html"><small>Previous</small>Templates</a><a class="next" href="notification-log-and-usage.html"><small>Next</small>Notification log and usage</a></div>
+<p class="footer">Admin guide: managing mini apps. Examples were captured from a running dev stack (ADERA_ENV=dev) with a throwaway app and a temporary staff account, both removed afterwards. Ids, timestamps and key ids differ on your system.</p>
+</main>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Worked example | Super app: notifications, inbox and push</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+<button id="menu-btn" type="button" aria-label="Toggle menu">Menu</button>
+<span class="brand">Super app: notifications, inbox and push</span>
+<span class="spacer"></span>
+<button id="theme-btn" type="button" aria-label="Toggle light or dark theme">Theme</button>
+</header>
+<div class="layout">
+<nav class="sidebar" aria-label="Pages in this guide">
+<h4>This guide</h4>
+<ul><li><a href="index.html">Overview and contents</a></li><li><a href="how-delivery-works.html">How delivery works</a></li><li><a href="worked-example.html" class="current">Worked example</a></li><li><a href="inbox-api.html">Inbox API</a></li><li><a href="push-notifications.html">Push notifications</a></li><li><a href="preferences-and-muting.html">Preferences and muting</a></li><li><a href="languages.html">Languages</a></li><li><a href="building-the-bell-screen.html">Building the bell screen</a></li><li><a href="delivery-states.html">Delivery states</a></li><li><a href="errors.html">Error codes</a></li><li><a href="known-issues.html">Known issues and not built yet</a></li></ul>
+</nav>
+<main>
+<h1>Worked example</h1>
+<p class="lead">A partner sends an IN_APP notification; the user's client then reads the inbox. Every response below was captured from the running dev stack on 2026-10-26.</p>
+<h2 id="overview">Overview</h2><p>Cast: the user is the seeded demo user <em>Demo Selam</em> (language <code>am</code>, phone <code>+2519*****02</code>); the mini app is <code>demo-food</code>; the template is <code>seed-order-update</code> (kind <code>IN_APP</code>, texts in en, am, om). The user has one registered phone. Rows created for this example were deleted afterwards.</p><h2 id="step0">Step 0: the client's state before</h2><pre><code>curl -s "$GATEWAY/api/v1/me/notifications/unread-count" -H "Authorization: Bearer $TOKEN"</code></pre><pre class="out"><code>{
+  "count": 0
+}</code></pre><p>The phone registered its FCM token earlier (<code>PUT /api/v1/me/devices</code>, see the Account guide). Without it everything below still works except the push.</p><h2 id="step1">Step 1: the partner's request (context only)</h2><p>This is sent by the mini app's server, not by the app. It is signed (headers <code>X-Adera-Key-Id</code>, <code>X-Adera-Timestamp</code>, <code>X-Adera-Signature</code>; see the Partner API guide) and goes to the same gateway.</p><pre><code>POST $GATEWAY/v1/notifications
+Content-Type: application/json
+
+{
+  "externalId": "order-1042-eta",
+  "userId": "u_p_3c5af220db58ca21a535e8dd0ce6474b",
+  "templateId": "b94d53fa-c514-4371-9239-95db3fe1ed25",
+  "params": { "name": "Selam", "eta": "7 min" },
+  "data": { "screen": "order", "orderId": "1042" }
+}</code></pre><pre class="out"><code>HTTP/1.1 202 Accepted
+
+{
+  "notificationId": "1a9aa88f-e23e-4ac4-8ffd-d54f22c3ccc7",
+  "externalId": "order-1042-eta",
+  "status": "QUEUED",
+  "channel": "IN_APP",
+  "environment": "DEV",
+  "createdAt": "2026-10-26T10:51:14.507915Z",
+  "expiresAt": "2026-10-27T10:51:14.497804Z"
+}</code></pre><p>(The example run used the external id <code>doc-tmp-order-1042-eta</code>; the prefix was only a marker for cleanup.) The partner chose no channel: the template kind <code>IN_APP</code> decided it.</p><h2 id="step2">Step 2: what happened in the background</h2><p>About a second later the worker delivered it. The partner's own status call showed:</p><pre class="out"><code>{
+  "notificationId": "1a9aa88f-e23e-4ac4-8ffd-d54f22c3ccc7",
+  "externalId": "order-1042-eta",
+  "status": "SENT",
+  "channel": "IN_APP",
+  "environment": "DEV",
+  "createdAt": "2026-10-26T10:51:14.507915Z",
+  "expiresAt": "2026-10-27T10:51:14.497804Z",
+  "completedAt": "2026-10-26T10:51:15.478008Z",
+  "attempts": 1
+}</code></pre><p>The service rendered the Amharic text (the user's language), wrote the inbox row, and tried push. In dev the fake push provider only logs a line:</p><pre class="out"><code>[PUSH fake] token=...abcdef title=ትዕዛዝዎ በመንገድ ላይ ነው</code></pre><p>With real Firebase the phone would have shown a banner carrying the payload described in <a href="push-notifications.html">Push notifications</a>.</p><h2 id="step3">Step 3: the client reads the inbox</h2><p>On the push (or when the app is opened) the client refreshes the badge and the list.</p><pre><code>curl -s "$GATEWAY/api/v1/me/notifications/unread-count" -H "Authorization: Bearer $TOKEN"</code></pre><pre class="out"><code>{
+  "count": 1
+}</code></pre><pre><code>curl -s "$GATEWAY/api/v1/me/notifications?unread=true" -H "Authorization: Bearer $TOKEN"</code></pre><pre class="out"><code>[
+  {
+    "id": "2d7e9b41-6ec3-41e1-8b49-b3701d0d8e38",
+    "appId": "24daadb5-f356-416d-8b91-43f5e6be386b",
+    "title": "ትዕዛዝዎ በመንገድ ላይ ነው",
+    "body": "ሰላም Selam፣ በ7 min ውስጥ ይደርሳል።",
+    "data": "{\"screen\": \"order\", \"orderId\": \"1042\"}",
+    "createdAt": "2026-10-26T10:51:15.474Z",
+    "readAt": null
+  }
+]</code></pre><div class="callout warn"><span class="label">Look closely</span><p><code>data</code> is a JSON <em>string</em> (note the escaped quotes), not an object: the client must decode it a second time. The item <code>id</code> differs from the partner's <code>notificationId</code>. The title and body are already in the user's language. The amharic text interpolates the values exactly as the partner sent them ("7 min" was not translated).</p></div><h2 id="step4">Step 4: the user taps the item</h2><p>The client decodes <code>data</code> (<code>{"screen":"order","orderId":"1042"}</code>), opens the <code>demo-food</code> mini app (looked up by <code>appId</code> in the app catalog) at the order screen, and marks the item read:</p><pre><code>curl -s -X PUT "$GATEWAY/api/v1/me/notifications/$ITEM_ID/read" -H "Authorization: Bearer $TOKEN"</code></pre><pre class="out"><code>{
+  "read": true,
+  "id": "2d7e9b41-6ec3-41e1-8b49-b3701d0d8e38"
+}</code></pre><p>The badge count becomes 0 on the next <code>unread-count</code> call.</p><h2 id="variants">Variants seen in the same run</h2><div class="table-wrap"><table><thead><tr><th>Situation</th><th>What the partner got</th><th>What the user saw</th></tr></thead><tbody><tr><td>The user had muted in-app messages for the mini app (<code>muteInApp: true</code>)</td><td><code>200</code> with <code>status: SUPPRESSED</code>, <code>reason: recipient_opted_out</code> (immediately, not <code>202</code>)</td><td>Nothing: no inbox item, no push</td></tr><tr><td>The user's account is suspended or deleted</td><td><code>422 {"error":"user_unreachable"}</code></td><td>Nothing</td></tr><tr><td>The same request is sent again with the same <code>externalId</code></td><td><code>200</code> with the current status and <code>"replayed": true</code></td><td>Still one inbox item (the partner's retry is safe)</td></tr><tr><td>A user without any registered phone</td><td><code>202</code>, then <code>SENT</code></td><td>Inbox item only (attempt log: <code>SKIPPED no_devices</code>)</td></tr></tbody></table></div>
+<div class="pager"><a class="prev" href="how-delivery-works.html"><small>Previous</small>How delivery works</a><a class="next" href="inbox-api.html"><small>Next</small>Inbox API</a></div>
+<p class="footer">Adera super-app guide &middot; notifications &middot; verified against the dev stack on 2026-10-26</p>
+</main>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

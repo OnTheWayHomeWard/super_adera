@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Devices and push tokens (FCM) | Adera guide</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+<button id="menu-btn" type="button" aria-label="Toggle menu">Menu</button>
+<span class="brand">Adera guide: sign-in and account</span>
+<span class="spacer"></span>
+<button id="theme-btn" type="button" aria-label="Toggle light or dark theme">Theme</button>
+</header>
+<div class="layout">
+<nav class="sidebar" aria-label="Pages in this guide">
+<h4>Super app: sign-in and account</h4>
+<ul><li><a href="index.html">Overview</a></li>
+<li><a href="quickstart.html">Quick start</a></li>
+<li><a href="authentication.html">Registration and login</a></li>
+<li><a href="session-and-logout.html">Session and logout</a></li>
+<li><a href="profile.html">Profile</a></li>
+<li><a href="extra-data.html">Extra data</a></li>
+<li><a href="location.html">Location</a></li>
+<li><a href="avatar.html">Avatar</a></li>
+<li><a href="devices-and-push-tokens.html" class="current">Devices and push tokens</a><ul><li><a href="#overview">Overview</a></li><li><a href="#rules">How registration behaves</a></li><li><a href="#when">When the app should call it</a></li><li><a href="#endpoints">Endpoints</a></li><li><a href="#logout-behaviour">What logout does to devices</a></li></ul></li>
+<li><a href="errors.html">Error table</a></li>
+<li><a href="known-issues.html">Known issues and not built yet</a></li></ul>
+</nav>
+<main>
+<h1>Devices and push tokens (FCM)</h1>
+<p class="lead">Register the phone's FCM token so the platform can push to it: registration, rotation, listing, removal, and what logout does.</p>
+<h2 id="overview">Overview</h2>
+<p>For Adera to push a notification to a phone, it must know that phone's Firebase Cloud Messaging (FCM) token and which user it belongs to. The app tells the server with <code>PUT /api/v1/me/devices</code>. A "device" here means <strong>one installation of the app</strong> that can receive push. When a mini app sends a notification to a user, the platform delivers it to all of that user's <em>active</em> devices.</p>
+<div class="table-wrap"><table><thead><tr><th>Method and path</th><th>Purpose</th></tr></thead><tbody>
+<tr><td><code>PUT /api/v1/me/devices</code></td><td>register this installation, or refresh its token and details (idempotent)</td></tr>
+<tr><td><code>GET /api/v1/me/devices</code></td><td>list my active devices</td></tr>
+<tr><td><code>DELETE /api/v1/me/devices</code></td><td>remove a device (by token or installation id)</td></tr>
+<tr><td><code>POST /api/v1/me/logout</code></td><td>sign out and remove this device's token in one call (see Session and logout)</td></tr>
+</tbody></table></div>
+<p>All need <code>Authorization: Bearer $TOKEN</code> and share the 300 per minute gateway limit. In the dev stack push is a fake provider: nothing reaches a phone and the server does not check the format of the token (any non-blank string up to 4096 characters is accepted), so you can test the whole API without Firebase.</p>
+<h2 id="rules">How registration behaves</h2>
+<ul><li><strong>The FCM token is unique across the platform.</strong> Registering a token that already exists moves it to the current user and re-activates it (the case of one phone used by two accounts over time: the new account gets the pushes). It is never delivered to two users.</li><li><strong>The installation id makes rotation clean.</strong> If you send a stable <code>installationId</code> and later register a new token for it, the server <strong>replaces</strong> the old token on the same device row (verified: the device <code>id</code> stayed the same, and only one device was listed). Without an installation id every new token creates a new row, and the old rows stay until Firebase reports them dead.</li><li><strong>Idempotent.</strong> Calling PUT with the same data again only refreshes <code>lastSeenAt</code> and the descriptive fields (verified: appVersion changed from 1.0.3 to 1.0.4 on the same row).</li><li><strong>Dead tokens are retired by the server.</strong> When Firebase tells the notification service a token no longer works, the row is marked inactive: it disappears from <code>GET /api/v1/me/devices</code> and gets no more pushes. The row is kept for history. If the app registers that token again it becomes active again. The app has no endpoint to deactivate (only to remove).</li><li><strong>Blocked accounts get no push.</strong> A suspended or deleted account is treated as unreachable for delivery.</li></ul>
+<h2 id="when">When the app should call it</h2>
+<div class="table-wrap"><table><thead><tr><th>Moment</th><th>Call</th></tr></thead><tbody>
+<tr><td>Right after sign-in or registration</td><td><code>PUT /api/v1/me/devices</code> with the current FCM token</td></tr>
+<tr><td>App start (signed in)</td><td><code>PUT</code> again: cheap, refreshes <code>lastSeenAt</code>, app version, OS version and locale</td></tr>
+<tr><td>Firebase rotates the token (<code>onTokenRefresh</code> / <code>onNewToken</code>)</td><td><code>PUT</code> with the new token and the <strong>same installation id</strong></td></tr>
+<tr><td>Notification permission granted later (iOS, Android 13+)</td><td><code>PUT</code> as soon as you get a token</td></tr>
+<tr><td>Logout</td><td><code>POST /api/v1/me/logout</code> with <code>fcmToken</code> and <code>installationId</code> (removes the device and the session)</td></tr>
+<tr><td>"Stop notifications on this device" switch</td><td><code>DELETE /api/v1/me/devices</code> with the token or installation id; register again when the person turns it on</td></tr>
+</tbody></table></div>
+<div class="callout"><span class="label">Installation id</span>
+<p>Generate a random UUID the first time the app runs, store it in app storage and send it with every registration. It survives token rotations but not a reinstall (a new install is a new device). Do not use hardware identifiers (IMEI, advertising id): the server only needs something stable and unique, max 64 characters.</p>
+</div>
+<h2 id="endpoints">Endpoints</h2>
+<details class="endpoint" id="ep-devices-put">
+<summary><span class="method m-put">PUT</span><span class="path">/api/v1/me/devices</span><span class="sum">Register or refresh this device</span></summary>
+<div class="body"><dl class="meta">
+<dt>Who may call</dt><dd>signed-in user, account not blocked</dd>
+<dt>Auth</dt><dd><code>Authorization: Bearer $TOKEN</code></dd>
+<dt>Headers</dt><dd><code>Content-Type: application/json</code></dd>
+<dt>Rate limit</dt><dd>300 per 60 s per IP</dd>
+<dt>Implemented by</dt><dd><code>device/DeviceController.java</code>, <code>DeviceService.java</code></dd>
+</dl>
+<h4>Purpose</h4>
+<p>Tells the platform "this installation can receive push at this token". Call it after login and whenever the token changes.</p>
+<h4>Request body</h4>
+<div class="table-wrap"><table><thead><tr><th>Field</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why</th></tr></thead><tbody>
+<tr><td><code>fcmToken</code></td><td>string</td><td>yes</td><td>not blank, max 4096</td><td>where to send the push</td></tr>
+<tr><td><code>platform</code></td><td>string enum</td><td>yes</td><td>exactly <code>ANDROID</code>, <code>IOS</code> or <code>WEB</code>; send it upper-case. An unknown value (verified with <code>SYMBIAN</code>) is answered <code>400 invalid_json</code></td><td>which push channel and format the platform uses</td></tr>
+<tr><td><code>installationId</code></td><td>string</td><td>recommended</td><td>max 64</td><td>stable id of this install, makes token rotation replace instead of add</td></tr>
+<tr><td><code>appVersion</code></td><td>string</td><td>optional</td><td>max 32</td><td>support and staff diagnostics</td></tr>
+<tr><td><code>osVersion</code></td><td>string</td><td>optional</td><td>max 32</td><td>same</td></tr>
+<tr><td><code>deviceName</code></td><td>string</td><td>optional</td><td>max 100</td><td>shown in a future "my devices" screen (for example "Pixel 8")</td></tr>
+<tr><td><code>locale</code></td><td>string</td><td>optional</td><td>max 16</td><td>device language tag such as <code>am-ET</code></td></tr>
+</tbody></table></div>
+<p>Blank optional strings are stored as <code>null</code>; values are trimmed.</p>
+<h4>Example request</h4>
+<pre><code>curl -s -X PUT "$GATEWAY/api/v1/me/devices" \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"fcmToken":"&lt;fcm token&gt;","platform":"ANDROID","installationId":"a1b2c3d4-0000-4000-8000-doc000000001","appVersion":"1.0.3","osVersion":"Android 15","deviceName":"Pixel 8","locale":"am-ET"}'</code></pre>
+<h4>Example response</h4>
+<pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+
+{
+  "id": "0d50615e-6227-4796-99bf-7ae475c875ea",
+  "installationId": "a1b2c3d4-0000-4000-8000-doc000000001",
+  "platform": "ANDROID",
+  "appVersion": "1.0.3",
+  "osVersion": "Android 15",
+  "deviceName": "Pixel 8",
+  "locale": "am-ET",
+  "active": true,
+  "createdAt": "2026-10-26T10:50:26.562422495Z",
+  "lastSeenAt": "2026-10-26T10:50:26.562422495Z"
+}</code></pre>
+<p>The token itself is deliberately never echoed back. <code>id</code> is the server's device id (stable across token rotations when an installation id is used); you do not need to store it.</p>
+<h4>Errors</h4>
+<div class="table-wrap"><table><thead><tr><th>Status</th><th>Body</th><th>When</th><th>What to do</th></tr></thead><tbody>
+<tr><td>400</td><td><code>validation_failed</code>, <code>fields.fcmToken</code> = "must not be blank"</td><td>token missing or blank</td><td>get a token first</td></tr>
+<tr><td>400</td><td><code>validation_failed</code>, <code>fields.platform</code> = "must not be null"</td><td>platform missing</td><td>send it</td></tr>
+<tr><td>400</td><td><code>validation_failed</code> with, for example, <code>locale</code>: "size must be between 0 and 16", <code>appVersion</code>: "size must be between 0 and 32", <code>deviceName</code>: "... 100", <code>installationId</code>: "... 64"</td><td>a field too long (captured together in one answer)</td><td>shorten</td></tr>
+<tr><td>400</td><td><code>{"error":"invalid_json"}</code></td><td>not JSON, or <code>platform</code> is not one of ANDROID, IOS, WEB (verified with <code>SYMBIAN</code>)</td><td>fix the client</td></tr>
+<tr><td>401 / 403 / 429 / 503</td><td>see the Error table</td><td></td><td></td></tr>
+</tbody></table></div>
+</div></details>
+<details class="endpoint" id="ep-devices-get">
+<summary><span class="method m-get">GET</span><span class="path">/api/v1/me/devices</span><span class="sum">List my active devices</span></summary>
+<div class="body"><dl class="meta">
+<dt>Who may call</dt><dd>signed-in user, account not blocked</dd>
+<dt>Auth</dt><dd><code>Authorization: Bearer $TOKEN</code></dd>
+<dt>Rate limit</dt><dd>300 per 60 s per IP</dd>
+<dt>Implemented by</dt><dd><code>DeviceController#list</code></dd>
+</dl>
+<h4>Purpose</h4>
+<p>Returns the user's <strong>active</strong> devices, most recently seen first, without tokens. Use it for a "devices that get my notifications" screen or to check that this install is registered. There is no pagination.</p>
+<h4>Example request</h4>
+<pre><code>curl -s "$GATEWAY/api/v1/me/devices" -H "Authorization: Bearer $TOKEN"</code></pre>
+<h4>Example response</h4>
+<pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+
+[
+  {
+    "id": "c652e0ef-1cba-4426-baad-22141f900891",
+    "installationId": null,
+    "platform": "IOS",
+    "appVersion": null,
+    "osVersion": null,
+    "deviceName": "iPhone",
+    "locale": null,
+    "active": true,
+    "createdAt": "2026-10-26T10:50:26.676798Z",
+    "lastSeenAt": "2026-10-26T10:50:26.676798Z"
+  },
+  {
+    "id": "0d50615e-6227-4796-99bf-7ae475c875ea",
+    "installationId": "a1b2c3d4-0000-4000-8000-doc000000001",
+    "platform": "ANDROID",
+    "appVersion": "1.0.3",
+    "osVersion": "Android 15",
+    "deviceName": "Pixel 8",
+    "locale": "am-ET",
+    "active": true,
+    "createdAt": "2026-10-26T10:50:26.562422Z",
+    "lastSeenAt": "2026-10-26T10:50:26.600988Z"
+  }
+]</code></pre>
+<p>An empty list is <code>[]</code>. <code>active</code> is always <code>true</code> in this list (inactive devices are not returned).</p>
+<h4>Errors</h4>
+<div class="table-wrap"><table><thead><tr><th>Status</th><th>Body</th><th>When</th></tr></thead><tbody>
+<tr><td>401 / 403 / 429 / 503</td><td>see the Error table</td><td>as for every call</td></tr>
+</tbody></table></div>
+</div></details>
+<details class="endpoint" id="ep-devices-delete">
+<summary><span class="method m-delete">DELETE</span><span class="path">/api/v1/me/devices</span><span class="sum">Remove a device</span></summary>
+<div class="body"><dl class="meta">
+<dt>Who may call</dt><dd>signed-in user, account not blocked</dd>
+<dt>Auth</dt><dd><code>Authorization: Bearer $TOKEN</code></dd>
+<dt>Headers</dt><dd><code>Content-Type: application/json</code> (the request has a JSON body)</dd>
+<dt>Rate limit</dt><dd>300 per 60 s per IP</dd>
+<dt>Implemented by</dt><dd><code>DeviceController#remove</code></dd>
+</dl>
+<h4>Purpose</h4>
+<p>Deletes the user's device row that matches the token and/or the installation id, so it receives no more pushes. Only <em>your own</em> devices can be removed (the match includes your user id). Removing something that is not there is not an error.</p>
+<h4>Request body</h4>
+<div class="table-wrap"><table><thead><tr><th>Field</th><th>Type</th><th>Required</th><th>Constraints</th></tr></thead><tbody>
+<tr><td><code>fcmToken</code></td><td>string</td><td>one of the two</td><td>max 4096</td></tr>
+<tr><td><code>installationId</code></td><td>string</td><td>one of the two</td><td>max 64</td></tr>
+</tbody></table></div>
+<p>If both are given, each is applied (the answer counts every deleted row).</p>
+<h4>Example request</h4>
+<pre><code>curl -s -X DELETE "$GATEWAY/api/v1/me/devices" \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"installationId":"a1b2c3d4-0000-4000-8000-doc000000001"}'</code></pre>
+<h4>Example responses</h4>
+<pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+
+{ "removed": 1 }</code></pre>
+<p>Nothing matched: <code>{ "removed": 0 }</code> (still <code>200</code>).</p>
+<h4>Errors</h4>
+<div class="table-wrap"><table><thead><tr><th>Status</th><th>Body</th><th>When</th><th>What to do</th></tr></thead><tbody>
+<tr><td>400</td><td><code>validation_failed</code>, <code>fields.fcmToken</code> = "give fcmToken or installationId"</td><td>body present but both fields missing or blank</td><td>send one</td></tr>
+<tr><td>400</td><td><code>{"error":"invalid_json"}</code></td><td>no body at all</td><td>send a JSON body</td></tr>
+<tr><td>401 / 403 / 429 / 503</td><td>see the Error table</td><td></td><td></td></tr>
+</tbody></table></div>
+<h4>Gotcha</h4>
+<p>Some HTTP libraries refuse to send a body with <code>DELETE</code>. If yours does, use <code>POST /api/v1/me/logout</code> (which accepts the same two fields) when signing out, or configure the client to allow a DELETE body.</p>
+</div></details>
+<h2 id="logout-behaviour">What logout does to devices</h2>
+<ul><li><code>POST /api/v1/me/logout</code> with <code>fcmToken</code> and/or <code>installationId</code> deletes the matching device row <em>and</em> revokes the session. This is how the next person using the phone is prevented from receiving the previous user's notifications (verified: after logout the device row was gone and the token was rejected).</li><li>If you call logout without those fields, the session ends but the device row stays: the phone would still receive the previous user's pushes until it is registered by someone else or Firebase retires the token. Always send them.</li><li>After logout, delete the local FCM token and ask Firebase for a new one before the next user signs in, so a token is never shared between accounts.</li><li>"Sign out everywhere else" (<code>DELETE /kratos/sessions</code>) and a staff suspension do <strong>not</strong> remove other devices' push tokens. Staff suspension makes the account unreachable for delivery, so nothing is sent anyway.</li></ul>
+
+<div class="pager"><a class="prev" href="avatar.html"><small>Previous</small>Avatar</a><a class="next" href="errors.html"><small>Next</small>Error table</a></div>
+<p class="footer">Adera super-app guide: sign-in and account &middot; verified against the dev stack on 2026-10-26</p>
+</main>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

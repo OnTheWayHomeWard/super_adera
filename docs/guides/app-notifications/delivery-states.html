@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Delivery states | Super app: notifications, inbox and push</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+<button id="menu-btn" type="button" aria-label="Toggle menu">Menu</button>
+<span class="brand">Super app: notifications, inbox and push</span>
+<span class="spacer"></span>
+<button id="theme-btn" type="button" aria-label="Toggle light or dark theme">Theme</button>
+</header>
+<div class="layout">
+<nav class="sidebar" aria-label="Pages in this guide">
+<h4>This guide</h4>
+<ul><li><a href="index.html">Overview and contents</a></li><li><a href="how-delivery-works.html">How delivery works</a></li><li><a href="worked-example.html">Worked example</a></li><li><a href="inbox-api.html">Inbox API</a></li><li><a href="push-notifications.html">Push notifications</a></li><li><a href="preferences-and-muting.html">Preferences and muting</a></li><li><a href="languages.html">Languages</a></li><li><a href="building-the-bell-screen.html">Building the bell screen</a></li><li><a href="delivery-states.html" class="current">Delivery states</a></li><li><a href="errors.html">Error codes</a></li><li><a href="known-issues.html">Known issues and not built yet</a></li></ul>
+</nav>
+<main>
+<h1>Delivery states</h1>
+<p class="lead">The status a partner sees for each notification, and what it means for the person on the other end.</p>
+<h2 id="overview">Overview</h2><p>The user never sees a status. Backend colleagues and support do, through the partner's status call, the callback and the staff tools. This page translates each status into what the user experienced, so a complaint ("I never got it") can be traced.</p><div class="table-wrap"><table><thead><tr><th>Status</th><th>Final?</th><th>Reason values</th><th>What the user experienced</th></tr></thead><tbody><tr><td><code>QUEUED</code></td><td>no</td><td>-</td><td>Nothing yet. Becomes <code>SENT</code> or a failure within about a second normally.</td></tr><tr><td><code>PROCESSING</code></td><td>no</td><td>-</td><td>Being delivered right now (a worker holds it for up to 60 s; if the worker dies it is picked up again).</td></tr><tr><td><code>RETRYING</code></td><td>no</td><td><code>user_directory_unavailable</code>, or a temporary SMS/email provider code</td><td>Nothing yet. Retried with backoff (30 s doubling to 1 h) up to 8 attempts or until the message expires.</td></tr><tr><td><code>SENT</code></td><td>yes</td><td>-</td><td>IN_APP: the inbox item exists and a push was attempted on each device (push may have been skipped or failed: see the attempt log). SMS/EMAIL: handed to the provider.</td></tr><tr><td><code>SUPPRESSED</code></td><td>yes</td><td><code>recipient_opted_out</code>, <code>not_allowlisted</code></td><td>Nothing, by choice: the user muted that channel for the mini app, or (SMS/email only, real providers only) the recipient is not on the live allow-list. Not retried.</td></tr><tr><td><code>UNREACHABLE</code></td><td>yes</td><td><code>user_unreachable</code>, <code>no_phone</code>, <code>no_email</code></td><td>Nothing: the account was suspended or deleted after acceptance, or the phone or email the chosen channel needed is gone.</td></tr><tr><td><code>FAILED</code></td><td>yes</td><td><code>twilio_http_4xx</code>, <code>resend_http_4xx</code> (permanent provider refusal), <code>max_attempts:&lt;reason&gt;</code></td><td>Nothing: the provider rejected the number or address, or all 8 attempts failed.</td></tr><tr><td><code>EXPIRED</code></td><td>yes</td><td>the last retry reason, or <code>expired</code></td><td>Nothing: the partner's <code>ttlSeconds</code> ran out (default 24 h, max 7 days) before delivery succeeded.</td></tr></tbody></table></div><h2 id="at-door">Answered at the door</h2><p>Some outcomes never create a queued notification: <code>422 user_unreachable</code>, <code>403 capability_not_granted</code>, <code>429 quota_exceeded</code>, validation and template errors. The mute case is special: it returns <code>200</code> with <code>SUPPRESSED</code> immediately and a stored record.</p><h2 id="attempts">Attempt log (IN_APP)</h2><div class="table-wrap"><table><thead><tr><th>Outcome / error code</th><th>Meaning</th></tr></thead><tbody><tr><td><code>OK</code> (provider <code>fcm-fake</code> or <code>fcm</code>)</td><td>A push was handed to the provider for one device. One row per device.</td></tr><tr><td><code>SKIPPED / no_devices</code></td><td>The user had no active registered device: inbox only.</td></tr><tr><td><code>PERMANENT / token_unregistered</code></td><td>Dead token; that device was deactivated.</td></tr><tr><td><code>TRANSIENT / push_unavailable</code></td><td>Firebase unavailable for that device; not retried.</td></tr></tbody></table></div><p>Note that in the IN_APP case <code>SENT</code> says the inbox item was written, not that a phone showed a banner. A Firebase-side delivery receipt does not exist.</p><h2 id="tracing">Tracing "I did not get my notification"</h2><ol><li>Find the notification by the partner's <code>externalId</code> (partner status call). Status <code>SUPPRESSED</code> with <code>recipient_opted_out</code>: the user muted the mini app (ask them to check the 3-dot menu).</li><li><code>SENT</code> but no banner: check the inbox (it should be there). If it is, the problem is push: no registered device, dead token, phone permissions, or the fake provider in dev.</li><li><code>SENT</code> and nothing in the inbox: check the user's id mapping (alias), and that the user is looking at the same account.</li><li><code>UNREACHABLE</code> or <code>422 user_unreachable</code>: the account is suspended or deleted.</li></ol>
+<div class="pager"><a class="prev" href="building-the-bell-screen.html"><small>Previous</small>Building the bell screen</a><a class="next" href="errors.html"><small>Next</small>Error codes</a></div>
+<p class="footer">Adera super-app guide &middot; notifications &middot; verified against the dev stack on 2026-10-26</p>
+</main>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

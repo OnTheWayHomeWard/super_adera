@@ -1,0 +1,345 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Registered users | Admin: users, staff, moderation and audit</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+<button id="menu-btn" type="button" aria-label="Toggle menu">Menu</button>
+<span class="brand">Admin: users, staff, moderation and audit</span>
+<span class="spacer"></span>
+<button id="theme-btn" type="button" aria-label="Toggle light or dark theme">Theme</button>
+</header>
+<div class="layout">
+<nav class="sidebar" aria-label="Pages in this guide"><h4>Admin: users, staff, moderation and audit</h4><ul><li><a href="index.html">Overview and conventions</a></li>
+<li><a href="roles-and-access.html">Staff sign-in, roles and permissions</a></li>
+<li><a href="dashboard.html">Dashboard, system and health</a></li>
+<li><a href="users.html" class="current">Registered users</a><ul><li><a href="#overview">Overview</a></li><li><a href="#ep-users-list">GET /users</a></li><li><a href="#search">What search matches</a></li><li><a href="#ep-user-detail">GET /users/{id}</a></li><li><a href="#fields">Every field</a></li><li><a href="#ep-user-status">POST /users/{id}/status</a></li><li><a href="#effects">Exact effects of a status change</a></li><li><a href="#scenarios">Worked scenarios</a></li><li><a href="#errors">Errors</a></li><li><a href="#notbuilt">Not built yet</a></li></ul></li>
+<li><a href="moderation-reviews.html">Moderation: reviews</a></li>
+<li><a href="moderation-reports.html">Moderation: reports</a></li>
+<li><a href="staff.html">Staff management</a></li>
+<li><a href="audit-log.html">Audit log</a></li>
+<li><a href="notifications-overview.html">Notification visibility</a></li>
+<li><a href="runbooks.html">Runbooks</a></li>
+<li><a href="errors.html">Error codes</a></li>
+<li><a href="known-issues.html">Known issues and not built yet</a></li>
+</ul></nav>
+<main>
+<h1>Registered users</h1>
+<p class="lead">List, search and inspect registered users, see what a viewer is allowed to see, and suspend, reactivate or delete an account with the exact effects on sign-in, partner delivery and reviews.</p>
+<section><h2 id="overview">Overview</h2>
+<p><em>Registered users</em> are Adera's customers (the people who sign up in the app with a phone number or email). Staff see them in the backoffice screen <strong>Users</strong> (list with search, and a detail page per user). This is how support finds a person, and how an admin stops an abusive account. The endpoints are served by user-service through the gateway route <code>admin-users</code>; all three need an aal2 staff session. <strong>VIEWER</strong> reads masked data; <strong>ADMIN</strong> and <strong>SUPER_ADMIN</strong> see full contact details and may change a user's status.</p>
+<div class="callout why"><span class="label">Why status changes exist</span><p>Staff need a fast, reversible way to stop an account that abuses the platform (spam reviews, scam messages) without deleting evidence. <code>SUSPENDED</code> is the reversible stop; <code>DELETED</code> is final and is for accounts that must be closed for good. Every change needs a written reason and is audited.</p></div></section>
+<section><h2 id="list">List and search</h2>
+<details class="endpoint" id="ep-users-list"><summary><span class="method m-get">GET</span><span class="path">/admin/api/v1/users</span><span class="sum">List or search registered users, newest first</span></summary><div class="body"><dl class="meta"><dt>Why</dt><dd>Find a user by what the caller knows: a phone number, an email, a name or the user id (for example the id found on a review or report).</dd><dt>Auth</dt><dd>Staff aal2 Bearer, any role. Contact fields are masked for VIEWER.</dd><dt>Rate limit</dt><dd>300/min/IP</dd><dt>Backoffice</dt><dd>Users: search box, status filter, table (columns Name, Phone, Email, Status, Market, Language, Tier, Registered, Last seen)</dd></dl><h4>Query parameters</h4><div class="table-wrap"><table><thead><tr><th>Name</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why it exists</th></tr></thead><tbody><tr><td><code>q</code></td><td>string</td><td>no</td><td>Trimmed; empty means no search. Rules below.</td><td>Free-text search over the identifying fields.</td></tr><tr><td><code>status</code></td><td>string</td><td>no</td><td><code>ACTIVE</code>, <code>SUSPENDED</code> or <code>DELETED</code> (any letter case). Anything else: <code>400 validation_failed</code>.</td><td>Review who is suspended or deleted.</td></tr><tr><td><code>page</code></td><td>integer</td><td>no (0)</td><td>Zero-based. Negative values become 0.</td><td>Paging.</td></tr><tr><td><code>size</code></td><td>integer</td><td>no (25)</td><td>Clamped to 1 to 100.</td><td>Page size.</td></tr></tbody></table></div><h4>Request</h4><pre><code>curl -sS "$GATEWAY/admin/api/v1/users?size=3" -H "Authorization: Bearer $VIEWER_TOKEN"</code></pre><h4>Response 200 (as VIEWER: masked)</h4><pre class="out"><code>HTTP/1.1 200 OK
+
+{
+  "items": [
+    {
+      "id": "5bc6d545-771d-44f5-91cb-55415b01e4e4",
+      "email": null,
+      "phone": "+251*****5257",
+      "firstName": null,
+      "lastName": null,
+      "status": "ACTIVE",
+      "market": "ET",
+      "language": "en",
+      "verificationTier": "CONTACT",
+      "createdAt": "2026-10-26T10:53:01.127638Z",
+      "lastSeenAt": "2026-10-26T10:53:01.127638Z"
+    },
+    {
+      "id": "72eeb650-15d2-42eb-8586-fbe124f67f4e",
+      "email": "d***@e***.com",
+      "phone": "+251*****0015",
+      "firstName": "Demo Fully",
+      "lastName": "Filled",
+      "status": "ACTIVE",
+      "market": "ET",
+      "language": "en",
+      "verificationTier": "CONTACT",
+      "createdAt": "2026-10-25T12:35:47.915347Z",
+      "lastSeenAt": "2026-10-25T12:35:47.945129Z"
+    },
+    {
+      "id": "5a34a478-6d70-45a9-89d3-a09eaa446ff3",
+      "email": null,
+      "phone": "+251*****0014",
+      "firstName": "Demo Blank",
+      "lastName": null,
+      "status": "ACTIVE",
+      "market": "ET",
+      "language": "en",
+      "verificationTier": "CONTACT",
+      "createdAt": "2026-10-25T12:35:44.377591Z",
+      "lastSeenAt": "2026-10-25T12:35:44.419313Z"
+    }
+  ],
+  "page": 0,
+  "size": 3,
+  "total": 16
+}</code></pre><p><code>total</code> is the number of users matching the filters (not the page size); use it to compute the number of pages. Rows are ordered by registration time, newest first. The first row here is another test user created while this guide was being written.</p>
+<h4>Same search as ADMIN (full values)</h4><pre><code>curl -sS -G "$GATEWAY/admin/api/v1/users" --data-urlencode "q=+251993012114" -H "Authorization: Bearer $ADMIN_TOKEN"</code></pre><pre class="out"><code>HTTP/1.1 200 OK
+
+{
+  "items": [
+    {
+      "id": "a5529687-ddd2-421f-867d-b6b5cf82d1fc",
+      "email": null,
+      "phone": "+251993012114",
+      "firstName": "Doc-tmp",
+      "lastName": "Tester",
+      "status": "ACTIVE",
+      "market": "ET",
+      "language": "en",
+      "verificationTier": "CONTACT",
+      "createdAt": "2026-10-26T10:56:40.349867Z",
+      "lastSeenAt": "2026-10-26T10:56:43.355502Z"
+    }
+  ],
+  "page": 0,
+  "size": 25,
+  "total": 1
+}</code></pre><h4>Errors</h4><pre><code>curl -sS "$GATEWAY/admin/api/v1/users?status=bogus" -H "Authorization: Bearer $TOKEN"</code></pre><pre class="out"><code>HTTP/1.1 400 Bad Request
+
+{
+  "error": "validation_failed",
+  "fields": {
+    "status": "must be ACTIVE, SUSPENDED or DELETED"
+  }
+}</code></pre><h4>Use in a client</h4><p>Debounce the search box. Show masked values as received (never try to un-mask). Keep the <code>id</code> of the chosen row: it is the key for the detail page, the status change and the audit filter <code>target=&lt;id&gt;</code>. Sizes above 100 silently become 100 (verified: <code>size=1000&amp;page=-4</code> answered <code>page 0, size 100</code>).</p>
+</div></details>
+</section>
+<section><h2 id="search">What search matches</h2>
+<p>The <code>q</code> text is matched against the <em>real</em> stored values (also for VIEWER, who then sees masked results):</p>
+<ul><li><strong>A 36-character UUID</strong> that parses: exact match on the user id, nothing else.</li><li><strong>Anything else</strong>: case-insensitive <em>contains</em> match on email, phone (<code>+251...</code> form), first name, last name, or <code>first last</code> together. <code>%</code> and <code>_</code> in the text are matched literally. Example: <code>q=doc-tmp</code> finds a user called "Doc-tmp Tester".</li><li><strong>Phone typed loosely</strong>: when the text contains only digits and the separators space, <code>+</code>, <code>(</code>, <code>)</code>, <code>-</code>, and at least 3 digits, the digits are also matched against the digits of every stored phone. <code>q=93012 114</code> finds <code>+251993012114</code> (verified).</li><li>Terms are not split into words: <code>q=Tester Doc</code> finds nothing, <code>q=Doc-tmp Tester</code> does.</li></ul>
+<p>Verified examples (ADMIN): <code>q=+251993012114</code> (exact phone), <code>q=93012%20114</code> (spaced digits) and <code>q=&lt;uuid&gt;</code> each returned <code>total: 1</code>.</p>
+<pre class="out"><code>HTTP/1.1 200 OK
+
+{
+  "items": [
+    {
+      "id": "a5529687-ddd2-421f-867d-b6b5cf82d1fc",
+      "email": null,
+      "phone": "+251993012114",
+      "firstName": "Doc-tmp",
+      "lastName": "Tester",
+      "status": "ACTIVE",
+      "market": "ET",
+      "language": "en",
+      "verificationTier": "CONTACT",
+      "createdAt": "2026-10-26T10:56:40.349867Z",
+      "lastSeenAt": "2026-10-26T10:56:43.355502Z"
+    }
+  ],
+  "page": 0,
+  "size": 25,
+  "total": 1
+}</code></pre></section>
+<section><h2 id="detail">User detail</h2>
+<details class="endpoint" id="ep-user-detail"><summary><span class="method m-get">GET</span><span class="path">/admin/api/v1/users/{id}</span><span class="sum">Everything staff may know about one user</span></summary><div class="body"><dl class="meta"><dt>Why</dt><dd>Decide whether to suspend, answer a support question (language, market, devices, which apps the user muted), or check the verification tier.</dd><dt>Auth</dt><dd>Staff aal2 Bearer, any role. VIEWER: masked and hidden fields as in the masking table.</dd><dt>Backoffice</dt><dd>Users: click a row. Cards Account status (admins), Profile, Location (summary), Devices and aliases, Mute preferences per app, Extra data, Audit for this user (admins)</dd></dl><h4>Path parameter</h4><p><code>id</code>: the user id (uuid), as listed in <code>items[].id</code>, as <code>userId</code> on reviews and reports, and as <code>targetId</code> of <code>user.status</code> audit events.</p>
+<h4>Request</h4><pre><code>curl -sS "$GATEWAY/admin/api/v1/users/$USER_ID" -H "Authorization: Bearer $ADMIN_TOKEN"</code></pre><h4>Response 200 (ADMIN, a throwaway user)</h4><pre class="out"><code>HTTP/1.1 200 OK
+
+{
+  "id": "a5529687-ddd2-421f-867d-b6b5cf82d1fc",
+  "email": null,
+  "phone": "+251993012114",
+  "firstName": "Doc-tmp",
+  "lastName": "Tester",
+  "status": "ACTIVE",
+  "market": "ET",
+  "language": "en",
+  "verificationTier": "CONTACT",
+  "createdAt": "2026-10-26T10:56:40.349867Z",
+  "lastSeenAt": "2026-10-26T10:56:43.355502Z",
+  "gender": null,
+  "dateOfBirth": null,
+  "timezone": "Africa/Addis_Ababa",
+  "avatarImageId": null,
+  "location": null,
+  "termsAcceptedVersion": null,
+  "termsAcceptedAt": null,
+  "deletedAt": null,
+  "updatedAt": "2026-10-26T10:56:43.356822Z",
+  "extra": {
+    "note": "doc-tmp"
+  },
+  "devices": {
+    "active": 0,
+    "total": 0,
+    "platforms": []
+  },
+  "aliasCount": 0,
+  "mutePreferences": [],
+  "masked": false
+}</code></pre><h4>Response 200 (VIEWER, seeded user Demo Fully)</h4><pre class="out"><code>HTTP/1.1 200 OK
+
+{
+  "id": "72eeb650-15d2-42eb-8586-fbe124f67f4e",
+  "email": "d***@e***.com",
+  "phone": "+251*****0015",
+  "firstName": "Demo Fully",
+  "lastName": "Filled",
+  "status": "ACTIVE",
+  "market": "ET",
+  "language": "en",
+  "verificationTier": "CONTACT",
+  "createdAt": "2026-10-25T12:35:47.915347Z",
+  "lastSeenAt": "2026-10-25T12:35:47.945129Z",
+  "gender": null,
+  "dateOfBirth": null,
+  "timezone": "Africa/Addis_Ababa",
+  "avatarImageId": "e42afe9a-ab09-4cef-81b7-a7ae808f8797",
+  "location": {
+    "countryCode": "ET",
+    "region": "Addis Ababa",
+    "city": "Addis Ababa",
+    "hasPreciseLocation": true,
+    "updatedAt": "2026-10-25T12:35:48.162570Z"
+  },
+  "termsAcceptedVersion": "2026-10",
+  "termsAcceptedAt": "2026-10-25T12:35:47.949204Z",
+  "deletedAt": null,
+  "updatedAt": "2026-10-25T12:35:48.402876Z",
+  "extra": null,
+  "extraKeys": [
+    "bio",
+    "list",
+    "mixed"
+  ],
+  "devices": {
+    "active": 2,
+    "total": 2,
+    "platforms": [
+      "ANDROID"
+    ]
+  },
+  "aliasCount": 3,
+  "mutePreferences": [
+    {
+      "appId": "4e831b72-a33b-4d93-a7ba-65e19b9dbd0a",
+      "muteInApp": true,
+      "muteSms": false,
+      "muteEmail": false,
+      "updatedAt": "2026-10-25T12:35:49.132438Z"
+    },
+    {
+      "appId": "24daadb5-f356-416d-8b91-43f5e6be386b",
+      "muteInApp": true,
+      "muteSms": true,
+      "muteEmail": true,
+      "updatedAt": "2026-10-25T12:35:48.914120Z"
+    }
+  ],
+  "masked": true
+}</code></pre><h4>Errors</h4><pre class="out"><code>HTTP/1.1 404 Not Found
+
+{
+  "error": "not_found"
+}</code></pre><p><code>404 not_found</code> for an unknown id. A value that is not a UUID is rejected by the framework before the controller with a <em>different</em> body shape (see Known issues):</p>
+<pre class="out"><code>HTTP/1.1 400 Bad Request
+
+{
+  "timestamp": "2026-10-26T10:56:44.942Z",
+  "status": 400,
+  "error": "Bad Request",
+  "path": "/admin/api/v1/users/notauuid"
+}</code></pre><h4>Use in a client</h4><p>Render <code>masked: true</code> as a banner. Treat <code>extra</code> as arbitrary JSON written by the user and the apps (do not trust or execute it).</p>
+</div></details>
+</section>
+<section><h2 id="fields">Every field of the detail response</h2>
+<div class="table-wrap"><table><thead><tr><th>Field</th><th>Meaning</th></tr></thead><tbody><tr><td><code>id</code></td><td>The user's id (the Kratos identity id).</td></tr><tr><td><code>email</code>, <code>phone</code></td><td>Contact details. Either can be <code>null</code> (a user signs up with one of them). Masked for VIEWER.</td></tr><tr><td><code>firstName</code>, <code>lastName</code></td><td>Names as the user entered them; may be null.</td></tr><tr><td><code>status</code></td><td><code>ACTIVE</code>, <code>SUSPENDED</code> or <code>DELETED</code>.</td></tr><tr><td><code>market</code></td><td><code>ET</code> or <code>US</code>: which market the user belongs to (decides which apps they see).</td></tr><tr><td><code>language</code></td><td><code>en</code>, <code>am</code> or <code>om</code>: used for notifications and the app UI.</td></tr><tr><td><code>verificationTier</code></td><td>How far the user is verified (<code>CONTACT</code> = a confirmed phone or email).</td></tr><tr><td><code>createdAt</code>, <code>lastSeenAt</code>, <code>updatedAt</code></td><td>ISO instants (UTC): sign-up, last time the user was seen by the app, last profile change.</td></tr><tr><td><code>gender</code>, <code>dateOfBirth</code></td><td>Profile values; <code>null</code> for VIEWER.</td></tr><tr><td><code>timezone</code></td><td>IANA timezone, for example <code>Africa/Addis_Ababa</code>.</td></tr><tr><td><code>avatarImageId</code></td><td>Id of the profile picture, or null. The picture itself is not exposed here.</td></tr><tr><td><code>location</code></td><td><code>null</code> when no location was ever saved, otherwise a summary: <code>countryCode</code>, <code>region</code>, <code>city</code>, <code>hasPreciseLocation</code> (true when coordinates are on file; the coordinates are never returned) and <code>updatedAt</code>.</td></tr><tr><td><code>termsAcceptedVersion</code>, <code>termsAcceptedAt</code></td><td>Which terms version the user accepted and when (null if never).</td></tr><tr><td><code>deletedAt</code></td><td>Set when the status became DELETED.</td></tr><tr><td><code>extra</code> / <code>extraKeys</code></td><td>Free-form JSON (preferences the user and apps store). For VIEWER <code>extra</code> is null and <code>extraKeys</code> lists the key names.</td></tr><tr><td><code>devices</code></td><td><code>{active, total, platforms}</code>: how many phones are registered for push (active means a usable push token) and on which platforms. Tokens are never shown.</td></tr><tr><td><code>aliasCount</code></td><td>In how many mini apps this user has a pseudonymous id (apps the user opened). The ids are never shown: partners know the user only by that id.</td></tr><tr><td><code>mutePreferences[]</code></td><td>Per app the user muted: <code>appId</code>, <code>muteInApp</code>, <code>muteSms</code>, <code>muteEmail</code>, <code>updatedAt</code>. Empty means nothing is muted. A muted channel makes partner notifications end as SUPPRESSED (<code>recipient_opted_out</code>).</td></tr><tr><td><code>masked</code></td><td>True when the caller is a VIEWER.</td></tr></tbody></table></div><p>The list response contains the first block only (id, email, phone, names, status, market, language, verificationTier, createdAt, lastSeenAt).</p>
+</section>
+<section><h2 id="status">Suspend, reactivate or delete</h2>
+<details class="endpoint" id="ep-user-status"><summary><span class="method m-post">POST</span><span class="path">/admin/api/v1/users/{id}/status</span><span class="sum">Change a user's status: ACTIVE, SUSPENDED or DELETED</span></summary><div class="body"><dl class="meta"><dt>Why</dt><dd>Stop an abusive account (suspend), give it back after an appeal (reactivate), or close it for good (delete).</dd><dt>Auth</dt><dd>Staff aal2 Bearer, role <strong>ADMIN</strong> or SUPER_ADMIN (VIEWER: <code>403 insufficient_role</code>, checked first)</dd><dt>Header</dt><dd><code>Content-Type: application/json</code></dd><dt>Rate limit</dt><dd>300/min/IP</dd><dt>Audit action</dt><dd><code>user.status</code> (target type <code>app_user</code>)</dd><dt>Reversible</dt><dd>SUSPENDED to ACTIVE: yes. DELETED: <strong>no</strong> (final)</dd><dt>Backoffice</dt><dd>User detail, card <em>Account status</em>: buttons Suspend, Reactivate, Mark deleted (each asks for a reason in a confirmation box)</dd></dl><h4>Body</h4><div class="table-wrap"><table><thead><tr><th>Field</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why it exists</th></tr></thead><tbody><tr><td><code>status</code></td><td>string</td><td>yes</td><td><code>ACTIVE</code>, <code>SUSPENDED</code>, <code>DELETED</code> (any case)</td><td>The new status.</td></tr><tr><td><code>reason</code></td><td>string</td><td>required for SUSPENDED and DELETED, optional for ACTIVE</td><td>3 to 500 characters after trimming (a longer text is rejected for any status)</td><td>Kept in the audit log: the answer to "why was this person suspended?" months later.</td></tr></tbody></table></div><p>Unknown fields are rejected: <code>400 validation_failed</code> with <code>"&lt;field&gt;": "unknown field"</code>.</p>
+<h4>Request: suspend</h4><pre><code>curl -sS -X POST "$GATEWAY/admin/api/v1/users/$USER_ID/status" \
+  -H "Authorization: Bearer $ADMIN_TOKEN" -H "Content-Type: application/json" \
+  -d '{"status":"SUSPENDED","reason":"doc-tmp: abusive review text"}'</code></pre><h4>Response 200</h4><pre class="out"><code>HTTP/1.1 200 OK
+
+{
+  "id": "a5529687-ddd2-421f-867d-b6b5cf82d1fc",
+  "email": null,
+  "phone": "+251993012114",
+  "firstName": "Doc-tmp",
+  "lastName": "Tester",
+  "status": "SUSPENDED",
+  "market": "ET",
+  "language": "en",
+  "verificationTier": "CONTACT",
+  "createdAt": "2026-10-26T10:56:40.349867Z",
+  "lastSeenAt": "2026-10-26T10:56:43.355502Z",
+  "gender": null,
+  "dateOfBirth": null,
+  "timezone": "Africa/Addis_Ababa",
+  "avatarImageId": null,
+  "location": null,
+  "termsAcceptedVersion": null,
+  "termsAcceptedAt": null,
+  "deletedAt": null,
+  "updatedAt": "2026-10-26T10:56:45.008510Z",
+  "extra": {
+    "note": "doc-tmp"
+  },
+  "devices": {
+    "active": 0,
+    "total": 0,
+    "platforms": []
+  },
+  "aliasCount": 0,
+  "mutePreferences": [],
+  "masked": false
+}</code></pre><p>The response is the user detail after the change (full values for an admin).</p>
+<h4>Request: reactivate</h4><pre><code>curl -sS -X POST "$GATEWAY/admin/api/v1/users/$USER_ID/status" \
+  -H "Authorization: Bearer $ADMIN_TOKEN" -H "Content-Type: application/json" \
+  -d '{"status":"ACTIVE","reason":"doc-tmp: appeal accepted"}'</code></pre><p>Answers <code>200</code> with the detail (<code>status: ACTIVE</code>).</p>
+<h4>Request: delete</h4><pre><code>curl -sS -X POST "$GATEWAY/admin/api/v1/users/$USER_ID/status" \
+  -H "Authorization: Bearer $ADMIN_TOKEN" -H "Content-Type: application/json" \
+  -d '{"status":"DELETED","reason":"doc-tmp: account closed at owner request"}'</code></pre><p>Answers <code>200</code> with <code>status: DELETED</code> and <code>deletedAt</code> set.</p>
+<h4>Errors (all verified)</h4><div class="table-wrap"><table><thead><tr><th>Status / error</th><th>When</th><th>What to do</th></tr></thead><tbody><tr><td><code>400 validation_failed</code> <code>fields.reason</code></td><td>Suspending or deleting without a reason, or a reason shorter than 3 or longer than 500 characters.</td><td>Write a reason.</td></tr><tr><td><code>400 validation_failed</code> <code>fields.status</code></td><td>Missing or unknown status (<code>BANNED</code>).</td><td>Use ACTIVE, SUSPENDED or DELETED.</td></tr><tr><td><code>400 validation_failed</code> <code>fields.&lt;name&gt;</code> = unknown field</td><td>A field other than <code>status</code> and <code>reason</code>.</td><td>Remove it.</td></tr><tr><td><code>403 insufficient_role</code></td><td>Caller is a VIEWER.</td><td>Ask an admin.</td></tr><tr><td><code>404 not_found</code></td><td>Unknown user id.</td><td>Check the id.</td></tr><tr><td><code>409 user_deleted</code></td><td>The user is already DELETED and you asked for a different status.</td><td>Nothing can be done: deletion is final.</td></tr><tr><td><code>503 audit_unavailable</code></td><td>The audit log could not be written; the change is rolled back.</td><td>Retry when registry-service is back.</td></tr></tbody></table></div><pre class="out"><code>HTTP/1.1 400 Bad Request
+
+{
+  "error": "validation_failed",
+  "fields": {
+    "reason": "required when suspending or deleting (3-500 characters); it is kept in the audit log"
+  }
+}</code></pre><pre class="out"><code>HTTP/1.1 409 Conflict
+
+{
+  "error": "user_deleted"
+}</code></pre><h4>Idempotency</h4><p>Asking for the status the user already has returns <code>200</code> with the detail and <strong>changes and audits nothing</strong> (verified with ACTIVE on an active user, and with DELETED on a deleted user: the second call is a no-op, not an error). Only a <em>different</em> status on a deleted user answers <code>409 user_deleted</code>.</p>
+</div></details>
+</section>
+<section><h2 id="effects">Exact effects of a status change</h2>
+<p>All verified on the running stack with a throwaway user (created, moderated, then removed; no seeded user was touched).</p>
+<div class="table-wrap"><table><thead><tr><th>Where</th><th>SUSPENDED</th><th>DELETED</th><th>ACTIVE (reactivate)</th></tr></thead><tbody><tr><td>Existing login sessions of the user (Kratos)</td><td>All revoked at once: the old token answers <code>401</code> (empty body) on the next call.</td><td>All revoked, same as suspend.</td><td>Nothing is restored; the user signs in again. (A session created while suspended works again at once.)</td></tr><tr><td>Signing in again (Kratos)</td><td>Still works: Kratos does not know our status and issues a session.</td><td>Still works at Kratos level.</td><td>Works.</td></tr><tr><td>Any user API call with a valid session (gateway check <code>/internal/auth/verify</code>)</td><td><code>403 {"error":"account_suspended"}</code> on every endpoint of the user API: profile, apps, reviews, in-app notifications (verified on <code>/api/v1/me</code>, <code>/api/v1/apps/{id}/reviews</code>, <code>/api/v1/me/notifications</code>).</td><td><code>403 {"error":"account_deleted"}</code>.</td><td><code>200</code> again with the same session.</td></tr><tr><td>Partner notifications, new requests (<code>POST /v1/notifications</code>)</td><td><code>422 user_unreachable</code> (unknown, deleted and suspended look the same on purpose, so a partner learns nothing about why).</td><td><code>422 user_unreachable</code>.</td><td>Accepted again.</td></tr><tr><td>Partner notifications already queued</td><td>Ends as <code>UNREACHABLE</code> with reason <code>user_unreachable</code> when delivery is attempted. The seeded data shows one: <code>seed-food-race-u12</code> for "Demo Deleted".</td><td>Same.</td><td>Not re-sent.</td></tr><tr><td>Public reviews the user wrote</td><td><strong>Unchanged</strong>: they stay visible and keep counting in the rating. Suspending a person does not hide their reviews (hide them separately in Moderation).</td><td>Unchanged.</td><td>n/a</td></tr><tr><td>Reports the user filed</td><td>Unchanged (still in the reports list).</td><td>Unchanged.</td><td>n/a</td></tr><tr><td>The user's data</td><td>Kept.</td><td><strong>Kept</strong>: the status is a flag. Nothing is erased, no Kratos identity is removed. <code>deletedAt</code> is stamped, and the unique email/phone indexes ignore deleted rows.</td><td>n/a</td></tr><tr><td>Audit</td><td><code>user.status</code>, <code>meta: {from: ACTIVE, to: SUSPENDED, reason}</code></td><td><code>user.status</code>, <code>{from, to: DELETED, reason}</code></td><td><code>user.status</code>, <code>{from: SUSPENDED, to: ACTIVE, reason?}</code></td></tr></tbody></table></div><p>The user sees the refusal as a 403 with those codes; a client should show a sign-out screen with a "contact support" message when it receives <code>account_suspended</code> or <code>account_deleted</code>. Verified answers:</p>
+<pre class="out"><code>HTTP/1.1 401 Unauthorized
+
+{}</code></pre><pre class="out"><code>HTTP/1.1 403 Forbidden
+
+{
+  "error": "account_suspended"
+}</code></pre><pre class="out"><code>HTTP/1.1 403 Forbidden
+
+{
+  "error": "account_deleted"
+}</code></pre><div class="callout warn"><span class="label">Deleted is not erased</span><p>"Mark deleted" blocks the account forever but does not remove personal data or the Kratos identity. There is no endpoint for erasure; see Not built yet. Never promise a customer that their data was erased on the strength of this action.</p></div></section>
+<section><h2 id="scenarios">Worked scenarios</h2>
+<ul><li><strong>An abusive reviewer</strong>: find the review in Moderation, copy the <code>userId</code>, open the user, suspend with a reason that names the review id, then hide the review (suspending does not hide it). See the abusive-user runbook.</li><li><strong>Appeal accepted</strong>: Users, filter SUSPENDED, open the user, Reactivate with a note. The user keeps the account; the next call works with a new sign-in (or the same session if it was created after the suspension).</li><li><strong>Support asks "is this number registered?"</strong>: search the digits; a VIEWER gets a masked row and the status, which is enough to answer.</li></ul>
+</section>
+<section><h2 id="errors">Errors on this page</h2>
+<p>Sign-in errors (<code>401</code>, <code>403 mfa_required</code>, <code>403 not_staff</code>) apply to every call. The business errors are listed with each endpoint; the full table is on the error codes page.</p>
+</section>
+<section><h2 id="notbuilt">Not built yet</h2>
+<ul><li>No endpoint to erase a user's data or remove the Kratos identity (do it by hand with the Kratos admin API and SQL, as the repository's journey script does for test users).</li><li>No bulk status change, no CSV export, no user notes or tags, no way to edit a user's profile from the dashboard.</li><li>No staff-visible history of logins; the audit log records only staff changes.</li></ul>
+</section>
+
+<div class="pager"><a class="prev" href="dashboard.html"><small>Previous</small>Dashboard, system and health</a><a class="next" href="moderation-reviews.html"><small>Next</small>Moderation: reviews</a></div>
+<p class="footer">Adera admin guide &middot; verified against the running dev stack on 2026-10-26</p>
+</main>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

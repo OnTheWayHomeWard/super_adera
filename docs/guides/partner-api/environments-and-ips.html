@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Environments, allowed IPs and keys | Adera partner API</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+<button id="menu-btn" type="button" aria-label="Toggle menu">Menu</button>
+<a class="brand" href="index.html">Adera partner API</a>
+<span class="spacer"></span>
+<button id="theme-btn" type="button" aria-label="Toggle light or dark theme">Theme</button>
+</header>
+<div class="layout">
+<nav class="sidebar" aria-label="Pages">
+<h4>Mini-app backend API</h4>
+<ul><li><a href="index.html">Overview and contents</a></li><li><a href="quickstart.html">Quick start</a></li><li><a href="signing.html">Signing requests (ADERA-SIG-1)</a></li><li><a href="environments-and-ips.html" class="current">Environments, IPs and keys</a><ul><li><a href="#overview">Overview</a></li><li><a href="#environments">DEV and PROD</a></li><li><a href="#ips">Allowed server addresses</a></li><li><a href="#keys">Key lifecycle, seen from the partner side</a></li><li><a href="#staff-checklist">What staff set up before your first call Adera staff</a></li></ul></li><li><a href="user-ids.html">Pseudonymous user ids</a></li><li><a href="templates.html">Templates</a></li><li><a href="sending-notifications.html">Sending notifications</a></li><li><a href="statuses-and-callbacks.html">Statuses, retries and callbacks</a></li><li><a href="limits-and-quotas.html">Limits and quotas</a></li><li><a href="sandbox-and-testing.html">Sandbox and testing checklist</a></li><li><a href="errors.html">Error codes</a></li><li><a href="data-available-to-mini-apps.html">What data a mini app gets</a></li><li><a href="known-issues.html">Known issues and not built yet</a></li></ul>
+</nav>
+<main>
+<h1>Environments, allowed IPs and keys</h1>
+<p class="lead">Which deployment a key works on, which of your servers may call, what has to be set up by Adera staff before your first call, and how to rotate or revoke a key.</p>
+
+<h2 id="overview">Overview</h2>
+<p>Three things must all be true before a request is accepted, in addition to a valid signature: (1) the key belongs to the environment of the deployment you call, (2) the mini app's status allows calls in that environment, (3) the call comes from a server address registered for that environment. This page explains each, and what you receive from staff.</p>
+
+<h2 id="environments">DEV and PROD</h2>
+<p>Every Adera deployment is exactly <strong>one</strong> environment, fixed by its configuration (<code>ADERA_ENV=dev</code> or <code>prod</code>; the notification service and the registry service must agree, otherwise the API answers <code>503 service_unavailable</code> and logs the mismatch). One deployment never serves both. You therefore have, per mini app, up to two independent sets of setup:</p>
+<div class="table-wrap"><table><thead><tr><th></th><th>DEV</th><th>PROD</th></tr></thead><tbody>
+<tr><td>Base URL</td><td>the development deployment Adera gives you (on Adera's own dev stack <code>http://127.0.0.1:9080</code>)</td><td>the production API host</td></tr>
+<tr><td>Key ids</td><td><code>ak_dev_...</code></td><td><code>ak_prod_...</code></td></tr>
+<tr><td>Allowed server addresses</td><td>registered separately</td><td>registered separately; a range that matches every address (<code>/0</code>) is refused</td></tr>
+<tr><td>App status needed</td><td>any status except <code>KILLED</code> (so you can integrate while the app is still <code>DRAFT</code>)</td><td><code>LIVE</code> only</td></tr>
+<tr><td>Real people?</td><td>Real demo or test users and real providers are replaced by dev ones: SMS is printed to a console log, email goes to a local mail catcher, push is a fake. Nothing reaches a real phone or inbox. Synthetic <code>u_p_test_*</code> users exist.</td><td>Real SMS, email and push to real users. <code>u_p_test_*</code> users are refused (<code>422 synthetic_user_not_allowed</code>).</td></tr>
+<tr><td>Data</td><td>Own notifications, usage and quotas</td><td>Separate notifications, usage counters and quotas. Quota numbers are counted per environment even though the limits are configured once per app.</td></tr>
+</tbody></table></div>
+<p>Every notification answer contains <code>"environment": "DEV"</code> or <code>"PROD"</code>, so you can assert in your tests which world you are talking to.</p>
+
+<h3 id="wrong-environment"><code>403 wrong_environment</code></h3>
+<p>Raised when your <em>signature is valid</em> but the key's environment is not the deployment's environment: a <code>ak_prod_...</code> key sent to the dev deployment, or a <code>ak_dev_...</code> key sent to production. It is checked after the signature (so an attacker cannot learn which environment a key belongs to without holding the private key). Fix: use the key id and base URL of the same environment (typically two sets of configuration in your service: <code>ADERA_BASE</code> and <code>ADERA_KEY_ID</code> per environment).</p>
+<p>Real example: a PROD key id (registered with the same public key) sent to the DEV deployment:</p>
+<pre class="out nocopy"><code>HTTP 403
+{"error": "wrong_environment"}</code></pre>
+
+<h3 id="app-status">App status and <code>403 app_*</code></h3>
+<div class="table-wrap"><table><thead><tr><th>App status</th><th>On a DEV deployment</th><th>On a PROD deployment</th></tr></thead><tbody>
+<tr><td><code>DRAFT</code></td><td>works</td><td><code>403 app_draft</code></td></tr>
+<tr><td><code>LIVE</code></td><td>works</td><td>works</td></tr>
+<tr><td><code>PAUSED</code></td><td>works</td><td><code>403 app_paused</code></td></tr>
+<tr><td><code>KILLED</code></td><td><code>403 app_killed</code></td><td><code>403 app_killed</code></td></tr>
+</tbody></table></div>
+<p>The DEV column was verified on the dev stack (DRAFT, PAUSED and KILLED); the PROD column is from the code and could not be exercised there.</p>
+<p>PAUSED is a temporary stop staff use while they investigate; KILLED is an emergency stop that only a super admin can undo. The change is effective within about 15 seconds (Adera caches the app configuration). <code>403 app_not_active</code> is a fallback code that should not occur. The app status is set by staff; you cannot see or change it through this API (the answer codes are the only signal).</p>
+<p>Real example on the dev deployment, after staff set the throwaway app to <code>KILLED</code>:</p>
+<pre class="out nocopy" id="killed-example"><code>POST /v1/notifications (any request)   -> HTTP 403 {"error": "app_killed"}
+GET  /v1/templates                      -> HTTP 403 {"error": "app_killed"}
+(the same app set to PAUSED on the dev deployment still answered 202: DEV only refuses KILLED)</code></pre>
+
+<h2 id="ips">Allowed server addresses</h2>
+<p>Staff register, per environment, a list of IP addresses or ranges (CIDR) from which your server may call (up to 50 entries, IPv4 or IPv6, for example <code>203.0.113.10</code>, <code>198.51.100.0/24</code>, <code>2001:db8::/32</code>). A single address is stored as a /32 (or /128). A request from any other address, or any request while the list is empty, is refused <em>after</em> the signature and status checks with:</p>
+<pre class="out nocopy"><code>HTTP 403
+{"error": "ip_not_allowed"}</code></pre>
+<ul>
+<li><strong>Why:</strong> a stolen private key is useless from an attacker's machine. The address list is the second factor.</li>
+<li><strong>Give staff your egress address:</strong> the public IP your requests <em>leave from</em>, not your server's private address. Behind a NAT gateway or a cloud load balancer give the NAT/egress address; for several servers give all of them or the range. Serverless platforms with changing egress addresses need a fixed-egress add-on before they can use this API.</li>
+<li><strong>How Adera sees your address:</strong> the Adera gateway records the TCP peer address of your connection (<code>$remote_addr</code>) and passes it to the service, together with a secret that proves the gateway wrote it. A client-supplied <code>X-Forwarded-For</code> or <code>X-Client-IP</code> is ignored, so you cannot (and need not) set it. In Adera's own dev stack a call from the developer machine arrives from the docker bridge address (for example <code>172.18.0.1</code>); that is the address staff must register for local tests.</li>
+<li><strong>Changing the list</strong> takes effect within about 15 seconds.</li>
+<li><strong>Private or loopback addresses</strong> are accepted in DEV lists (needed for local testing) and are meaningless in PROD unless your traffic really arrives from such an address.</li>
+</ul>
+<p>Real example captured while the throwaway app's DEV list contained only the documentation address <code>203.0.113.77</code>:</p>
+<pre class="out nocopy"><code>$ python send.py doc-first $ABEBE $JOB
+403 {
+  "error": "ip_not_allowed"
+}</code></pre>
+
+<h2 id="keys">Key lifecycle, seen from the partner side</h2>
+<div class="table-wrap"><table><thead><tr><th>Step</th><th>Who</th><th>What happens</th></tr></thead><tbody>
+<tr><td>1. Generate</td><td>You</td><td><code>openssl genrsa -out partner.pem 2048</code>, then extract the public key (see <a href="signing.html#setup">Signing</a>). Use a separate key pair per environment. Keep the private key in your secret store.</td></tr>
+<tr><td>2. Register</td><td>You send the public key; staff register it</td><td>Send the PEM that begins <code>-----BEGIN PUBLIC KEY-----</code> (SPKI, which is what <code>openssl rsa -pubout</code> writes; the older <code>BEGIN RSA PUBLIC KEY</code> format is refused). RSA only, at least 2048 bits. A private key is refused outright. Staff choose the environment and may set an optional expiry date and a label (up to 100 characters). Adera answers with the <strong>key id</strong> (<code>ak_dev_...</code> or <code>ak_prod_...</code>) and a <strong>fingerprint</strong>.</td></tr>
+<tr><td>3. Verify the fingerprint</td><td>You</td><td>The fingerprint is the SHA-256 of your public key in DER form, in hex. Check that Adera registered your key and not another one: <code>openssl rsa -pubin -in partner.pub -outform DER | openssl dgst -sha256</code> must print the same value (verified for the key used on these pages).</td></tr>
+<tr><td>4. Use</td><td>You</td><td>Send the key id in <code>X-Adera-Key-Id</code> and sign with the private key.</td></tr>
+<tr><td>5. Rotate</td><td>You and staff</td><td>An app can have up to <strong>5 active keys per environment</strong> at the same time, so rotation has no downtime: generate a new pair, staff register the new public key, you deploy and switch to the new key id, then staff revoke the old key.</td></tr>
+<tr><td>6. Expire or revoke</td><td>Staff (or the expiry date)</td><td>An expired or revoked key is refused with <code>401 key_revoked_or_expired</code>. Revocation is permanent; there is no un-revoke (register a new key). It takes effect within about 15 seconds, because Adera caches key lookups: a revoked key may still work for a few seconds (verified: a request signed with a key revoked a moment earlier was still accepted, and refused 40 seconds later).</td></tr>
+<tr><td>Lost or leaked private key</td><td>You tell staff immediately</td><td>Staff revoke it (action <code>key.revoke</code>); register a replacement. Until revoked, an attacker also needs one of your allowed server addresses.</td></tr>
+</tbody></table></div>
+<p>You cannot list, create or revoke keys yourself: there is no partner endpoint for it. Everything in the table that says "staff" is a request to Adera.</p>
+<p>Key ids are not secret, but do not publish them either. Errors you may see: <code>401 unknown_key</code> (typo, or a key id from another deployment's database), <code>401 key_revoked_or_expired</code>.</p>
+
+<h2 id="staff-checklist">What staff set up before your first call <span class="badge ours">Adera staff</span></h2>
+<p>A mini app can send nothing until staff have done all of the following in the admin dashboard (admin API <code>/admin/api/v1</code>, role <code>ADMIN</code> or above, staff signed in with the authenticator step). Each action is written to the audit log under the name shown.</p>
+<div class="table-wrap"><table><thead><tr><th>Step</th><th>Admin API call</th><th>Audit action</th><th>What the partner sees</th></tr></thead><tbody>
+<tr><td>Create the app</td><td><code>POST /apps</code> (slug, name, support email)</td><td><code>app.create</code></td><td>nothing yet</td></tr>
+<tr><td>Grant notification capabilities</td><td><code>PUT /apps/{id}/capabilities/notify.sms</code> etc. with <code>{"state":"GRANTED"}</code> (states: <code>GRANTED</code>, <code>DENIED</code>, <code>SUSPENDED</code>)</td><td><code>capability.set</code></td><td>The channel works. Granting also creates default limits for that channel if none exist (see <a href="limits-and-quotas.html">Limits</a>). <code>DENIED</code> or <code>SUSPENDED</code> gives <code>403 capability_not_granted</code>.</td></tr>
+<tr><td>Set limits</td><td><code>PUT /apps/{id}/notification-limits/{SMS|EMAIL|IN_APP}</code></td><td><code>limit.set</code></td><td><code>429 quota_exceeded</code> when reached</td></tr>
+<tr><td>Register allowed addresses</td><td><code>PUT /apps/{id}/environments/{DEV|PROD}</code> with <code>{"allowedCidrs":[...]}</code></td><td><code>environment.set</code></td><td>Calls from these addresses pass; others get <code>403 ip_not_allowed</code></td></tr>
+<tr><td>Register the public key</td><td><code>POST /apps/{id}/keys</code> with <code>{"environment","publicKeyPem","label","expiresAt"}</code> (or <code>/keys/generate</code>, DEV convenience: returns the private key once)</td><td><code>key.register</code></td><td>The key id to sign with</td></tr>
+<tr><td>Create templates</td><td><code>POST /notification/templates</code></td><td>none (only <code>createdBy</code>/<code>updatedBy</code> on the template; see <a href="known-issues.html">known issues</a>)</td><td><code>GET /v1/templates</code> lists them</td></tr>
+<tr><td>Set the status</td><td><code>POST /apps/{id}/status</code> (<code>DRAFT</code>, <code>LIVE</code>, <code>PAUSED</code>, <code>KILLED</code>; going LIVE needs a logo and a support email)</td><td><code>app.status</code></td><td>See the <a href="#app-status">status table</a></td></tr>
+</tbody></table></div>
+<div class="callout"><span class="label">Order for a new partner</span><p>Create the app, grant capabilities, register the DEV address list and the DEV key, create templates: the partner can now integrate against DEV while the app is still <code>DRAFT</code>. When the partner is ready, repeat for PROD (PROD address list, PROD key), then set the app <code>LIVE</code>. After each change wait 15 seconds before testing.</p></div>
+
+<div class="pager"><a class="prev" href="signing.html"><small>Previous</small>Signing requests (ADERA-SIG-1)</a><a class="next" href="user-ids.html"><small>Next</small>Pseudonymous user ids</a></div>
+<p class="footer">Adera mini-app backend API guide &middot; verified against the dev deployment on 2026-10-26</p>
+</main>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>List the mini apps | Mini-app catalog guide</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<header class="topbar">
+<button id="menu-btn" type="button" aria-label="Toggle menu">Menu</button>
+<a class="brand" href="index.html">Mini-app catalog guide</a>
+<span class="spacer"></span>
+<button id="theme-btn" type="button" aria-label="Toggle light or dark theme">Theme</button>
+</header>
+<div class="layout">
+<nav class="sidebar" aria-label="Pages">
+<h4>Mini-app catalog</h4><ul><li><a href="index.html">Overview</a></li><li><a href="list-apps.html" class="current">List the mini apps</a></li><li><a href="app-details.html">App details</a></li><li><a href="capabilities-and-permissions.html">Capabilities and permissions</a></li><li><a href="reviews-and-ratings.html">Reviews and ratings</a></li><li><a href="reporting.html">Reporting an app</a></li><li><a href="mute-preferences.html">Mute preferences</a></li><li><a href="building-the-store-screen.html">Building the store screen</a></li><li><a href="errors.html">Error codes</a></li><li><a href="known-issues.html">Known issues</a></li></ul>
+</nav>
+<main>
+<h1>List the mini apps</h1>
+<p class="lead">Everything about <code>GET /api/v1/apps</code>: what is returned, in which order, how to filter, sort, search and cache it.</p>
+
+<h2 id="overview">Overview</h2>
+<p>One endpoint returns everything the home grid and the store list need. It is deliberately simple: the server filters out everything that is not LIVE, optionally filters by market, orders the result, and returns it. Everything else (categories, search, sorting by rating, favourites) is the client's job today.</p>
+<h2 id="what-is-included">What is included and excluded</h2>
+<div class="table-wrap"><table><thead><tr><th>App status</th><th>In the list?</th><th>On the detail endpoint?</th><th>Who sees it</th></tr></thead><tbody><tr><td><code>LIVE</code></td><td>Yes</td><td>Yes</td><td>Every signed-in user</td></tr><tr><td><code>PAUSED</code></td><td>No</td><td><code>404 not_found</code></td><td>Staff only. A temporary hide: an app disappears from the catalog and comes back when staff resume it.</td></tr><tr><td><code>KILLED</code></td><td>No</td><td><code>404 not_found</code></td><td>Staff only. Switched off (only a super admin can revive it).</td></tr><tr><td><code>DRAFT</code></td><td>No</td><td><code>404 not_found</code></td><td>Staff only. Not yet released: staff cannot make an app LIVE without a logo and a support email.</td></tr></tbody></table></div>
+<p>Verified on the stack: <code>demo-paused</code>, <code>demo-killed</code> and <code>demo-flights</code> (DRAFT) are absent from the list and answer <code>404 {"error":"not_found"}</code> on <code>GET /api/v1/apps/{slug}</code>. The client cannot tell "paused" from "killed" from "never existed" and does not need to.</p>
+<h2 id="ordering">Ordering</h2>
+<p>The server sorts by the app's <code>priority</code> ascending (lower number first; set by staff, range 0 to 100000, default 100), then by <code>slug</code> alphabetically to make ties stable. <strong>The <code>priority</code> value is not included in the response</strong>: only the resulting order is. Treat the array order as the "recommended" order and keep it unless the user picks another sort. Do not re-sort by name by default, or you throw away staff's curation (the seeded catalog is not in alphabetical order).</p>
+<h2 id="market">The <code>market</code> filter</h2>
+<p>An app is returned when its <code>markets</code> array contains the value (upper-cased before comparing). Apps are created with <code>["ET"]</code> unless staff choose otherwise, so today almost everything is <code>ET</code>. Recommendation: call <code>GET /api/v1/apps?market=&lt;profile.market&gt;</code> so a US user does not see Ethiopia-only services; fall back to the unfiltered call only if the user explicitly asks to "show all". If you omit <code>market</code> you get all LIVE apps whatever their markets.</p>
+<h2 id="client-side">Filter, sort and search on the client today</h2>
+<p>The server does not support category, text-search or sort parameters, and ignores unknown parameters silently. The catalog is small (a few dozen apps at most is the expected scale) and arrives in one response, so doing this on the device is cheap and is the supported approach.</p>
+<ul>
+<li><strong>Categories.</strong> Each app has <code>categories</code>: a list of up to 10 lower-case words such as <code>food</code>, <code>delivery</code>, <code>travel</code>, <code>transport</code>, <code>shopping</code>, <code>classifieds</code>, <code>tools</code>. They are free-form words chosen by staff, not a fixed list. Build the category chips from the data: collect the union of <code>categories</code> over the list, count apps per word, and show the most frequent first. Localise the chip label in the client with a lookup table (unknown words: show the word itself, capitalised). An app can appear under several chips.</li>
+<li><strong>Search.</strong> Match the query (trimmed, case-folded) against the localised <code>name</code>, then <code>description</code>, then <code>publisher.name</code>, then <code>categories</code>. Search <em>all</em> languages of <code>name</code>, not only the displayed one, so a user typing the English name still finds the app while the UI is in Amharic. Rank name matches above description matches.</li>
+<li><strong>Sort.</strong> "Recommended" = server order. "Top rated": by <code>ratingAvg</code> descending, but only rank apps with <code>ratingCount</code> of at least a few ratings above unrated ones (a single 5-star review should not beat an app with 200 reviews at 4.6); apps with <code>ratingCount == 0</code> go last. "A to Z": by the displayed name using locale-aware comparison.</li>
+<li><strong>Do the work on the cached list</strong>; do not call the server for each keystroke. Code: <a href="building-the-store-screen.html#client-code">Building the store screen</a>.</li>
+</ul>
+<h2 id="languages">Pick a language and fall back</h2>
+<p><code>name</code>, <code>description</code> and each permission <code>reason</code> are maps such as <code>{"en": "Food Delivery", "am": "ምግብ አቅርቦት"}</code>. Rules verified in code and data:</p>
+<ul>
+<li><code>name.en</code> always exists (staff cannot save an app without an English name).</li>
+<li><code>description</code> has <strong>no</strong> such guarantee: it can be <code>{}</code> or lack <code>en</code>. A permission <code>reason</code> is <code>{}</code> for capabilities that need no explanation.</li>
+<li>A missing language is <strong>absent</strong>, never an empty string.</li>
+<li>Supported codes are exactly <code>en</code>, <code>am</code>, <code>om</code>. In the seeded data every app has <code>en</code> and <code>am</code>; <code>om</code> is rare.</li>
+</ul>
+<p>Recommended selection function: use the user's profile <code>language</code> if the map has it; otherwise <code>en</code>; otherwise the first available value in a fixed order (<code>en</code>, <code>am</code>, <code>om</code>); otherwise nothing (hide the description block, do not show an empty paragraph). Do the choice per field, not per app: an app can have an Oromo name but only an English description. Optionally show a small "in English" hint when you fall back to a language other than the user's.</p>
+<h2 id="caching">Caching advice</h2>
+<p>The responses carry no <code>Cache-Control</code> or <code>ETag</code> headers, so caching is a client decision. Recommended:</p>
+<div class="table-wrap"><table><thead><tr><th>What</th><th>How long</th><th>Why</th></tr></thead><tbody><tr><td>The catalog list</td><td>Keep in memory and on disk. Show the cached copy immediately on app start, then refresh in the background (stale-while-revalidate). Refresh at most every 5 to 15 minutes while the user browses, and always on pull-to-refresh.</td><td>Staff changes (a new app, a paused app, new texts, a new rating) are not pushed to clients, so a cached list is up to the refresh interval out of date. 300 requests per minute per IP is plenty, but mobile networks in the same carrier NAT can share an IP.</td></tr><tr><td>An app's detail</td><td>Re-fetch when the user opens the store page (it is cheap), and render the cached list item while it loads.</td><td>The list item and the detail are identical, but ratings and permissions are the data most likely to have changed, and an app can be paused between the list and the tap (then the detail is <code>404</code>).</td></tr><tr><td>Logo image bytes</td><td>Cache by the URL <strong>without its query string</strong> (scheme, host and path). The path contains the image's id, so it changes exactly when staff upload a new logo.</td><td>The query string (signature and timestamp) is different on every response, so a cache keyed on the full URL never hits.</td></tr><tr><td><code>logoUrl</code> itself</td><td>Never store it for longer than 50 minutes. It expires 60 minutes after it was issued (<code>X-Amz-Expires=3600</code>).</td><td>After expiry the storage refuses the request (an XML error page, not JSON). The fix is to re-fetch the list or detail to obtain a fresh URL; see <a href="app-details.html#logo">the logo section</a>.</td></tr><tr><td>Ratings and permissions</td><td>Never cache for long, and never trust them offline for a decision.</td><td>They change whenever users review or staff change grants.</td></tr></tbody></table></div>
+<h2 id="errors-list">Edge cases</h2>
+<ul>
+<li>An app that is paused between list and tap returns <code>404</code> on detail, reviews, my-review and report. Handle it by removing the tile and showing "This service is not available right now".</li>
+<li>The list is not paged. If it ever grows large the server will need a paging parameter first (not built).</li>
+<li><code>ratingAvg</code> is <code>0.0</code> when there are no ratings; use <code>ratingCount == 0</code> to show "No ratings yet" instead of "0.0 stars".</li>
+<li>Two apps can legitimately have the same name in a language. Use <code>id</code> or <code>slug</code> as the list key, not the name.</li>
+</ul>
+<h2 id="notbuilt">Not built yet on this page</h2>
+<ul><li>Server-side category filter, text search, sorting and paging parameters on <code>GET /api/v1/apps</code>.</li><li>"Featured", "new" or "updated" flags, app version, size, screenshots, install counts.</li><li>A <code>priority</code> or position value in the response (only the order is given).</li></ul>
+<h2 id="endpoint">Endpoint</h2><details class="endpoint" id="ep-list-apps"><summary><span class="method m-get">GET</span><span class="path">/api/v1/apps</span><span class="sum">List the mini apps shown in the catalog</span></summary><div class="body"><dl class="meta"><dt>Who may call</dt><dd>Signed-in end user (session token in <code>Authorization: Bearer $TOKEN</code>).</dd><dt>Client path</dt><dd><code>/api/v1/apps</code> through the gateway (route <code>apps-catalog</code>, forward-auth, 300 requests per 60 s per client IP).</dd><dt>Headers</dt><dd><code>Authorization: Bearer $TOKEN</code>. Nothing else is required for a GET.</dd><dt>Implemented in</dt><dd><code>registry-service: AppPublicController#list, AppService#publicView</code></dd></dl>
+<h4>Purpose</h4>
+<p>Returns the whole catalog the user may open: every mini app whose status is <code>LIVE</code>, already in display order, each with the data needed for a tile <em>and</em> for a store page (names, descriptions, logo, colour, categories, markets, publisher, rating, permissions). Use it to fill the home grid, the app-store list and any "all services" screen. The same item shape comes back from the detail endpoint, so a tile can open the store page without another request.</p>
+<h4>Request parameters</h4>
+<div class="table-wrap"><table><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why it exists</th></tr></thead><tbody><tr><td><code>market</code></td><td>query</td><td>string</td><td>no</td><td>Case-insensitive; compared against each app's <code>markets</code> (<code>ET</code> or <code>US</code>). Blank = no filter. An unknown value is not an error, it simply matches nothing and the answer is <code>[]</code>.</td><td>Show only apps offered in the user's market. Send the <code>market</code> from the user's profile.</td></tr></tbody></table></div>
+<p>There are <strong>no other parameters</strong>. Unknown query parameters are ignored silently (for example <code>?category=food</code> or <code>?q=taxi</code> do nothing; see <a href="#client-side">filter, sort and search on the client</a>).</p>
+<h4>Example request</h4>
+<pre><code>curl -s "$GATEWAY/api/v1/apps?market=ET" \
+  -H "Authorization: Bearer $TOKEN"</code></pre>
+<h4>Example response (200)</h4>
+<p>The dev stack answered with a JSON array of five apps. To keep this page readable only one element is shown in full (<code>demo-quota</code>); the other elements have exactly the same shape. The logo URL's signature parts are masked.</p>
+<pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+X-RateLimit-Limit: 300
+X-RateLimit-Remaining: 299
+X-RateLimit-Reset: 60
+
+[
+  ...,
+  {
+    "id": "201d3342-d276-4f46-99a0-37c5eddf0646",
+    "slug": "demo-quota",
+    "name": {
+      "am": "የመልእክት ገደብ ሙከራ",
+      "en": "Notification Quota Lab"
+    },
+    "description": {
+      "am": "ሁሉንም የመልእክት ገደቦች የደረሰ ማሳያ።",
+      "en": "Demo app that is at or near every notification limit (seed_scenarios)."
+    },
+    "logoUrl": "http://127.0.0.1:9000/adera-media/apps/201d3342-d276-4f46-99a0-37c5eddf0646/logo/ae28e72b-5274-4f22-b429-e2913142b845.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&amp;X-Amz-Date=20261026T105835Z&amp;X-Amz-SignedHeaders=host&amp;X-Amz-Credential=ACCESS_KEY%2F20261026%2Fus-east-1%2Fs3%2Faws4_request&amp;X-Amz-Expires=3600&amp;X-Amz-Signature=SIGNATURE",
+    "brandColor": "#148C8C",
+    "categories": [
+      "tools"
+    ],
+    "markets": [
+      "ET"
+    ],
+    "publisher": {
+      "name": "Demo Publisher: Quota",
+      "legalName": null,
+      "supportEmail": "support-quota@example.com",
+      "supportPhone": null,
+      "website": "https://example.com/quota"
+    },
+    "entryUrl": "https://example.com/quota",
+    "ratingAvg": 0.0,
+    "ratingCount": 0,
+    "permissions": [
+      {
+        "capability": "notify.email",
+        "description": "Send email to users",
+        "reason": {}
+      },
+      {
+        "capability": "notify.inapp",
+        "description": "Send in-app notifications (inbox + push) to users",
+        "reason": {}
+      },
+      {
+        "capability": "notify.sms",
+        "description": "Send SMS to users (costs money; capped)",
+        "reason": {}
+      },
+      {
+        "capability": "user.basic",
+        "description": "Pseudonymous id and display name",
+        "reason": {}
+      }
+    ]
+  }
+]</code></pre>
+<p class="masked">Masked: the storage access key and signature in <code>logoUrl</code>. The array was cut to one element with <code>...</code>; the real response is a plain array with no wrapper object.</p>
+<p>Field-by-field description: <a href="app-details.html#fields">App details, fields</a>. Seeded catalog at the time of capture (display order): <code>demo-food</code>, <code>demo-ride</code>, <code>demo-market</code>, <code>demo-quota</code> (plus any temporary apps other people are testing with).</p>
+<h4>Example: filter by market</h4>
+<pre><code>curl -s "$GATEWAY/api/v1/apps?market=us" -H "Authorization: Bearer $TOKEN"</code></pre>
+<pre class="out"><code>HTTP/1.1 200 OK
+
+[]</code></pre>
+<p>No seeded app is offered in <code>US</code>, so the list is empty. <code>market=us</code> (lower case) was accepted and treated as <code>US</code>.</p>
+<h4>Errors</h4>
+<div class="table-wrap"><table><thead><tr><th>Status</th><th>Error code</th><th>When it happens</th><th>What the caller should do</th></tr></thead><tbody><tr><td><strong>401</strong></td><td>(empty body)</td><td>Missing, expired or revoked session token; or the account is not allowed to sign in (for example suspended). Produced by the gateway.</td><td>Send the user to sign-in. Do not retry with the same token.</td></tr><tr><td><strong>429</strong></td><td>(HTML page)</td><td>More than 300 requests in 60 s from this IP.</td><td>Back off until <code>X-RateLimit-Reset</code> seconds have passed. Cache the list so this cannot happen from normal use.</td></tr><tr><td><strong>503</strong></td><td>(empty or gateway body)</td><td>The gateway could not reach user-service to verify the session (<code>status_on_error: 503</code>).</td><td>Show a retry state; try again with a short back-off.</td></tr></tbody></table></div>
+<p>There is no 404 on this endpoint: an empty catalog is <code>200 []</code>.</p>
+</div></details>
+<div class="pager"><a class="prev" href="index.html"><small>Previous</small>Overview</a><a class="next" href="app-details.html"><small>Next</small>App details</a></div>
+<p class="footer">Adera super-app guides &middot; mini-app catalog &middot; last verified against the running dev stack on 2026-10-26</p>
+</main>
+</div>
+<script src="assets/app.js"></script>
+</body>
+</html>

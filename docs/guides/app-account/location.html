@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Location: share, update, clear | Adera guide</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+<button id="menu-btn" type="button" aria-label="Toggle menu">Menu</button>
+<span class="brand">Adera guide: sign-in and account</span>
+<span class="spacer"></span>
+<button id="theme-btn" type="button" aria-label="Toggle light or dark theme">Theme</button>
+</header>
+<div class="layout">
+<nav class="sidebar" aria-label="Pages in this guide">
+<h4>Super app: sign-in and account</h4>
+<ul><li><a href="index.html">Overview</a></li>
+<li><a href="quickstart.html">Quick start</a></li>
+<li><a href="authentication.html">Registration and login</a></li>
+<li><a href="session-and-logout.html">Session and logout</a></li>
+<li><a href="profile.html">Profile</a></li>
+<li><a href="extra-data.html">Extra data</a></li>
+<li><a href="location.html" class="current">Location</a><ul><li><a href="#overview">Overview</a></li><li><a href="#what-is-stored">What is stored: coarse versus fine</a></li><li><a href="#endpoints">Endpoints</a></li></ul></li>
+<li><a href="avatar.html">Avatar</a></li>
+<li><a href="devices-and-push-tokens.html">Devices and push tokens</a></li>
+<li><a href="errors.html">Error table</a></li>
+<li><a href="known-issues.html">Known issues and not built yet</a></li></ul>
+</nav>
+<main>
+<h1>Location: share, update, clear</h1>
+<p class="lead">Share, update and clear the optional location in the profile: what is stored, coarse versus fine, and the exact validation.</p>
+<h2 id="overview">Overview</h2>
+<p>The profile can hold <strong>one</strong> location that the person chose to share: a city/region/country, optionally with exact coordinates. Why it exists: so the app (and in the future mini apps that ask for it) can offer local content without asking every time. It is always <strong>user-initiated</strong>: the server never derives a location from an IP address and nothing is stored unless the app calls <code>PUT /api/v1/me/location</code>. Ask for the operating-system location permission first, then store only what you need.</p>
+<div class="table-wrap"><table><thead><tr><th>Method and path</th><th>Purpose</th></tr></thead><tbody>
+<tr><td><code>PUT /api/v1/me/location</code></td><td>set (replace) the stored location</td></tr>
+<tr><td><code>DELETE /api/v1/me/location</code></td><td>clear it</td></tr>
+<tr><td><code>GET /api/v1/me</code></td><td>read it, as the <code>location</code> object</td></tr>
+</tbody></table></div>
+<h2 id="what-is-stored">What is stored: coarse versus fine</h2>
+<div class="table-wrap"><table><thead><tr><th>Field</th><th>Type</th><th>Validation</th><th>Notes</th></tr></thead><tbody>
+<tr><td><code>countryCode</code></td><td>string</td><td>exactly two letters (<code>^[A-Za-z]{2}$</code>); stored upper-case</td><td>any two letters pass: the server does not check the code against the ISO list</td></tr>
+<tr><td><code>region</code></td><td>string</td><td>max 100 characters</td><td>state, province or sub-city (e.g. "Addis Ababa"); blank is stored as <code>null</code></td></tr>
+<tr><td><code>city</code></td><td>string</td><td>max 100 characters</td><td>blank is stored as <code>null</code></td></tr>
+<tr><td><code>latitude</code></td><td>number</td><td>-90 to 90</td><td>give together with <code>longitude</code> or not at all</td></tr>
+<tr><td><code>longitude</code></td><td>number</td><td>-180 to 180</td><td>give together with <code>latitude</code> or not at all</td></tr>
+<tr><td><code>updatedAt</code></td><td>timestamp</td><td>set by the server</td><td>when the location was last set; present in the response only</td></tr>
+</tbody></table></div>
+<ul><li><strong>Coarse</strong> = <code>countryCode</code>, <code>region</code>, <code>city</code> only. This is enough for almost every use and is what you should send by default.</li><li><strong>Fine</strong> = also <code>latitude</code> and <code>longitude</code>. Only send them when a feature really needs a position (nearest branch, delivery address), and only after the person agreed. The server stores the numbers exactly as sent (<code>9.0054</code> came back as <code>9.0054</code>); it does <strong>not</strong> round them. Round on the device (for example to 2 decimals, about 1 km) if you only need the neighbourhood.</li><li>Staff screens show the country, region and city of a user and only a yes/no flag saying that precise coordinates exist; they do not show the coordinates.</li><li>At least one of country, region, city or the coordinate pair is required; an empty request is refused.</li></ul>
+<h2 id="endpoints">Endpoints</h2>
+<details class="endpoint" id="ep-location-put">
+<summary><span class="method m-put">PUT</span><span class="path">/api/v1/me/location</span><span class="sum">Share (set) my location</span></summary>
+<div class="body"><dl class="meta">
+<dt>Who may call</dt><dd>signed-in user, account not blocked</dd>
+<dt>Auth</dt><dd><code>Authorization: Bearer $TOKEN</code></dd>
+<dt>Headers</dt><dd><code>Content-Type: application/json</code></dd>
+<dt>Rate limit</dt><dd>300 per 60 s per IP</dd>
+<dt>Implemented by</dt><dd><code>ProfileController#setLocation</code>, <code>LocationRequest.java</code></dd>
+</dl>
+<h4>Purpose</h4>
+<p>Stores the location, <strong>replacing</strong> whatever was stored before (it is a PUT, not a merge). Sending only a city after a full location erases the old region and coordinates (verified). To update one part, send the complete location you want to keep.</p>
+<h4>Parameters</h4>
+<p>JSON body with any of <code>countryCode</code>, <code>region</code>, <code>city</code>, <code>latitude</code>, <code>longitude</code> as in the table above. At least one meaningful value is required, and a latitude without a longitude (or the reverse) is refused.</p>
+<h4>Example request (fine location)</h4>
+<pre><code>curl -s -X PUT "$GATEWAY/api/v1/me/location" \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"countryCode":"et","region":"Addis Ababa","city":"Bole","latitude":9.0054,"longitude":38.7636}'</code></pre>
+<h4>Example response</h4>
+<pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+
+{
+  "...": "all profile fields (id, firstName, ..., extra)",
+  "location": {
+    "countryCode": "ET",
+    "region": "Addis Ababa",
+    "city": "Bole",
+    "latitude": 9.0054,
+    "longitude": 38.7636,
+    "updatedAt": "2026-10-26T10:50:05.998994084Z"
+  },
+  "updatedAt": "2026-10-26T10:50:05.998994084Z"
+}</code></pre>
+<p>Coarse variant: <code>{"city":"Hawassa","countryCode":"ET"}</code> answers <code>"location": {"countryCode":"ET","region":null,"city":"Hawassa","latitude":null,"longitude":null,"updatedAt":"..."}</code>. Note the lower-case <code>et</code> was stored as <code>ET</code>.</p>
+<h4>Errors</h4>
+<div class="table-wrap"><table><thead><tr><th>Status</th><th>Body</th><th>When</th><th>What to do</th></tr></thead><tbody>
+<tr><td>400</td><td><code>validation_failed</code>, <code>fields.location</code> = "give at least a city, region, country or coordinates"</td><td>empty body <code>{}</code> or all values blank</td><td>send something, or use DELETE to clear</td></tr>
+<tr><td>400</td><td><code>validation_failed</code>, <code>fields.latitude</code> = "latitude and longitude must be given together"</td><td>only one coordinate</td><td>send both</td></tr>
+<tr><td>400</td><td><code>validation_failed</code> with <code>fields</code> such as <code>latitude</code>: "must be less than or equal to 90.0", <code>countryCode</code>: "must be a 2-letter ISO country code", <code>city</code>: "size must be between 0 and 100"</td><td>out-of-range or too long values (captured together in one answer)</td><td>fix the values; only the first message per field is returned</td></tr>
+<tr><td>400</td><td><code>{"error":"invalid_json"}</code></td><td>body not JSON</td><td>fix the client</td></tr>
+<tr><td>401 / 403 / 429 / 503</td><td>see the Error table</td><td></td><td></td></tr>
+</tbody></table></div>
+<h4>Using it in the app</h4>
+<ul><li>The answer is the whole profile; use <code>location.updatedAt</code> to show "last updated".</li><li>Call it when the person explicitly picks or confirms a place, not on every GPS fix: each call is a write and counts toward the 300 per minute limit.</li><li>Show where the stored location is visible (profile screen) and give a clear way to remove it.</li></ul>
+</div></details>
+<details class="endpoint" id="ep-location-delete">
+<summary><span class="method m-delete">DELETE</span><span class="path">/api/v1/me/location</span><span class="sum">Clear my location</span></summary>
+<div class="body"><dl class="meta">
+<dt>Who may call</dt><dd>signed-in user, account not blocked</dd>
+<dt>Auth</dt><dd><code>Authorization: Bearer $TOKEN</code></dd>
+<dt>Rate limit</dt><dd>300 per 60 s per IP</dd>
+<dt>Implemented by</dt><dd><code>ProfileController#clearLocation</code></dd>
+</dl>
+<h4>Purpose</h4>
+<p>Removes the stored location completely (all five values and the timestamp). Use it for a "stop sharing my location" switch. It is idempotent: clearing when nothing is stored also answers <code>200</code>.</p>
+<h4>Example request</h4>
+<pre><code>curl -s -X DELETE "$GATEWAY/api/v1/me/location" -H "Authorization: Bearer $TOKEN"</code></pre>
+<h4>Example response</h4>
+<pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+
+{
+  "...": "all profile fields",
+  "location": null,
+  "updatedAt": "2026-10-26T10:50:06.132749479Z"
+}</code></pre>
+<h4>Errors</h4>
+<div class="table-wrap"><table><thead><tr><th>Status</th><th>Body</th><th>When</th></tr></thead><tbody>
+<tr><td>401 / 403 / 429 / 503</td><td>see the Error table</td><td>as for every profile call</td></tr>
+</tbody></table></div>
+</div></details>
+
+<div class="pager"><a class="prev" href="extra-data.html"><small>Previous</small>Extra data</a><a class="next" href="avatar.html"><small>Next</small>Avatar</a></div>
+<p class="footer">Adera super-app guide: sign-in and account &middot; verified against the dev stack on 2026-10-26</p>
+</main>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

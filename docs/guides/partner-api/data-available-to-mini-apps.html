@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>What data does a mini app get from Adera today | Adera partner API</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+<button id="menu-btn" type="button" aria-label="Toggle menu">Menu</button>
+<a class="brand" href="index.html">Adera partner API</a>
+<span class="spacer"></span>
+<button id="theme-btn" type="button" aria-label="Toggle light or dark theme">Theme</button>
+</header>
+<div class="layout">
+<nav class="sidebar" aria-label="Pages">
+<h4>Mini-app backend API</h4>
+<ul><li><a href="index.html">Overview and contents</a></li><li><a href="quickstart.html">Quick start</a></li><li><a href="signing.html">Signing requests (ADERA-SIG-1)</a></li><li><a href="environments-and-ips.html">Environments, IPs and keys</a></li><li><a href="user-ids.html">Pseudonymous user ids</a></li><li><a href="templates.html">Templates</a></li><li><a href="sending-notifications.html">Sending notifications</a></li><li><a href="statuses-and-callbacks.html">Statuses, retries and callbacks</a></li><li><a href="limits-and-quotas.html">Limits and quotas</a></li><li><a href="sandbox-and-testing.html">Sandbox and testing checklist</a></li><li><a href="errors.html">Error codes</a></li><li><a href="data-available-to-mini-apps.html" class="current">What data a mini app gets</a><ul><li><a href="#summary">Summary</a></li><li><a href="#table">What is and is not available</a></li><li><a href="#verified">How this was verified</a></li><li><a href="#capabilities">The capability catalog</a></li><li><a href="#implications">What this means for a mini-app design today</a></li><li><a href="#not-built">Not built yet</a></li></ul></li><li><a href="known-issues.html">Known issues and not built yet</a></li></ul>
+</nav>
+<main>
+<h1>What data does a mini app get from Adera today</h1>
+<p class="lead">Short answer: <strong>only what it created itself and the delivery status of it.</strong> Nothing about the user: no profile, no contact details, no location, no payments. The mechanism that would give a mini app such data, the frontend bridge with per-user consent, is not built yet.</p>
+
+<h2 id="summary">Summary</h2>
+<div class="callout danger"><span class="label">Do not plan around data that is not there</span><p>A mini-app backend cannot ask Adera who a user is. Adera has no endpoint, for a partner, that returns a user's name, phone number, email address, address, language, avatar, location, payment information or device. The only user-related value a partner holds is the pseudonymous id <code>u_p_...</code>, and even obtaining that is not possible by the partner itself today (<a href="user-ids.html#obtaining">User ids</a>).</p></div>
+
+<h2 id="table">What is and is not available</h2>
+<div class="table-wrap"><table><thead><tr><th>Data</th><th>Available to a mini-app server?</th><th>How / why not</th></tr></thead><tbody>
+<tr><td>Notifications your app requested: ids, channel chosen, timestamps, number of attempts</td><td><span class="badge built">yes</span></td><td><code>POST /v1/notifications</code> answer, <code>GET /v1/notifications/{externalId}</code> (you need to know the <code>externalId</code>: no list endpoint)</td></tr>
+<tr><td>Delivery status of your notifications (<code>SENT</code>, <code>FAILED</code>, <code>UNREACHABLE</code>, <code>SUPPRESSED</code>, <code>EXPIRED</code>) and a reason</td><td><span class="badge built">yes</span></td><td>Poll, or the signed callback. Statuses are provider-level only: no handset receipt, no "read", no "clicked".</td></tr>
+<tr><td>Your own templates (text in all languages, params, validity)</td><td><span class="badge built">yes</span></td><td><code>GET /v1/templates</code>, <code>GET /v1/templates/{id}</code></td></tr>
+<tr><td>Adera's public signing key</td><td><span class="badge built">yes</span></td><td><code>GET /.well-known/jwks.json</code></td></tr>
+<tr><td>The fact that a user muted your app on a channel</td><td><span class="badge partial">indirectly</span></td><td>Only as the outcome <code>SUPPRESSED</code> / <code>recipient_opted_out</code> of a request; the setting itself is not readable.</td></tr>
+<tr><td>Whether a user is deleted or suspended</td><td><span class="badge partial">indirectly, generic</span></td><td>Only as <code>422 user_unreachable</code> (or final <code>UNREACHABLE</code>), deliberately without saying which reason.</td></tr>
+<tr><td>The user's pseudonymous id</td><td><span class="badge notyet">not obtainable by you</span></td><td>Issued by an internal Adera call only; the frontend bridge that would pass it to your mini app is not built.</td></tr>
+<tr><td>Name, display name, avatar (<code>user.basic</code>, <code>user.full_name</code>)</td><td><span class="badge notyet">no</span></td><td>No endpoint. The capabilities exist in the catalog only.</td></tr>
+<tr><td>Phone number, email address (<code>user.contact</code>)</td><td><span class="badge notyet">no</span></td><td>Never exposed. Adera uses them internally to deliver your messages, you do not see them even for users you notify.</td></tr>
+<tr><td>Saved address (<code>user.address</code>)</td><td><span class="badge notyet">no</span></td><td>No endpoint.</td></tr>
+<tr><td>Location, coarse or fine (<code>location.coarse</code>, <code>location.fine</code>)</td><td><span class="badge notyet">no</span></td><td>No endpoint; location is stored on the user profile for Adera's own use only.</td></tr>
+<tr><td>Payments (<code>pay.request</code>)</td><td><span class="badge notyet">no</span></td><td>No endpoint. Staff can store payment settings for an app (currencies, limits) but nothing uses them yet.</td></tr>
+<tr><td>The user's language or market</td><td><span class="badge notyet">no</span></td><td>Not returned. Adera renders in the user's language without telling you which one.</td></tr>
+<tr><td>The user's devices or push tokens</td><td><span class="badge notyet">no</span></td><td>Never exposed.</td></tr>
+<tr><td>Which other mini apps a user uses</td><td><span class="badge notyet">no</span></td><td>Ids are per app on purpose; there is no cross-app view.</td></tr>
+<tr><td>Anything over a session with the Adera app (a token from the app to your frontend or backend)</td><td><span class="badge notyet">no</span></td><td>The bridge is not built.</td></tr>
+</tbody></table></div>
+
+<h2 id="verified">How this was verified</h2>
+<ul>
+<li><strong>Gateway:</strong> the only route that serves partner traffic is <code>/v1/*</code> (plus <code>/.well-known/jwks.json</code>). The notification service implements under <code>/v1/</code> only <code>GET /templates</code>, <code>GET /templates/{id}</code>, <code>POST /notifications</code> and <code>GET /notifications/{externalId}</code>.</li>
+<li><strong>Probing:</strong> with a valid signed key, <code>GET /v1/users/{id}</code>, <code>/v1/users</code>, <code>/v1/me</code>, <code>/v1/profile</code>, <code>/v1/location</code>, <code>/v1/payments</code>, <code>/v1/apps</code>, <code>/v1/capabilities</code> and <code>/v1/session</code> all answered <code>404 Not Found</code>.</li>
+<li><strong>Capabilities:</strong> the catalog of capabilities staff can grant has ten entries (table below). Only the three <code>notify.*</code> ones change what the API does. The other seven are stored and shown in the dashboard, but no service reads them. Their purpose is the future consent sheet shown to users.</li>
+<li><strong>Frontend bridge:</strong> no code path hands a mini app a user id or data. The registry stores an <code>entryUrl</code> and <code>allowedOrigins</code> per app "for the frontend bridge", validated but not enforced or used.</li>
+<li><strong>Internal endpoints</strong> that carry user data (<code>/internal/users/{id}/delivery-context</code>, <code>/internal/aliases</code>) are protected by an internal secret and are not routed by the gateway (<code>404</code> through it); they serve Adera's own services only.</li>
+</ul>
+
+<h2 id="capabilities">The capability catalog</h2>
+<p>Staff grant or deny these per app (<code>PUT /admin/api/v1/apps/{id}/capabilities/{key}</code>, states <code>GRANTED</code>, <code>DENIED</code>, <code>SUSPENDED</code>). "Reason" means staff must write a plain-language reason (shown to users in the future consent sheet) to grant it.</p>
+<div class="table-wrap"><table><thead><tr><th>Key</th><th>Description</th><th>Reason required</th><th>Effect today</th></tr></thead><tbody>
+<tr><td><code>notify.inapp</code></td><td>Send in-app notifications (inbox + push)</td><td>no</td><td><span class="badge built">works</span>, needs a limit row (created with defaults)</td></tr>
+<tr><td><code>notify.sms</code></td><td>Send SMS (costs money; capped)</td><td>no</td><td><span class="badge built">works</span>, limits as above</td></tr>
+<tr><td><code>notify.email</code></td><td>Send email</td><td>no</td><td><span class="badge built">works</span></td></tr>
+<tr><td><code>user.basic</code></td><td>Pseudonymous id and display name</td><td>no</td><td><span class="badge notyet">none yet</span></td></tr>
+<tr><td><code>user.full_name</code></td><td>First and last name</td><td>yes</td><td><span class="badge notyet">none yet</span></td></tr>
+<tr><td><code>user.contact</code></td><td>Phone number and email</td><td>yes</td><td><span class="badge notyet">none yet</span></td></tr>
+<tr><td><code>user.address</code></td><td>One saved address the user picks</td><td>yes</td><td><span class="badge notyet">none yet</span></td></tr>
+<tr><td><code>location.coarse</code></td><td>City-level location</td><td>yes</td><td><span class="badge notyet">none yet</span></td></tr>
+<tr><td><code>location.fine</code></td><td>Precise location, foreground only</td><td>yes</td><td><span class="badge notyet">none yet</span></td></tr>
+<tr><td><code>pay.request</code></td><td>Ask the user to pay</td><td>yes</td><td><span class="badge notyet">none yet</span></td></tr>
+</tbody></table></div>
+
+<h2 id="implications">What this means for a mini-app design today</h2>
+<ul>
+<li>Your mini app must have its own user accounts and its own source of contact data. Adera cannot supply or verify them.</li>
+<li>You cannot yet link "this person in my system" to "this person in Adera". Until the bridge exists, the only users you can notify are ones whose <code>u_p_...</code> ids Adera staff handed to you (test users), plus synthetic <code>u_p_test_*</code> ids in DEV. Real production notification traffic depends on the bridge.</li>
+<li>Do not design features that need the user's phone, name or location from Adera. Ask the user in your own screens.</li>
+<li>You get no data back about <em>what the user did</em> with a notification.</li>
+</ul>
+
+<h2 id="not-built">Not built yet</h2>
+<ul>
+<li>The <strong>frontend bridge</strong>: the Adera app opens your mini app, gets the user's consent per capability, and hands over the pseudonymous id and an access mechanism.</li>
+<li>Any endpoint returning <code>user.basic</code>, <code>user.full_name</code>, <code>user.contact</code>, <code>user.address</code>, <code>location.*</code>.</li>
+<li>Payments: <code>pay.request</code>, payment callbacks.</li>
+<li>A partner endpoint to list or search the notifications it sent.</li>
+<li>Per-user consent records and the consent sheet.</li>
+</ul>
+
+<div class="pager"><a class="prev" href="errors.html"><small>Previous</small>Error codes</a><a class="next" href="known-issues.html"><small>Next</small>Known issues and not built yet</a></div>
+<p class="footer">Adera mini-app backend API guide &middot; verified against the dev deployment on 2026-10-26</p>
+</main>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>App details | Mini-app catalog guide</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<header class="topbar">
+<button id="menu-btn" type="button" aria-label="Toggle menu">Menu</button>
+<a class="brand" href="index.html">Mini-app catalog guide</a>
+<span class="spacer"></span>
+<button id="theme-btn" type="button" aria-label="Toggle light or dark theme">Theme</button>
+</header>
+<div class="layout">
+<nav class="sidebar" aria-label="Pages">
+<h4>Mini-app catalog</h4><ul><li><a href="index.html">Overview</a></li><li><a href="list-apps.html">List the mini apps</a></li><li><a href="app-details.html" class="current">App details</a></li><li><a href="capabilities-and-permissions.html">Capabilities and permissions</a></li><li><a href="reviews-and-ratings.html">Reviews and ratings</a></li><li><a href="reporting.html">Reporting an app</a></li><li><a href="mute-preferences.html">Mute preferences</a></li><li><a href="building-the-store-screen.html">Building the store screen</a></li><li><a href="errors.html">Error codes</a></li><li><a href="known-issues.html">Known issues</a></li></ul>
+</nav>
+<main>
+<h1>App details</h1>
+<p class="lead">The public view of a mini app: every field, what is deliberately hidden, the logo link, ratings and publisher information.</p>
+
+<h2 id="overview">Overview</h2>
+<p>The "public view" of a mini app is everything a user may know about it: what it is, who runs it, how to reach support, how well it is rated and what it is allowed to do. It is the same JSON object in the catalog list and in <code>GET /api/v1/apps/{idOrSlug}</code>. Anything operational is left out on purpose (list below).</p>
+<h2 id="fields">Every field</h2>
+<div class="table-wrap"><table><thead><tr><th>Field</th><th>Type</th><th>Meaning and how to use it</th></tr></thead><tbody><tr><td><code>id</code></td><td>string (UUID)</td><td>The app's permanent id. Use it for the preferences endpoints (they take only the UUID) and as a stable key.</td></tr><tr><td><code>slug</code></td><td>string</td><td>Permanent short name, 2 to 40 chars of <code>a-z 0-9 -</code>. Use in deep links such as <code>adera://apps/demo-ride</code> (your scheme) and in any <code>{idOrSlug}</code> path.</td></tr><tr><td><code>name</code></td><td>object lang to string</td><td>Display name, max 100 characters per language. <code>en</code> always present; <code>am</code>, <code>om</code> optional.</td></tr><tr><td><code>description</code></td><td>object lang to string</td><td>Short description, max 1000 characters per language. May be <code>{}</code>; may lack <code>en</code>.</td></tr><tr><td><code>logoUrl</code></td><td>string or null</td><td>Time-limited download link for the logo image (PNG). Staff cannot put an app LIVE without a logo, but they can remove it afterwards, so code defensively and show a placeholder tile when it is <code>null</code>. See <a href="#logo">Logo</a>.</td></tr><tr><td><code>brandColor</code></td><td>string or null</td><td>Accent colour as <code>#RRGGBB</code> (upper-case hex), for tile backgrounds, headers, buttons on the store page. Optional: staff may leave it unset, so keep a default accent.</td></tr><tr><td><code>categories</code></td><td>array of string</td><td>0 to 10 lower-case words (<code>food</code>, <code>tools</code>...). Free-form, not a fixed list.</td></tr><tr><td><code>markets</code></td><td>array of string</td><td>Where the app is offered: <code>ET</code>, <code>US</code>. Never empty (defaults to <code>["ET"]</code>).</td></tr><tr><td><code>publisher</code></td><td>object</td><td>Who runs the app: <code>name</code> (display name), <code>legalName</code> (registered company name), <code>supportEmail</code>, <code>supportPhone</code>, <code>website</code>. Every key is always present; each can be <code>null</code> (staff cannot put an app LIVE without a support email, but can clear it later, so do not assume it is there). See <a href="#publisher">Publisher and support</a>.</td></tr><tr><td><code>entryUrl</code></td><td>string or null</td><td>The https address of the mini app's start page. Today: show it as the "Open" target / website link; <strong>do not embed or auto-open it expecting a user-data handover</strong> (see <a href="#entry">Entry URL</a>).</td></tr><tr><td><code>ratingAvg</code></td><td>number</td><td>Average of the visible reviews, rounded to 2 decimals (<code>3.3</code>, <code>5.0</code>). <code>0.0</code> when there are none.</td></tr><tr><td><code>ratingCount</code></td><td>integer</td><td>Number of visible reviews (hidden ones are not counted).</td></tr><tr><td><code>permissions</code></td><td>array of object</td><td>What staff have granted this app. Each: <code>capability</code> (key), <code>description</code> (English only), <code>reason</code> (object lang to string, may be <code>{}</code>). Sorted alphabetically by key. See <a href="capabilities-and-permissions.html">Capabilities and permissions</a>.</td></tr></tbody></table></div>
+<h2 id="hidden">What users never get</h2>
+<p>Staff see a richer object (the "admin view"). These parts are intentionally absent from the public view, so do not look for them and do not ask backend colleagues to "just add" them without a product reason:</p>
+<div class="table-wrap"><table><thead><tr><th>Field staff can see</th><th>Why users do not get it</th></tr></thead><tbody><tr><td><code>status</code></td><td>Users only ever get LIVE apps, so the field would always say LIVE.</td></tr><tr><td><code>priority</code></td><td>Internal ordering knob; the effect is already in the array order.</td></tr><tr><td><code>allowedOrigins</code></td><td>Web origins the mini app may be loaded from or talk to. It is a security setting for the (not yet built) launcher, not something to display.</td></tr><tr><td><code>extra</code></td><td>Free-form JSON staff keep on the app (up to 16 KB). Internal.</td></tr><tr><td><code>logoImageId</code></td><td>Internal object id (the same id is visible inside <code>logoUrl</code>'s path).</td></tr><tr><td><code>createdAt</code>, <code>updatedAt</code></td><td>Not part of the public contract. There is no "last updated" to show.</td></tr><tr><td>Capabilities that are DENIED or SUSPENDED, with their reasons</td><td>Users see only what the app can do, never what it was refused.</td></tr><tr><td>Payment settings (allowed currencies, hold, min/max amount)</td><td>Operational limits for the payment feature, which is not built.</td></tr><tr><td>Notification limits (per user per day etc.)</td><td>Operational. Users cannot see how many messages an app may send.</td></tr><tr><td>Partner keys, allowed server addresses (environments)</td><td>Partner-side security material.</td></tr></tbody></table></div>
+<h2 id="logo">Logo: URL, loading and refreshing</h2>
+<ul>
+<li><code>logoUrl</code> is a <strong>pre-signed</strong> link straight to the object store (in dev <code>http://127.0.0.1:9000/adera-media/apps/&lt;appId&gt;/logo/&lt;imageId&gt;.png?...</code>). It does not go through the gateway and needs <strong>no</strong> <code>Authorization</code> header: the signature in the query string is the credential. Do not add your session token to it.</li>
+<li>It is valid for <strong>60 minutes</strong> (<code>X-Amz-Expires=3600</code>; the server setting is <code>STORAGE_PRESIGN_MINUTES</code>, default 60). A new link, with a new signature, is produced on every API call, so two calls give two different strings for the same image.</li>
+<li>The image is always a <strong>PNG</strong>, at most 512 by 512 pixels (staff uploads are re-encoded, fitted inside a square, transparency kept). Verified: the demo logos download as <code>image/png</code>, under 1 KB. Treat it as a square icon; do not stretch it. A transparent background is possible, so put it on a tile coloured with <code>brandColor</code> or a neutral surface.</li>
+<li>Replacing the logo gives it a new image id, so the <em>path</em> changes. That makes the path (without the query) an ideal image-cache key: same path, same pixels. Do not key the cache on the full URL.</li>
+<li><strong>Refreshing.</strong> If an image request fails with 403 (link expired, typically because the list was cached for more than an hour), re-fetch the app (detail is enough) and retry once with the new <code>logoUrl</code>. Do not retry the old URL. With a disk image cache keyed by path you rarely need the URL at all after the first download.</li>
+<li>If <code>logoUrl</code> is <code>null</code> (staff removed the logo of a LIVE app) or the download fails, draw a placeholder: the app's initial on a tile filled with <code>brandColor</code>.</li>
+<li>In production the host will be the production object store's public address; always use the URL exactly as given and never rebuild it from parts.</li>
+</ul>
+<h2 id="brand">Brand colour</h2>
+<p>A string like <code>#1E78C8</code>, always six hex digits with a leading <code>#</code>, upper-case. Optional (null when staff did not set one). Use it for the tile background, the header of the store page and the primary button on that page. Keep text readable: compute the contrast and switch the foreground between white and near-black. Do not use it for status colours (errors, ratings) and ignore it if it is too close to your background in dark mode.</p>
+<h2 id="rating">Rating average and count</h2>
+<ul>
+<li><code>ratingAvg</code> is the arithmetic mean of the <em>visible</em> reviews' stars (1 to 5), rounded to two decimals, as a JSON number. <code>ratingCount</code> is how many reviews that is. Verified example: <code>demo-food</code> returns <code>3.3</code> and <code>10</code>.</li>
+<li>Both are recomputed by the server every time a review is created, edited, deleted or hidden/restored by staff. Hidden reviews are excluded from both.</li>
+<li>When <code>ratingCount</code> is <code>0</code>, <code>ratingAvg</code> is <code>0.0</code>: show "No ratings yet", not "0.0".</li>
+<li>Show one decimal (<code>3.3</code>) and the count in brackets. The detail does not include the per-star histogram; you can build a rough one only from the reviews list, which is paged and anonymous, so do not.</li>
+<li>Reviews of a user who was later suspended or deleted still count until staff hide them (see <a href="known-issues.html">Known issues</a>).</li>
+</ul>
+<h2 id="publisher">Publisher and support</h2>
+<p>The <code>publisher</code> object tells users who is behind the mini app. Show the brand-level <code>name</code> under the title ("by Deliver Addis"), and the <code>legalName</code> (registered company) in an "About this service" section when present. <code>supportEmail</code> is required to go LIVE and so is normally present (it can be cleared later): use it for a "Contact support" row (<code>mailto:</code>). <code>supportPhone</code> (up to 30 characters, free text, usually in international format) and <code>website</code> (https URL, up to 500 characters) are optional: hide the row if <code>null</code>. These values are entered by staff and are not verified to be reachable. Seeded apps use <code>support-*@example.com</code> addresses, which do not receive mail.</p>
+<h2 id="entry">Entry URL and allowed origins</h2>
+<ul>
+<li><code>entryUrl</code> is the https address where the mini app starts (or <code>null</code>). Today it is the app's public web address. You may show it as an "Open website" action in the system browser. <strong>Launching a mini app inside the super app is not built</strong>: there is no web-view bridge, no session handover and no per-user consent step yet. Do not pass the user's token or id to it.</li>
+<li><code>allowedOrigins</code> (the origins the mini app may be embedded from and call) exists only in the staff view. It is not returned to users, and nothing in the user API needs it.</li>
+</ul>
+<h2 id="not-built">Not built yet on this page</h2>
+<ul><li>Screenshots, a long description, version, size, changelog, "what is new".</li><li>Opening the mini app inside the super app with a handover of the user's identity.</li><li>A "similar apps" or "more from this publisher" lookup.</li></ul>
+<h2 id="endpoint">Endpoint</h2><details class="endpoint" id="ep-app-detail"><summary><span class="method m-get">GET</span><span class="path">/api/v1/apps/{idOrSlug}</span><span class="sum">Get one mini app (the store page data)</span></summary><div class="body"><dl class="meta"><dt>Who may call</dt><dd>Signed-in end user.</dd><dt>Client path</dt><dd><code>/api/v1/apps/{idOrSlug}</code> (gateway route <code>apps-catalog</code>, 300 requests per 60 s per client IP).</dd><dt>Headers</dt><dd><code>Authorization: Bearer $TOKEN</code></dd><dt>Implemented in</dt><dd><code>registry-service: AppPublicController#detail, AppService#publicView</code></dd></dl>
+<h4>Purpose</h4>
+<p>Returns the public view of a single app. The shape is identical to a catalog list item. Use it when the user opens a store page (to get fresh rating, permissions and a fresh logo link), when you open an app from a deep link or a notification (you only have a slug or id), and to re-check that an app is still LIVE.</p>
+<h4>Request parameters</h4>
+<div class="table-wrap"><table><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why it exists</th></tr></thead><tbody><tr><td><code>idOrSlug</code></td><td>path</td><td>string</td><td>yes</td><td>The app's UUID or its slug. A value that parses as a UUID is looked up as an id; anything else is looked up as a slug.</td><td>Links use the readable slug; the id is what other APIs (preferences) need.</td></tr></tbody></table></div>
+<h4>Example request</h4>
+<pre><code>curl -s "$GATEWAY/api/v1/apps/demo-ride" \
+  -H "Authorization: Bearer $TOKEN"</code></pre>
+<h4>Example response (200)</h4>
+<pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+X-RateLimit-Limit: 300
+X-RateLimit-Remaining: 298
+
+{
+  "id": "4e831b72-a33b-4d93-a7ba-65e19b9dbd0a",
+  "slug": "demo-ride",
+  "name": {
+    "am": "የመኪና ጥሪ",
+    "en": "Ride Hailing"
+  },
+  "description": {
+    "am": "በደቂቃዎች ውስጥ ጉዞ ይዘዙ።",
+    "en": "Book a ride in minutes (demo entry: link goes to ZayRide)."
+  },
+  "logoUrl": "http://127.0.0.1:9000/adera-media/apps/4e831b72-a33b-4d93-a7ba-65e19b9dbd0a/logo/13fa5c73-6a1e-494c-ab25-3d4b4dc9641e.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&amp;X-Amz-Date=20261026T105953Z&amp;X-Amz-SignedHeaders=host&amp;X-Amz-Credential=ACCESS_KEY%2F20261026%2Fus-east-1%2Fs3%2Faws4_request&amp;X-Amz-Expires=3600&amp;X-Amz-Signature=SIGNATURE",
+  "brandColor": "#1E78C8",
+  "categories": [
+    "travel",
+    "transport"
+  ],
+  "markets": [
+    "ET"
+  ],
+  "publisher": {
+    "name": "Demo Publisher: Ride",
+    "legalName": null,
+    "supportEmail": "support-ride@example.com",
+    "supportPhone": null,
+    "website": "https://www.zayride.com"
+  },
+  "entryUrl": "https://www.zayride.com",
+  "ratingAvg": 3.0,
+  "ratingCount": 3,
+  "permissions": [
+    {
+      "capability": "location.fine",
+      "description": "Precise location, foreground only",
+      "reason": {
+        "am": "ለእርስዎ ቅርብ የሆነውን አሽከርካሪ ለማግኘት",
+        "en": "To find the closest driver to you"
+      }
+    },
+    {
+      "capability": "notify.inapp",
+      "description": "Send in-app notifications (inbox + push) to users",
+      "reason": {}
+    },
+    {
+      "capability": "notify.sms",
+      "description": "Send SMS to users (costs money; capped)",
+      "reason": {}
+    },
+    {
+      "capability": "pay.request",
+      "description": "Ask the user to pay (currencies and limits in payment settings)",
+      "reason": {
+        "am": "ለትዕዛዝዎ ክፍያ ለመጠየቅ",
+        "en": "To ask you to pay for your order"
+      }
+    },
+    {
+      "capability": "user.basic",
+      "description": "Pseudonymous id and display name",
+      "reason": {}
+    },
+    {
+      "capability": "user.full_name",
+      "description": "The user's first and last name",
+      "reason": {
+        "am": "በስምዎ ለመጥራት",
+        "en": "To address you by name"
+      }
+    }
+  ]
+}
+</code></pre>
+<p class="masked">Masked: the storage access key and signature inside <code>logoUrl</code>. The Amharic texts are real seed data.</p>
+<h4>Example: unknown or not-LIVE app</h4>
+<pre><code>curl -s -i "$GATEWAY/api/v1/apps/demo-paused" -H "Authorization: Bearer $TOKEN"</code></pre>
+<pre class="out"><code>HTTP/1.1 404 Not Found
+Content-Type: application/json
+
+{"error":"not_found"}</code></pre>
+<h4>Errors</h4>
+<div class="table-wrap"><table><thead><tr><th>Status</th><th>Error code</th><th>When it happens</th><th>What the caller should do</th></tr></thead><tbody><tr><td><strong>404</strong></td><td><code>not_found</code></td><td>No app with that id or slug, <em>or</em> the app exists but is DRAFT, PAUSED or KILLED. The two cases are deliberately indistinguishable.</td><td>Remove the app from any cached list and show "not available". Do not retry.</td></tr><tr><td><strong>401</strong></td><td>(empty body)</td><td>Bad or missing session.</td><td>Sign in again.</td></tr><tr><td><strong>429</strong></td><td>(HTML page)</td><td>Gateway rate limit.</td><td>Back off.</td></tr></tbody></table></div>
+<h4>How to use it</h4>
+<ul><li>Render the store page from this response; use the <code>permissions</code> array for the "What this app can access" section.</li><li>Do not call it for every tile on the home grid; the list already has the same data.</li></ul>
+</div></details>
+<div class="pager"><a class="prev" href="list-apps.html"><small>Previous</small>List the mini apps</a><a class="next" href="capabilities-and-permissions.html"><small>Next</small>Capabilities and permissions</a></div>
+<p class="footer">Adera super-app guides &middot; mini-app catalog &middot; last verified against the running dev stack on 2026-10-26</p>
+</main>
+</div>
+<script src="assets/app.js"></script>
+</body>
+</html>

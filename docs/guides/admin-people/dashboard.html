@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dashboard, system and health | Admin: users, staff, moderation and audit</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+<button id="menu-btn" type="button" aria-label="Toggle menu">Menu</button>
+<span class="brand">Admin: users, staff, moderation and audit</span>
+<span class="spacer"></span>
+<button id="theme-btn" type="button" aria-label="Toggle light or dark theme">Theme</button>
+</header>
+<div class="layout">
+<nav class="sidebar" aria-label="Pages in this guide"><h4>Admin: users, staff, moderation and audit</h4><ul><li><a href="index.html">Overview and conventions</a></li>
+<li><a href="roles-and-access.html">Staff sign-in, roles and permissions</a></li>
+<li><a href="dashboard.html" class="current">Dashboard, system and health</a><ul><li><a href="#overview">Overview</a></li><li><a href="#ep-dashboard">GET /dashboard</a></li><li><a href="#ep-user-stats">GET /users/stats</a></li><li><a href="#ep-notif-stats">GET /notification/stats</a></li><li><a href="#ep-system">GET /system</a></li><li><a href="#ep-health">Health probes</a></li><li><a href="#links">Tool links</a></li><li><a href="#reading">How to read the home page</a></li><li><a href="#errors">Errors</a></li></ul></li>
+<li><a href="users.html">Registered users</a></li>
+<li><a href="moderation-reviews.html">Moderation: reviews</a></li>
+<li><a href="moderation-reports.html">Moderation: reports</a></li>
+<li><a href="staff.html">Staff management</a></li>
+<li><a href="audit-log.html">Audit log</a></li>
+<li><a href="notifications-overview.html">Notification visibility</a></li>
+<li><a href="runbooks.html">Runbooks</a></li>
+<li><a href="errors.html">Error codes</a></li>
+<li><a href="known-issues.html">Known issues and not built yet</a></li>
+</ul></nav>
+<main>
+<h1>Dashboard, system and health</h1>
+<p class="lead">The read-only summary endpoints behind the backoffice home and System pages, and how to read them.</p>
+<section><h2 id="overview">Overview</h2>
+<p>The backoffice <em>Dashboard</em> home page is built from four read-only calls, each loading (and failing) on its own: <code>/dashboard</code> (apps, reports, reviews, staff counts), <code>/users/stats</code>, <code>/notification/stats</code>, and the newest rows of the notification, report and audit lists. The <em>System</em> screen adds <code>/system</code> and live health probes. All of them are open to <strong>every staff role</strong>; counts contain no personal data.</p>
+<div class="callout why"><span class="label">Why it exists</span><p>To answer in ten seconds: is anything on fire (open reports, failing deliveries, a dead service) and is there work waiting (draft apps that cannot go live yet, reports to review). The numbers are real counts from the databases, never estimates. The figures in the examples were captured on a shared dev stack, so other people's test data is included.</p></div></section>
+<section><h2 id="ep-dashboard-s">Home counts</h2>
+<details class="endpoint" id="ep-dashboard"><summary><span class="method m-get">GET</span><span class="path">/admin/api/v1/dashboard</span><span class="sum">Counts of apps, reports, reviews and staff, and draft apps not ready for LIVE</span></summary><div class="body"><dl class="meta"><dt>Why</dt><dd>One call for the numbers on the home page: how many mini apps in each status, how much moderation is waiting, how many staff exist, and which draft apps still lack something before they can go LIVE.</dd><dt>Auth</dt><dd>Staff aal2 Bearer, any role</dd><dt>Rate limit</dt><dd>300/min/IP</dd><dt>Backoffice</dt><dd>Dashboard: panels Mini apps by status, Moderation, Apps not ready for LIVE</dd></dl><h4>Request</h4><p>No parameters.</p>
+<pre><code>curl -sS "$GATEWAY/admin/api/v1/dashboard" -H "Authorization: Bearer $TOKEN"</code></pre><h4>Response 200</h4><pre class="out"><code>HTTP/1.1 200 OK
+
+{
+  "apps": {
+    "DRAFT": 2,
+    "LIVE": 6,
+    "PAUSED": 2,
+    "KILLED": 1,
+    "total": 11
+  },
+  "reports": {
+    "open": 8,
+    "total": 12
+  },
+  "reviews": {
+    "total": 16,
+    "hidden": 2,
+    "last7Days": 16
+  },
+  "staff": {
+    "active": 9,
+    "disabled": 1
+  },
+  "draftApps": [
+    {
+      "id": "3180f7cd-fdd9-425c-b609-fe00232f9438",
+      "slug": "demo-flights",
+      "name": {
+        "am": "በረራዎች",
+        "en": "Flights"
+      },
+      "missingForLive": []
+    }
+  ]
+}</code></pre><div class="table-wrap"><table><thead><tr><th>Field</th><th>Meaning</th></tr></thead><tbody><tr><td><code>apps.DRAFT / LIVE / PAUSED / KILLED</code></td><td>Number of mini apps in each status (always all four keys, zero when none). <code>apps.total</code> is their sum.</td></tr><tr><td><code>reports.open</code>, <code>reports.total</code></td><td>Reports whose status is OPEN, and all reports ever filed. <code>open</code> is the work queue.</td></tr><tr><td><code>reviews.total</code>, <code>reviews.hidden</code>, <code>reviews.last7Days</code></td><td>All reviews, those currently HIDDEN by staff, and those created in the last 7 days (by creation time, edits do not count).</td></tr><tr><td><code>staff.active</code>, <code>staff.disabled</code></td><td>Staff rows by status. Includes every account in the staff table (also colleagues who never signed in).</td></tr><tr><td><code>draftApps[]</code></td><td>Up to 10 DRAFT apps, newest first: <code>id</code>, <code>slug</code>, <code>name</code> (per-language object) and <code>missingForLive</code>. The list holds <code>logo</code> and/or <code>supportEmail</code>, the two things a DRAFT app needs before it can go LIVE; an empty list means the app is ready and only needs the status change.</td></tr></tbody></table></div><h4>Errors</h4><p>Only the sign-in errors (<code>401</code>, <code>403 mfa_required</code>, <code>403 not_staff</code>). It never answers <code>insufficient_role</code>.</p>
+<h4>Use in a client</h4><p>Show <code>reports.open</code> prominently (red when above zero) and link it to the reports list with <code>status=OPEN</code>. The numbers are computed on each call; poll no faster than every 30 seconds.</p>
+</div></details>
+</section>
+<section><h2 id="stats">User and notification statistics</h2>
+<details class="endpoint" id="ep-user-stats"><summary><span class="method m-get">GET</span><span class="path">/admin/api/v1/users/stats</span><span class="sum">Registered-user counts by status</span></summary><div class="body"><dl class="meta"><dt>Why</dt><dd>Know how many customers exist, how many are suspended or deleted, and the sign-up pace.</dd><dt>Served by</dt><dd>user-service (route <code>admin-users</code>)</dd><dt>Auth</dt><dd>Staff aal2 Bearer, any role</dd><dt>Backoffice</dt><dd>Dashboard: panel Users</dd></dl><h4>Request</h4><pre><code>curl -sS "$GATEWAY/admin/api/v1/users/stats" -H "Authorization: Bearer $TOKEN"</code></pre><h4>Response 200</h4><pre class="out"><code>HTTP/1.1 200 OK
+
+{
+  "total": 16,
+  "active": 14,
+  "suspended": 1,
+  "deleted": 1,
+  "createdLast7Days": 16
+}</code></pre><p><code>createdLast7Days</code> counts profiles created in the last 7 days regardless of their current status. Note that <code>/users/stats</code> is matched before the <code>/users/{id}</code> pattern, so the word <code>stats</code> is never treated as a user id.</p>
+<h4>Errors</h4><p>Sign-in errors only.</p>
+</div></details>
+<details class="endpoint" id="ep-notif-stats"><summary><span class="method m-get">GET</span><span class="path">/admin/api/v1/notification/stats</span><span class="sum">Delivery counts across all apps (or one)</span></summary><div class="body"><dl class="meta"><dt>Why</dt><dd>Spot delivery trouble: a rising share of FAILED, UNREACHABLE or EXPIRED in the last 24 hours means a provider or a partner problem.</dd><dt>Served by</dt><dd>notification-service (route <code>admin-notification</code>)</dd><dt>Auth</dt><dd>Staff aal2 Bearer, any role</dd><dt>Backoffice</dt><dd>Dashboard panel Notifications; the Notifications screen header</dd></dl><h4>Request</h4><div class="table-wrap"><table><thead><tr><th>Query</th><th>Type</th><th>Required</th><th>Meaning</th></tr></thead><tbody><tr><td><code>appId</code></td><td>uuid</td><td>no</td><td>Restrict the counts to one mini app. A value that is not a uuid answers <code>400 invalid_request</code>-style errors (see Errors).</td></tr></tbody></table></div><pre><code>curl -sS "$GATEWAY/admin/api/v1/notification/stats" -H "Authorization: Bearer $TOKEN"</code></pre><h4>Response 200</h4><pre class="out"><code>HTTP/1.1 200 OK
+
+{
+  "total": 55,
+  "last24h": {
+    "total": 55,
+    "byStatus": {
+      "EXPIRED": 1,
+      "SENT": 45,
+      "SUPPRESSED": 7,
+      "UNREACHABLE": 2
+    }
+  },
+  "byStatus": {
+    "EXPIRED": 1,
+    "SENT": 45,
+    "SUPPRESSED": 7,
+    "UNREACHABLE": 2
+  },
+  "byChannel": {
+    "EMAIL": 8,
+    "IN_APP": 18,
+    "SMS": 29
+  }
+}</code></pre><p><code>total</code> and <code>byStatus</code>/<code>byChannel</code> cover all time; <code>last24h</code> covers the last 24 hours (<code>total</code> is the sum of its <code>byStatus</code>). Only statuses that occur appear as keys. The meaning of each status is in the notification visibility page.</p>
+<h4>Errors</h4><p>Sign-in errors; a malformed <code>appId</code> is rejected before any query (see the notification visibility page for the exact body).</p>
+</div></details>
+</section>
+<section><h2 id="system">System: environment, health and links</h2>
+<details class="endpoint" id="ep-system"><summary><span class="method m-get">GET</span><span class="path">/admin/api/v1/system</span><span class="sum">Which environment this deployment is (DEV or PROD)</span></summary><div class="body"><dl class="meta"><dt>Why</dt><dd>A deployment runs in exactly one environment (setting <code>ADERA_ENV</code>). Keys and allowed server addresses of the other environment can be stored but are not used here. The backoffice shows a DEV or PROD tag so nobody mistakes a test stack for production.</dd><dt>Auth</dt><dd>Staff aal2 Bearer, any role</dd><dt>Backoffice</dt><dd>System page, first paragraph; environment tag in the header</dd></dl><h4>Request</h4><pre><code>curl -sS "$GATEWAY/admin/api/v1/system" -H "Authorization: Bearer $TOKEN"</code></pre><h4>Response 200</h4><pre class="out"><code>HTTP/1.1 200 OK
+
+{
+  "environment": "DEV"
+}</code></pre><h4>Errors</h4><p>Sign-in errors only.</p>
+</div></details>
+<div class="callout ok"><span class="label">Not built yet</span><p>There is no endpoint that returns build version or uptime. Use the health probes below, Grafana and Prometheus.</p></div></section>
+<section><h2 id="health">Health probes</h2>
+<details class="endpoint" id="ep-health"><summary><span class="method m-get">GET</span><span class="path">/backoffice/api/health/{service}</span><span class="sum">Is this service up? (the System page's table)</span></summary><div class="body"><dl class="meta"><dt>Why</dt><dd>The services' own health endpoints are not reachable from outside the Docker network. The backoffice web server proxies a fixed list of probes so staff can check them from the System page.</dd><dt>Auth</dt><dd>Staff aal2 Bearer, any role (same forward-auth as the admin API; the path is not under <code>/admin/api/v1</code>)</dd><dt>Rate limit</dt><dd>120/min/IP</dd><dt>Backoffice</dt><dd>System: Service health (refreshes every 30 seconds, button <em>Check now</em>)</dd></dl><h4>Request</h4><p><code>{service}</code> is one of: <code>registry</code>, <code>user</code>, <code>notification</code>, <code>kratos</code>, <code>prometheus</code>, <code>grafana</code>, <code>loki</code>, <code>mailpit</code>, <code>infisical</code>. GET only; any other name answers a plain nginx <code>404</code>.</p>
+<pre><code>curl -sS "$GATEWAY/backoffice/api/health/registry" -H "Authorization: Bearer $TOKEN"</code></pre><h4>Response 200 (examples)</h4><pre class="out"><code>HTTP/1.1 200 OK
+
+{
+  "groups": [
+    "liveness",
+    "readiness"
+  ],
+  "status": "UP"
+}</code></pre><pre class="out"><code>HTTP/1.1 200 OK
+
+{
+  "status": "ok"
+}</code></pre><pre class="out"><code>HTTP/1.1 200 OK
+
+{
+  "database": "ok",
+  "version": "13.0.2",
+  "commit": "3fcdbc5a"
+}</code></pre><p>The body is whatever the service answers, so its shape differs per service (Prometheus and Loki answer plain text). The status code is passed through: <strong>anything other than 200 means the service is down or not ready</strong>. The page marks a service UP when it answered 200 and, if there is a <code>status</code> field, it reads UP, ok or ready.</p>
+<h4>Errors</h4><p><code>401 unauthorized</code> without a staff token (verified), <code>404</code> for an unknown name (verified, an HTML page from nginx), and a gateway or proxy error status when the service itself is down (the page shows DOWN). Probes time out after 3 seconds.</p>
+<h4>The probe names</h4><div class="table-wrap"><table><thead><tr><th>service</th><th>What it is</th><th>Checks</th></tr></thead><tbody><tr><td><code>registry</code></td><td>registry-service (mini apps, staff, reviews, audit)</td><td><code>/actuator/health</code></td></tr><tr><td><code>user</code></td><td>user-service</td><td><code>/actuator/health</code></td></tr><tr><td><code>notification</code></td><td>notification-service</td><td><code>/actuator/health</code></td></tr><tr><td><code>kratos</code></td><td>Ory Kratos (identity, sessions)</td><td><code>/health/ready</code></td></tr><tr><td><code>prometheus</code></td><td>Prometheus (metrics)</td><td><code>/-/healthy</code></td></tr><tr><td><code>grafana</code></td><td>Grafana (dashboards)</td><td><code>/api/health</code></td></tr><tr><td><code>loki</code></td><td>Loki (logs)</td><td><code>/ready</code></td></tr><tr><td><code>mailpit</code></td><td>Mailpit (dev inbox)</td><td><code>/readyz</code></td></tr><tr><td><code>infisical</code></td><td>Infisical (secrets)</td><td><code>/api/status</code></td></tr></tbody></table></div><p>The gateway itself is up if the call reached this point.</p>
+</div></details>
+</section>
+<section><h2 id="links">Tool links on the System page</h2>
+<p>The System page lists links to the tools around the platform: Grafana (dashboards), Prometheus (metrics), Mailpit (dev inbox), Infisical (secrets), RabbitMQ management and the RustFS console. They are <strong>not</strong> an API: the backoffice reads them from its static <code>config.json</code> (written when its container starts from <code>BACKOFFICE_*</code> settings); a link that is not configured is not shown. In the dev stack they point to <code>127.0.0.1</code> ports (Grafana 3001, Prometheus 9090, Mailpit 8025, Infisical 8080, RabbitMQ 15672, RustFS console 9001). The same page also lists the <em>Capability catalog</em> (<code>GET /capabilities</code>), a glossary of staff error codes and of partner-facing error codes.</p>
+</section>
+<section><h2 id="reading">How to read the home page</h2>
+<div class="table-wrap"><table><thead><tr><th>You see</th><th>It means</th><th>Do this</th></tr></thead><tbody><tr><td>Open reports above zero</td><td>Users reported a mini app and nobody has handled it.</td><td>Work through them: see Moderation: reports.</td></tr><tr><td>Hidden reviews growing</td><td>Staff have hidden many reviews.</td><td>Check the audit log for who and why (<code>review.moderate</code>).</td></tr><tr><td>Apps not ready for LIVE lists <code>logo</code> or <code>supportEmail</code></td><td>A draft app cannot go LIVE yet.</td><td>Ask the app owner or fill the missing field in the app detail.</td></tr><tr><td>Suspended users above zero</td><td>Someone was suspended and not reactivated.</td><td>Open Users with status SUSPENDED and confirm each is intentional.</td></tr><tr><td>Notifications: many UNREACHABLE</td><td>Partners are sending to deleted, suspended or unknown users, or to users without a phone or email.</td><td>Open the Notifications log and read the reasons.</td></tr><tr><td>Notifications: FAILED or EXPIRED in the last 24 hours</td><td>A provider problem, or an unreachable provider in DEV (for example Mailpit down).</td><td>Check Service health on the System page, then the delivery attempts of one notification.</td></tr><tr><td>A service shows DOWN</td><td>Its health probe did not answer 200.</td><td>Look at its logs in Loki or <code>docker compose logs &lt;service&gt;</code>.</td></tr></tbody></table></div></section>
+<section><h2 id="errors">Errors</h2>
+<p>These endpoints have no business errors of their own. Sign-in errors are described on the roles page; see also the error codes page.</p>
+</section>
+
+<div class="pager"><a class="prev" href="roles-and-access.html"><small>Previous</small>Staff sign-in, roles and permissions</a><a class="next" href="users.html"><small>Next</small>Registered users</a></div>
+<p class="footer">Adera admin guide &middot; verified against the running dev stack on 2026-10-26</p>
+</main>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

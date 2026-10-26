@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Known issues and not built yet | Super app: notifications, inbox and push</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+<button id="menu-btn" type="button" aria-label="Toggle menu">Menu</button>
+<span class="brand">Super app: notifications, inbox and push</span>
+<span class="spacer"></span>
+<button id="theme-btn" type="button" aria-label="Toggle light or dark theme">Theme</button>
+</header>
+<div class="layout">
+<nav class="sidebar" aria-label="Pages in this guide">
+<h4>This guide</h4>
+<ul><li><a href="index.html">Overview and contents</a></li><li><a href="how-delivery-works.html">How delivery works</a></li><li><a href="worked-example.html">Worked example</a></li><li><a href="inbox-api.html">Inbox API</a></li><li><a href="push-notifications.html">Push notifications</a></li><li><a href="preferences-and-muting.html">Preferences and muting</a></li><li><a href="languages.html">Languages</a></li><li><a href="building-the-bell-screen.html">Building the bell screen</a></li><li><a href="delivery-states.html">Delivery states</a></li><li><a href="errors.html">Error codes</a></li><li><a href="known-issues.html" class="current">Known issues and not built yet</a></li></ul>
+</nav>
+<main>
+<h1>Known issues and not built yet</h1>
+<p class="lead">Gotchas found while verifying this section against the running stack, and the features that do not exist yet.</p>
+<h2 id="issues">Known issues</h2><div class="table-wrap"><table><thead><tr><th>#</th><th>Issue</th><th>How to see it</th><th>Advice</th></tr></thead><tbody><tr><td>1</td><td>The inbox <code>data</code> field is a JSON <em>string</em>, not an object (the service returns the database's text form).</td><td><code>GET /api/v1/me/notifications</code>: <code>"data": "{\"screen\": \"order\"}"</code></td><td>Decode twice. Key order is not preserved.</td></tr><tr><td>2</td><td>A push carries <code>notificationId</code> but inbox items do not expose it, so a push cannot be matched to its inbox item by id.</td><td>Compare the push payload with the list response</td><td>On a push, re-fetch the list and the count instead of looking the item up.</td></tr><tr><td>3</td><td>Nested values in the partner's <code>data</code> are flattened badly in the <em>push</em> (Java text form such as <code>{a=1}</code>, not JSON). The inbox copy is intact. Derived from the code: the fake provider does not expose payloads.</td><td>Send <code>data</code> with a nested object once real push runs</td><td>Keep push-relevant <code>data</code> flat; read the inbox for anything richer.</td></tr><tr><td>4</td><td>Partner <code>data</code> keys named <code>notificationId</code> or <code>appId</code> are overwritten in the push payload.</td><td>Code: the service adds them after copying the partner's keys</td><td>Tell partners not to use those two names.</td></tr><tr><td>5</td><td>Paging is offset based with no total and no cursor; items arriving during paging shift later pages.</td><td>Compare two pages after a new item arrives</td><td>De-duplicate by <code>id</code>.</td></tr><tr><td>6</td><td>Items have no per-app count or filter on the server; the unread count is global.</td><td>-</td><td>Group on the client.</td></tr><tr><td>7</td><td>Wrong HTTP method on an inbox path (for example <code>DELETE /api/v1/me/notifications/{id}</code>) returns a framework default 404 body (<code>{"timestamp":..,"status":404,"error":"Not Found","path":..}</code>), not the <code>{"error":..}</code> shape.</td><td><code>DELETE /api/v1/me/notifications/&lt;uuid&gt;</code></td><td>Do not call methods that are not documented.</td></tr><tr><td>8</td><td>Firebase's <code>INVALID_ARGUMENT</code> and <code>SENDER_ID_MISMATCH</code> answers retire the token like <code>UNREGISTERED</code> does (code reading). A malformed push could therefore deactivate a good device.</td><td>Code: <code>FirebaseFcmProvider</code></td><td>Re-register the token on every app start: it re-activates the device.</td></tr><tr><td>9</td><td>The preference endpoints take any UUID as <code>appId</code> without checking that the mini app exists (not tested with an unknown id to avoid creating a stray row).</td><td>-</td><td>Send only catalog ids.</td></tr></tbody></table></div><h2 id="notyet">Not built yet</h2><ul><li><strong>Push delivery with real Firebase.</strong> The sending code exists but is off (<code>FCM_PROVIDER=fake</code>), so no phone has ever received a push from this stack. iOS-specific settings (badge, sound) are not set.</li><li><strong>Notification categories and per-type settings.</strong> Only three switches per mini app exist (in-app, SMS, email). No category filter, global switch, quiet hours, or separate push switch.</li><li><strong>Inbox retention and deletion.</strong> Items are kept forever; there is no delete, archive, mark-unread, or expiry per item.</li><li><strong>Rich content.</strong> Title and plain-text body only: no images, buttons or actions, no HTML, no per-notification deep-link field (use the partner's free-form <code>data</code>).</li><li><strong>Real-time inbox updates</strong> (websocket or server push of the count) and a delivery receipt from the phone.</li><li><strong>Per-app unread counts and an app filter</strong> on the inbox API.</li></ul>
+<div class="pager"><a class="prev" href="errors.html"><small>Previous</small>Error codes</a><span></span></div>
+<p class="footer">Adera super-app guide &middot; notifications &middot; verified against the dev stack on 2026-10-26</p>
+</main>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

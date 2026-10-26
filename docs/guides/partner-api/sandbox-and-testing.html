@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sandbox and testing checklist | Adera partner API</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+<button id="menu-btn" type="button" aria-label="Toggle menu">Menu</button>
+<a class="brand" href="index.html">Adera partner API</a>
+<span class="spacer"></span>
+<button id="theme-btn" type="button" aria-label="Toggle light or dark theme">Theme</button>
+</header>
+<div class="layout">
+<nav class="sidebar" aria-label="Pages">
+<h4>Mini-app backend API</h4>
+<ul><li><a href="index.html">Overview and contents</a></li><li><a href="quickstart.html">Quick start</a></li><li><a href="signing.html">Signing requests (ADERA-SIG-1)</a></li><li><a href="environments-and-ips.html">Environments, IPs and keys</a></li><li><a href="user-ids.html">Pseudonymous user ids</a></li><li><a href="templates.html">Templates</a></li><li><a href="sending-notifications.html">Sending notifications</a></li><li><a href="statuses-and-callbacks.html">Statuses, retries and callbacks</a></li><li><a href="limits-and-quotas.html">Limits and quotas</a></li><li><a href="sandbox-and-testing.html" class="current">Sandbox and testing checklist</a><ul><li><a href="#overview">Overview</a></li><li><a href="#synthetic">Synthetic users u_p_test_* (DEV only)</a></li><li><a href="#dev-providers">What DEV delivery looks like (Adera's dev stack)</a></li><li><a href="#callbacks-dev">Testing callbacks in DEV</a></li><li><a href="#checklist">Testing checklist</a></li><li><a href="#not-built">Not built yet</a></li></ul></li><li><a href="errors.html">Error codes</a></li><li><a href="data-available-to-mini-apps.html">What data a mini app gets</a></li><li><a href="known-issues.html">Known issues and not built yet</a></li></ul>
+</nav>
+<main>
+<h1>Sandbox and testing checklist</h1>
+<p class="lead">How to test your integration without reaching real people: the DEV deployment, the synthetic <code>u_p_test_*</code> users, and a checklist to run before you ask Adera to go live.</p>
+
+<h2 id="overview">Overview</h2>
+<p>There is no separate "sandbox API". The <strong>DEV deployment is the sandbox</strong>: same endpoints, same signing, same validation, same quotas, but its providers are harmless. On Adera's dev stack, SMS is printed to a log instead of being sent, email goes to a local mail catcher, and push is a fake provider. Nothing reaches a real phone, inbox or device, even for real users. DEV keys and PROD keys are different keys on different deployments (<a href="environments-and-ips.html">Environments</a>).</p>
+<div class="callout warn"><span class="label">Do not test with real users in PROD</span><p>A PROD request reaches the real person by real SMS or email and costs money. Test everything in DEV. Your PROD smoke test should be one message to a user who knows it is coming (for example your own staff account).</p></div>
+
+<h2 id="synthetic">Synthetic users <code>u_p_test_*</code> (DEV only)</h2>
+<p>A user id that starts with <code>u_p_test_</code> (followed by anything: <code>u_p_test_ok</code>, <code>u_p_test_driver42</code>) is not a person. It needs no issuing by Adera: you can use it right away with your DEV key. It exists so that you can try every path of your integration, including error paths, with no real people and no contact data.</p>
+<div class="table-wrap"><table><thead><tr><th>User id</th><th>Behaviour in DEV</th></tr></thead><tbody>
+<tr><td><code>u_p_test_ok</code>, or any other <code>u_p_test_&lt;anything&gt;</code> except the two below</td><td>Accepted (<code>202</code>). It behaves like a user with a phone number, an email address and a device, who has not muted anything. Delivery is <strong>simulated</strong>: nothing is sent, Adera records an attempt with provider <code>sandbox</code> and the notification becomes <code>SENT</code> within a second or two, and the callback fires. <code>DIRECT</code> templates choose <code>SMS</code> (needs <code>notify.sms</code>), <code>IN_APP</code> templates choose <code>IN_APP</code>. The ids are separate per app: <code>u_p_test_ok</code> of your app is not the one of another app.</td></tr>
+<tr><td><code>u_p_test_unreachable</code></td><td><code>422 {"error":"user_unreachable"}</code> immediately, like a deleted user.</td></tr>
+<tr><td><code>u_p_test_muted</code></td><td><code>200</code> with status <code>SUPPRESSED</code>, reason <code>recipient_opted_out</code>, on every channel, like a user who muted your app. A callback follows.</td></tr>
+</tbody></table></div>
+<p>Everything else still applies to them exactly as to real users: signature and address checks, template and <code>params</code> validation, capabilities, <strong>quotas</strong> (synthetic users count in DEV), idempotency. Real captured answers:</p>
+<pre class="out nocopy"><code>u_p_test_anything     202 {"notificationId":"e8f0ea5c-...","externalId":"doc-u5","status":"QUEUED","channel":"SMS","environment":"DEV",...}
+   ... a second later:  GET -> {"status":"SENT","channel":"SMS","attempts":1,...}   (attempt recorded with provider "sandbox")
+u_p_test_unreachable  422 {"error":"user_unreachable"}
+u_p_test_muted        200 {"status":"SUPPRESSED","channel":"IN_APP","reason":"recipient_opted_out","environment":"DEV",...}
+u_p_test_ok with an IN_APP template and callbackUrl:
+   202 {"channel":"IN_APP","status":"QUEUED",...}  -> SENT, and the callback arrived with {"status":"SENT","channel":"IN_APP",...}</code></pre>
+<div class="callout danger"><span class="label">PROD</span><p>On a PROD deployment <strong>every</strong> <code>u_p_test_*</code> id is refused with <code>422 {"error":"synthetic_user_not_allowed"}</code> (from the code: the check runs before any lookup). If you ever see this in production, a test id leaked into production code. It does not make a PROD request reach anybody.</p></div>
+<p>What synthetic users cannot show you: real-language rendering (they use English), real provider failures (<code>RETRYING</code>, <code>FAILED</code>), a push to a real phone. For those, Adera staff can arrange real DEV test users, with ids issued for your app, that are delivered through the dev providers (console SMS, mail catcher), in the language of that user.</p>
+
+<h2 id="dev-providers">What DEV delivery looks like (Adera's dev stack)</h2>
+<ul>
+<li><strong>SMS:</strong> a line in the notification service log, with the phone number masked: <code>[SMS console] to=+2519******01 body=Hi Abebe, your Adera job was accepted. Thank you!</code></li>
+<li><strong>Email:</strong> a message in the mail catcher (web UI on port 8025 of the dev machine), sender <code>no-reply@adera.local</code>.</li>
+<li><strong>In-app:</strong> an inbox row (visible through the Adera app's inbox) and one fake push per registered device.</li>
+</ul>
+<p>As a partner you normally cannot see those logs; you verify through the API (<code>GET /v1/notifications/{externalId}</code>) and your callback. Ask Adera if you need to see the rendered text of a DEV message.</p>
+
+<h2 id="callbacks-dev">Testing callbacks in DEV</h2>
+<p>The dev stack lets callbacks go to private addresses and plain <code>http</code>, so a receiver on your laptop works (<a href="statuses-and-callbacks.html#receivers">ready-to-run receivers</a>). Production will not: the callback URL there must be public <code>https</code> on port 443 or 8443 (<a href="sending-notifications.html#callback-url">rules</a>). Before go-live, test your callback with your real public HTTPS URL against a DEV deployment that is reachable from the internet, or at least check each rule on the checklist below yourself.</p>
+
+<h2 id="checklist">Testing checklist</h2>
+<p>Tick each line in DEV. "Expect" is what a correct integration sees; every behaviour below was exercised on the dev stack for this guide.</p>
+<h3>Access and signing</h3>
+<ul>
+<li>[ ] Your server's egress address is registered; a call from elsewhere gives <code>403 ip_not_allowed</code>.</li>
+<li>[ ] A signed <code>GET /v1/templates</code> returns <code>200</code> and the answer signature verifies (<a href="signing.html#responses">verify responses</a>).</li>
+<li>[ ] You handle <code>401 stale_timestamp</code> (clock skew: your server's time is within 5 minutes; NTP is on).</li>
+<li>[ ] You send the key id of the right environment per deployment; <code>403 wrong_environment</code> does not occur.</li>
+<li>[ ] Your private key is only on your server, not in the repository or the mini app's frontend.</li>
+<li>[ ] You can rotate: a second key registered, switched to, the first revoked, no downtime (<a href="environments-and-ips.html#keys">key lifecycle</a>).</li>
+</ul>
+<h3>Sending</h3>
+<ul>
+<li>[ ] <code>u_p_test_ok</code> with each of your templates: <code>202</code>, then <code>SENT</code> by polling and by callback.</li>
+<li>[ ] Every template that has params: missing, unknown, too long and link-containing values give <code>422 param_invalid</code> and you surface it as a bug in your code, not to the user.</li>
+<li>[ ] Retrying the same request (same <code>externalId</code>) after a simulated timeout gives <code>200 replayed</code> and one notification; a changed body with the same <code>externalId</code> gives <code>409</code> and your code does not loop on it.</li>
+<li>[ ] A refused request (<code>4xx</code>) can be re-sent with the same <code>externalId</code> once the cause is fixed.</li>
+<li>[ ] Your <code>externalId</code> is the id of the business event, stable across your own retries and restarts.</li>
+<li>[ ] You never send <code>userId</code>s you did not receive from Adera, and never store contact details you do not have.</li>
+<li>[ ] <code>ttlSeconds</code> is set per template to match how long the message is useful.</li>
+</ul>
+<h3>Soft refusals and limits</h3>
+<ul>
+<li>[ ] <code>u_p_test_muted</code>: your code treats <code>200 SUPPRESSED</code> as final and does not retry or switch channel.</li>
+<li>[ ] <code>u_p_test_unreachable</code>: your code treats <code>422 user_unreachable</code> as "do not retry", without showing the user a reason.</li>
+<li>[ ] Quotas: ask staff to set a small limit (for example <code>maxPerUserPerDay: 1</code>) and check that your server handles <code>429 quota_exceeded</code> (for each <code>limit</code> value) by delaying or dropping, not by hammering.</li>
+<li>[ ] <code>403 capability_not_granted</code> is logged with its <code>capability</code> and alerts a human.</li>
+<li>[ ] <code>503 service_unavailable</code>: you retry later with the same <code>externalId</code>, with backoff.</li>
+<li>[ ] Any non-JSON answer (<code>5xx</code> from the gateway, <code>429</code> from the gateway) is treated as a temporary failure and retried later.</li>
+</ul>
+<h3>Callbacks</h3>
+<ul>
+<li>[ ] The endpoint verifies the signature on the raw body and rejects tampered or unsigned requests (<code>401</code>).</li>
+<li>[ ] It answers <code>2xx</code> within a couple of seconds and does heavy work afterwards.</li>
+<li>[ ] A callback delivered twice (same <code>Idempotency-Key</code>) changes nothing the second time. Test by answering <code>500</code> once.</li>
+<li>[ ] It copes with fields it does not know, and with callbacks arriving before the response to the <code>POST</code> (for <code>SUPPRESSED</code>).</li>
+<li>[ ] If the callback never arrives, your reconciliation job polls <code>GET /v1/notifications/{externalId}</code> for notifications that are not final after a while.</li>
+<li>[ ] Your callback URL is public <code>https</code>, port 443 (or 8443), no credentials in it, no redirect, a valid certificate.</li>
+</ul>
+<h3>Go-live (with Adera staff)</h3>
+<ul>
+<li>[ ] PROD key pair generated separately; PROD public key and PROD egress addresses sent to staff; PROD key id and base URL stored as separate configuration.</li>
+<li>[ ] Templates reviewed in all languages your users need (<code>en</code>, <code>am</code>, <code>om</code>) and approved by staff.</li>
+<li>[ ] Capabilities and limits agreed for PROD (expected daily volume).</li>
+<li>[ ] Staff set the app <code>LIVE</code> (until then PROD answers <code>403 app_draft</code>).</li>
+<li>[ ] One smoke message in PROD to a known recipient; the answer shows <code>"environment": "PROD"</code>.</li>
+</ul>
+
+<h2 id="not-built">Not built yet</h2>
+<ul>
+<li>A way to simulate provider failures (<code>RETRYING</code>, <code>FAILED</code>) with a synthetic user.</li>
+<li>A way for a partner to see rendered DEV messages or its own recent notifications (there is no list endpoint).</li>
+<li>A synthetic user that is delivered by email, or in Amharic or Afaan Oromo.</li>
+<li>A request-inspection log for partners (staff can list your notifications in the dashboard).</li>
+</ul>
+
+<div class="pager"><a class="prev" href="limits-and-quotas.html"><small>Previous</small>Limits and quotas</a><a class="next" href="errors.html"><small>Next</small>Error codes</a></div>
+<p class="footer">Adera mini-app backend API guide &middot; verified against the dev deployment on 2026-10-26</p>
+</main>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

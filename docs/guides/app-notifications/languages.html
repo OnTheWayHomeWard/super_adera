@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Languages | Super app: notifications, inbox and push</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+<button id="menu-btn" type="button" aria-label="Toggle menu">Menu</button>
+<span class="brand">Super app: notifications, inbox and push</span>
+<span class="spacer"></span>
+<button id="theme-btn" type="button" aria-label="Toggle light or dark theme">Theme</button>
+</header>
+<div class="layout">
+<nav class="sidebar" aria-label="Pages in this guide">
+<h4>This guide</h4>
+<ul><li><a href="index.html">Overview and contents</a></li><li><a href="how-delivery-works.html">How delivery works</a></li><li><a href="worked-example.html">Worked example</a></li><li><a href="inbox-api.html">Inbox API</a></li><li><a href="push-notifications.html">Push notifications</a></li><li><a href="preferences-and-muting.html">Preferences and muting</a></li><li><a href="languages.html" class="current">Languages</a></li><li><a href="building-the-bell-screen.html">Building the bell screen</a></li><li><a href="delivery-states.html">Delivery states</a></li><li><a href="errors.html">Error codes</a></li><li><a href="known-issues.html">Known issues and not built yet</a></li></ul>
+</nav>
+<main>
+<h1>Languages</h1>
+<p class="lead">Which language a notification is written in, and what happens when the template lacks that language.</p>
+<h2 id="overview">Overview</h2><p>Templates (written by Adera staff) hold text per language: <code>en</code>, <code>am</code>, <code>om</code>. The language used for a user is their <strong>profile language</strong> (<code>language</code> on the user's profile, one of <code>en</code>, <code>am</code>, <code>om</code>, default <code>en</code>; changed through the profile endpoint described in the Account guide).</p><h2 id="rules">Rules</h2><ol><li>The text is rendered at <strong>delivery time</strong> using the language the user has <em>then</em>.</li><li>If the template has text for that language, it is used.</li><li>If it has not, the English text is used. The fallback is per text, so a template with an Amharic <code>body</code> but no Amharic <code>title</code> shows the Amharic body with the English title.</li><li>English is mandatory: an IN_APP template cannot be saved without an English title, so title and body are never empty.</li><li>The placeholder values (<code>params</code>) come from the partner and are inserted as sent; they are not translated. A partner serving Amharic users should send localised values if it wants a fully Amharic sentence (the example shows <code>7 min</code> inside an Amharic sentence).</li></ol><div class="table-wrap"><table><thead><tr><th>Thing</th><th>Language used</th></tr></thead><tbody><tr><td>Inbox <code>title</code> / <code>body</code></td><td>User's profile language, fixed when delivered; later language changes do <strong>not</strong> re-translate existing items.</td></tr><tr><td>Push title / body</td><td>Same text as the inbox item.</td></tr><tr><td>SMS</td><td>The template's <code>sms</code> text in the user's language (if that language has no <code>sms</code> text, the English <code>sms</code> text; if there is none at all, the body).</td></tr><tr><td>Email</td><td>Subject and HTML from the template in the user's language.</td></tr><tr><td>Device <code>locale</code></td><td>Not used for notifications.</td></tr></tbody></table></div><h2 id="example">Captured example</h2><p>The same template <code>seed-order-update</code> exists in en, am and om. The seeded user above has language <code>am</code>, so the inbox item was Amharic: <code>ትዕዛዝዎ በመንገድ ላይ ነው</code> (en: "Your order is on the way"). A user with <code>om</code> would get the Afaan Oromo text; a template without <code>om</code> would give that user the English text.</p><h2 id="client">Client notes</h2><ul><li>Render with a font that covers Ethiopic script and test long Amharic strings in the notification row (title up to 100, body up to 1000 characters).</li><li>The app's own UI language and the notification language are independent settings: the notification language follows the server-side profile language, so make sure the app saves the user's chosen language to their profile.</li></ul>
+<div class="pager"><a class="prev" href="preferences-and-muting.html"><small>Previous</small>Preferences and muting</a><a class="next" href="building-the-bell-screen.html"><small>Next</small>Building the bell screen</a></div>
+<p class="footer">Adera super-app guide &middot; notifications &middot; verified against the dev stack on 2026-10-26</p>
+</main>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

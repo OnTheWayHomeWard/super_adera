@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Logo | Admin: managing mini apps</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+<button id="menu-btn" type="button" aria-label="Toggle menu">Menu</button>
+<a class="brand" href="index.html">Admin: managing mini apps</a>
+<span class="spacer"></span>
+<button id="theme-btn" type="button" aria-label="Toggle light or dark theme">Theme</button>
+</header>
+<div class="layout">
+<nav class="sidebar" aria-label="Pages in this guide">
+<h4>This guide</h4>
+<ul><li><a href="index.html">Overview</a></li>
+<li><a href="roles-and-access.html">Roles and access</a></li>
+<li><a href="apps-create-and-edit.html">Create, edit, list apps</a></li>
+<li><a href="status-lifecycle.html">Status lifecycle</a></li>
+<li><a href="logo.html" class="current">Logo</a><ul><li><a href="#overview">Overview</a></li><li><a href="#rules">The rules</a></li><li><a href="#endpoints">Endpoints</a></li><li><a href="#not-built">Not built yet</a></li></ul></li>
+<li><a href="capabilities.html">Capabilities</a></li>
+<li><a href="notification-limits.html">Notification limits</a></li>
+<li><a href="environments-and-ips.html">Environments and IPs</a></li>
+<li><a href="partner-keys.html">Partner keys</a></li>
+<li><a href="templates.html">Templates</a></li>
+<li><a href="payment-settings.html">Payment settings</a></li>
+<li><a href="notification-log-and-usage.html">Notification log and usage</a></li>
+<li><a href="reviews-reports-audit.html">Reviews, reports, audit</a></li>
+<li><a href="runbooks.html">Runbooks</a></li>
+<li><a href="errors.html">Errors</a></li>
+<li><a href="known-issues.html">Known issues</a></li>
+</ul></nav>
+<main>
+<h1>Logo</h1>
+<p class="lead">Upload and remove an app's logo: formats, size limits and how the image is processed.</p>
+<h2 id="overview">Overview</h2>
+<p>A mini app needs a logo before it can go LIVE. Staff upload an image; Adera checks it, shrinks it, converts it to PNG and stores it in the media storage. Users get a temporary signed link to it in the catalog.</p>
+<div class="callout why"><span class="label">Why this exists</span>Logos come from partners, so the file is never trusted: the server ignores the file name and the declared type, decodes the image itself, and re-encodes it. That removes hidden metadata, odd file tricks and oversized images, and makes every logo the same format and a sensible size.</div>
+<h2 id="rules">The rules</h2>
+<div class="table-wrap"><table><thead><tr><th>Rule</th><th>Value</th><th>Why</th></tr></thead><tbody><tr><td>Accepted formats</td><td>PNG, JPEG, GIF, BMP. The format is detected from the content, not from the file name or <code>Content-Type</code>. WebP, SVG, PDF and the like are refused.</td><td>Only formats the server can safely decode.</td></tr><tr><td>Maximum upload size</td><td><strong>2 MiB</strong> (2,097,152 bytes) per file. Larger: <code>413 file_too_large</code>. (Deployment setting <code>LOGO_MAX_BYTES</code>; the request itself may not exceed 4 MB per file and 5 MB in total, also answered with <code>413 file_too_large</code>.)</td><td>A logo has no reason to be big.</td></tr><tr><td>Maximum dimensions</td><td>At most 12,000 pixels on a side and 40 million pixels in total, otherwise <code>400 validation_failed</code> (<em>image dimensions are too large</em>).</td><td>Protects against decompression bombs (a tiny file that decodes to gigabytes).</td></tr><tr><td>Processing</td><td>Scaled down (never up) so the longer side is at most <strong>512 px</strong> (setting <code>LOGO_MAX_PX</code>), aspect ratio kept, transparency kept, re-encoded as <strong>PNG</strong>. Metadata (EXIF and so on) is dropped. An animated GIF keeps only its first frame.</td><td>One format and size everywhere in the apps.</td></tr><tr><td>Not cropped</td><td>A wide logo stays wide (a 1200x800 upload becomes 512x341). Ask partners for a square PNG with a transparent background, at least 512x512.</td><td>The server never changes the picture, only its size.</td></tr><tr><td>Storage</td><td>One object per upload in the media storage at <code>apps/{appId}/logo/{logoImageId}.png</code>. A new upload gets a new <code>logoImageId</code> and the previous object is deleted.</td><td>A changed logo is never served from an old cache.</td></tr><tr><td>The link</td><td><code>logoUrl</code> is a presigned link, valid 60 minutes by default (<code>STORAGE_PRESIGN_MINUTES</code>); a new one is produced on every read. In the user catalog it is the same kind of link.</td><td>The bucket is private; links expire.</td></tr></tbody></table></div>
+<h2 id="endpoints">Endpoints</h2>
+<details class="endpoint" id="ep-logo-upload" open><summary><span class="method m-post">POST</span><span class="path">/admin/api/v1/apps/{appId}/logo</span><span class="sum">Upload or replace the logo</span></summary><div class="body"><dl class="meta"><dt>Who may call</dt><dd>ADMIN or SUPER_ADMIN</dd><dt>Auth</dt><dd>Staff session Bearer token at assurance level aal2 (<code>Authorization: Bearer $TOKEN</code>)</dd><dt>Rate limit</dt><dd>300 requests per minute per client IP at the gateway (HTTP 429 beyond that)</dd><dt>Backoffice</dt><dd>App &gt; General &gt; <em>Logo</em> (the upload button; a warning "No logo yet (needed to go LIVE)" shows while there is none)</dd><dt>Audit name</dt><dd><code>app.logo</code></dd><dt>Reversible</dt><dd>Yes: upload the old image again, or remove the logo</dd></dl>
+<p><strong>Purpose.</strong> Sets (or replaces) the app's logo. <strong>When to use it.</strong> During onboarding (a LIVE requirement), and whenever the partner rebrands.</p>
+<h4>Request</h4>
+<p><code>multipart/form-data</code> with one part named <code>file</code> (the image). No JSON body. Do not set the <code>Content-Type</code> header yourself when using curl's <code>-F</code>.</p>
+<pre><code>curl -sS -X POST "$GATEWAY/admin/api/v1/apps/$APP_ID/logo" \
+  -H "Authorization: Bearer $TOKEN" \
+  -F "file=@logo.png;type=image/png"</code></pre>
+<h4>Response (HTTP 200)</h4>
+<p>The full app. A 1200x800 PNG (122 KB) was uploaded; the stored logo is 512x341 (101 KB):</p>
+<pre class="out"><code>HTTP 200 OK
+
+{
+  "id": "ff6510a9-de00-4fb2-97a4-ce4ad6e377dd",
+  "slug": "doc-tmp-admin",
+  "logoImageId": "18a1b264-13fd-45e1-b2ae-af13ef2b85d3",
+  "logoUrl": "http://127.0.0.1:9000/adera-media/apps/ff6510a9-de00-4fb2-97a4-ce4ad6e377dd/logo/18a1b264-13fd-45e1-b2ae-af13ef2b85d3.png?X-Amz-Algorithm=...&amp;X-Amz-Signature=...(signed, expires)",
+  "updatedAt": "2026-10-26T11:05:20.676805368Z"
+}</code></pre>
+<h4>Errors</h4>
+<div class="table-wrap"><table><thead><tr><th>Status</th><th><code>error</code></th><th>When it happens</th><th>What to do</th></tr></thead><tbody><tr><td>400</td><td><code>validation_failed</code> (<code>fields.file</code>)</td><td>No file part, an empty file, not a supported image, corrupt image, or dimensions too large.</td><td>Send a real PNG/JPEG/GIF/BMP in the part named <code>file</code>.</td></tr><tr><td>403</td><td><code>insufficient_role</code></td><td>VIEWER.</td><td>Use an ADMIN.</td></tr><tr><td>404</td><td><code>not_found</code></td><td>No such app.</td><td>Check the id.</td></tr><tr><td>413</td><td><code>file_too_large</code></td><td>Over 2 MiB (or over the request limit).</td><td>Export a smaller file; 512x512 PNG is normally far below the limit.</td></tr></tbody></table></div>
+<pre class="out nocopy"><code>A text file:
+HTTP 400  {"error": "validation_failed", "fields": {"file": "not a supported image (use PNG, JPEG, GIF or BMP)"}}
+
+A 2.4 MB image:
+HTTP 413  {"error": "file_too_large"}</code></pre>
+<h4>Effects, audit</h4>
+<ul><li>Audit: <code>app.logo</code> with meta <code>{"imageId": ...}</code>. The file contents are not logged.</li><li>The new logo shows in the catalog right away (each read produces a fresh signed link).</li><li>Idempotent in effect: uploading the same file twice just creates a new image id and deletes the previous object.</li><li>If storing the new file fails, the app keeps its previous logo (the change is all or nothing).</li></ul>
+<h4>Scenario</h4>
+<p>The partner e-mails a 3 MB JPEG. Convert it to a PNG of at most 2 MiB (or let the server shrink it if it is under the limit), upload it, open the app page to check it, then set the app LIVE.</p>
+</div></details>
+<details class="endpoint" id="ep-logo-remove" open><summary><span class="method m-delete">DELETE</span><span class="path">/admin/api/v1/apps/{appId}/logo</span><span class="sum">Remove the logo</span></summary><div class="body"><dl class="meta"><dt>Who may call</dt><dd>ADMIN or SUPER_ADMIN</dd><dt>Auth</dt><dd>Staff session Bearer token at assurance level aal2 (<code>Authorization: Bearer $TOKEN</code>)</dd><dt>Rate limit</dt><dd>300 requests per minute per client IP at the gateway (HTTP 429 beyond that)</dd><dt>Backoffice</dt><dd>App &gt; General &gt; <em>Remove logo</em> (confirmation: "An app without a logo cannot go LIVE")</dd><dt>Audit name</dt><dd><code>app.logo.remove</code> (only if a logo existed)</dd><dt>Reversible</dt><dd>Yes: upload a logo again</dd></dl>
+<p><strong>Purpose.</strong> Removes the logo. <strong>When to use it.</strong> When a logo must disappear at once (wrong picture, trademark complaint). The app shows without a logo afterwards.</p>
+<pre><code>curl -sS -X DELETE "$GATEWAY/admin/api/v1/apps/$APP_ID/logo" \
+  -H "Authorization: Bearer $TOKEN"</code></pre>
+<h4>Response (HTTP 200)</h4>
+<p>The full app with <code>logoImageId</code> and <code>logoUrl</code> set to <code>null</code>:</p>
+<pre class="out"><code>HTTP 200 OK
+
+{
+  "status": "LIVE",
+  "logoImageId": null,
+  "logoUrl": null
+}</code></pre>
+<h4>Errors</h4>
+<div class="table-wrap"><table><thead><tr><th>Status</th><th><code>error</code></th><th>When it happens</th><th>What to do</th></tr></thead><tbody><tr><td>403</td><td><code>insufficient_role</code></td><td>VIEWER.</td><td>Use an ADMIN.</td></tr><tr><td>404</td><td><code>not_found</code></td><td>No such app.</td><td>Check the id.</td></tr></tbody></table></div>
+<h4>Effects, audit</h4>
+<ul><li>Deletes the stored image. Audit: <code>app.logo.remove</code>, written only when there actually was a logo; removing a logo that is not there answers 200 and writes nothing (safe to repeat).</li><li><strong>A LIVE app stays LIVE</strong> without its logo (verified): the logo is checked only when the status is set. Users then see the app without a picture. You cannot set it LIVE again until a new logo is uploaded (<code>409 not_ready_for_live</code>).</li></ul>
+</div></details>
+<h2 id="not-built">Not built yet</h2>
+<ul><li>Cropping or a square-fit step: the picture keeps its aspect ratio.</li><li>WebP and SVG logos.</li><li>A separate dark-mode logo or a banner image.</li></ul>
+
+<div class="pager"><a class="prev" href="status-lifecycle.html"><small>Previous</small>Status lifecycle</a><a class="next" href="capabilities.html"><small>Next</small>Capabilities</a></div>
+<p class="footer">Admin guide: managing mini apps. Examples were captured from a running dev stack (ADERA_ENV=dev) with a throwaway app and a temporary staff account, both removed afterwards. Ids, timestamps and key ids differ on your system.</p>
+</main>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Admin: users, staff, moderation and audit | Admin: users, staff, moderation and audit</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+<button id="menu-btn" type="button" aria-label="Toggle menu">Menu</button>
+<span class="brand">Admin: users, staff, moderation and audit</span>
+<span class="spacer"></span>
+<button id="theme-btn" type="button" aria-label="Toggle light or dark theme">Theme</button>
+</header>
+<div class="layout">
+<nav class="sidebar" aria-label="Pages in this guide"><h4>Admin: users, staff, moderation and audit</h4><ul><li><a href="index.html" class="current">Overview and conventions</a><ul><li><a href="#audience">Audience</a></li><li><a href="#urls">Base URLs</a></li><li><a href="#auth">Authentication summary</a></li><li><a href="#conventions">Conventions</a></li><li><a href="#contents">Contents</a></li><li><a href="#glossary">Glossary</a></li><li><a href="#setup">Variables used in the examples</a></li></ul></li>
+<li><a href="roles-and-access.html">Staff sign-in, roles and permissions</a></li>
+<li><a href="dashboard.html">Dashboard, system and health</a></li>
+<li><a href="users.html">Registered users</a></li>
+<li><a href="moderation-reviews.html">Moderation: reviews</a></li>
+<li><a href="moderation-reports.html">Moderation: reports</a></li>
+<li><a href="staff.html">Staff management</a></li>
+<li><a href="audit-log.html">Audit log</a></li>
+<li><a href="notifications-overview.html">Notification visibility</a></li>
+<li><a href="runbooks.html">Runbooks</a></li>
+<li><a href="errors.html">Error codes</a></li>
+<li><a href="known-issues.html">Known issues and not built yet</a></li>
+</ul></nav>
+<main>
+<h1>Admin: users, staff, moderation and audit</h1>
+<p class="lead">How the owner and Adera's admins operate the platform through the admin API (and the backoffice screens that call it): sign-in and roles, the dashboard, registered users, moderation, staff, the audit log and notification visibility.</p>
+<section><h2 id="audience">Audience</h2>
+<p>The owner, Adera's admins and developers who operate the platform. It documents every <strong>staff action that is not about configuring one mini app</strong>: staff sign-in and roles, the dashboard summary, registered users, moderation (reviews and reports), staff management, the audit log, cross-app notification visibility and the system page. Each entry is API first (path under <code>/admin/api/v1</code>) and names the equivalent screen of the <strong>backoffice</strong> (the staff dashboard at <code>/backoffice/</code>). Creating and configuring mini apps, keys, limits and templates is covered by a separate guide; this one only lists those endpoints where it needs to (permission matrix).</p>
+</section>
+<section><h2 id="urls">Base URLs</h2>
+<div class="table-wrap"><table><thead><tr><th>Name</th><th>Dev value</th><th>Use</th></tr></thead><tbody><tr><td><code>$GATEWAY</code></td><td><code>http://127.0.0.1:9080</code></td><td>Every call goes through the gateway (APISIX). The services are not reachable directly.</td></tr><tr><td>Admin API</td><td><code>$GATEWAY/admin/api/v1</code></td><td>All staff endpoints. Routed to registry-service, except <code>/users*</code> (user-service) and <code>/notification/*</code> (notification-service).</td></tr><tr><td>Backoffice</td><td><code>$GATEWAY/backoffice/</code></td><td>The staff dashboard (static files; it calls the same admin API).</td></tr><tr><td>Kratos (sign-in flows)</td><td><code>$GATEWAY/kratos</code></td><td>Public sign-in API. The Kratos <em>admin</em> API (<code>127.0.0.1:4434</code>) is never reachable through the gateway.</td></tr><tr><td>Mailpit</td><td><code>http://127.0.0.1:8025</code></td><td>DEV inbox where emailed codes arrive.</td></tr></tbody></table></div></section>
+<section><h2 id="auth">Authentication summary</h2>
+<ul><li>Every call needs <code>Authorization: Bearer $TOKEN</code> where the token is a Kratos session token at <strong>aal2</strong> (emailed code and authenticator-app code).</li><li>The caller must be an ACTIVE staff member; the role (<code>VIEWER</code>, <code>ADMIN</code>, <code>SUPER_ADMIN</code>) decides what is allowed.</li><li>Answers: <code>401 unauthorized</code>, <code>403 mfa_required</code>, <code>403 not_staff</code>, <code>403 insufficient_role</code>. Details on the page Staff sign-in, roles and permissions.</li><li>Limits at the gateway: 300 admin calls per minute and 10 sign-in submits per minute, both per IP.</li></ul>
+</section>
+<section><h2 id="conventions">Conventions</h2>
+<ul><li><strong>Errors</strong>: <code>{"error": "code"}</code>, with <code>"fields": {"name": "message"}</code> for <code>validation_failed</code>. See Error codes.</li><li><strong>Ids</strong> are UUIDs (staff, users, apps, reviews, reports, notifications, audit events) except partner key ids (<code>ak_dev_...</code>). The staff id equals the person's Kratos identity id.</li><li><strong>Timestamps</strong> are ISO-8601 in UTC (<code>2026-10-26T10:56:44.614665Z</code>); filters take instants like <code>2026-10-01T00:00:00Z</code>.</li><li><strong>Pagination</strong> differs by endpoint: users use <code>page</code>/<code>size</code> and answer <code>{items, page, size, total}</code>; reviews and reports use <code>page</code>/<code>size</code> and a plain array with the total in header <code>X-Total-Count</code>; the audit log and notification log use <code>limit</code>/<code>offset</code> (max 200) and <code>X-Total-Count</code>. Out-of-range sizes are clamped, not rejected.</li><li><strong>Languages</strong>: the API itself answers in codes, not sentences. Per-language objects (<code>en</code>, <code>am</code>, <code>om</code>) appear in app names (for example <code>draftApps[].name</code>) and user <code>language</code> values.</li><li><strong>Writes</strong> are JSON with <code>Content-Type: application/json</code>; several endpoints reject unknown fields so a typo never silently does nothing.</li><li><strong>Audit</strong>: every successful change is audited under an action name (catalogue on the Audit log page).</li></ul>
+</section>
+<section><h2 id="contents">Contents</h2>
+<div class="cards"><div class="card"><a class="stretch" href="roles-and-access.html"><h3 id="card-roles-and-access">Sign-in, roles, permission matrix</h3><p>aal1 versus aal2, sessions, who may do what, masking.</p></a></div><div class="card"><a class="stretch" href="dashboard.html"><h3 id="card-dashboard">Dashboard, system and health</h3><p>The summary counts and how to read them; health probes.</p></a></div><div class="card"><a class="stretch" href="users.html"><h3 id="card-users">Registered users</h3><p>Search, detail, suspend, reactivate, delete and their effects.</p></a></div><div class="card"><a class="stretch" href="moderation-reviews.html"><h3 id="card-moderation-reviews">Moderation: reviews</h3><p>Hide and restore, effect on ratings.</p></a></div><div class="card"><a class="stretch" href="moderation-reports.html"><h3 id="card-moderation-reports">Moderation: reports</h3><p>Work the queue, statuses, reopen rules.</p></a></div><div class="card"><a class="stretch" href="staff.html"><h3 id="card-staff">Staff management</h3><p>Add, change role, deactivate, bootstrap super admin.</p></a></div><div class="card"><a class="stretch" href="audit-log.html"><h3 id="card-audit-log">Audit log</h3><p>Every filter, what is recorded, action catalogue.</p></a></div><div class="card"><a class="stretch" href="notifications-overview.html"><h3 id="card-notifications-overview">Notification visibility</h3><p>Delivery log, detail, statuses glossary.</p></a></div><div class="card"><a class="stretch" href="runbooks.html"><h3 id="card-runbooks">Runbooks</h3><p>Abusive user, app report, colleagues, no SMS, lost authenticator, audit a change.</p></a></div><div class="card"><a class="stretch" href="errors.html"><h3 id="card-errors">Error codes</h3><p>Every code and what to do.</p></a></div><div class="card"><a class="stretch" href="known-issues.html"><h3 id="card-known-issues">Known issues</h3><p>Bugs found, and what is not built yet.</p></a></div></div></section>
+<section><h2 id="glossary">Glossary</h2>
+<div class="table-wrap"><table><thead><tr><th>Term</th><th>Meaning</th></tr></thead><tbody><tr><td>Super app</td><td>The Adera app that customers use.</td></tr><tr><td>Mini app</td><td>A partner service listed in the super app. Only staff create and configure them.</td></tr><tr><td>Partner</td><td>The company behind a mini app; its backend sends notifications through the partner API.</td></tr><tr><td>Staff / admin</td><td>A person who signs in to the backoffice or the admin API.</td></tr><tr><td>Role</td><td><code>VIEWER</code>, <code>ADMIN</code> or <code>SUPER_ADMIN</code>.</td></tr><tr><td>aal1 / aal2</td><td>Kratos authenticator assurance level: aal1 = emailed code only, aal2 = emailed code plus authenticator-app code. The admin API needs aal2.</td></tr><tr><td>Backoffice</td><td>The staff dashboard web app at <code>/backoffice/</code>.</td></tr><tr><td>Moderation</td><td>Hiding abusive reviews and working user reports.</td></tr><tr><td>Audit event</td><td>One row of the audit log: who, what, on what, when, from where.</td></tr><tr><td>Masking</td><td>Partial hiding of contact data for VIEWER (<code>+251*****0015</code>).</td></tr><tr><td>Bootstrap super admin</td><td>The first SUPER_ADMIN, created at start-up from <code>BOOTSTRAP_SUPER_ADMIN_EMAIL</code> when none exists.</td></tr><tr><td>Kratos</td><td>Ory Kratos, the identity system that holds customer and staff accounts and sessions.</td></tr><tr><td>Capability</td><td>A permission a mini app may be granted (for example <code>notify.sms</code>).</td></tr></tbody></table></div></section>
+<section><h2 id="setup">Variables used in the examples</h2>
+<pre><code>GATEWAY=http://127.0.0.1:9080
+TOKEN=&lt;aal2 session token of a staff member&gt;
+VIEWER_TOKEN / ADMIN_TOKEN / SUPER_TOKEN=&lt;tokens of staff with that role&gt;
+USER_ID, APP_ID, REVIEW_ID, REPORT_ID, STAFF_ID=&lt;uuids from earlier answers&gt;</code></pre><p>All responses in this guide were captured on 2026-10-26 from the running dev stack (<code>ADERA_ENV=dev</code>) with temporary staff accounts and the seeded demo data; throwaway users, apps, reviews and colleagues created for the examples were removed afterwards. Counts such as <code>X-Total-Count</code> reflect that shared stack and will differ on yours.</p>
+</section>
+
+<div class="pager"><a class="next" href="roles-and-access.html"><small>Next</small>Staff sign-in, roles and permissions</a></div>
+<p class="footer">Adera admin guide &middot; verified against the running dev stack on 2026-10-26</p>
+</main>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

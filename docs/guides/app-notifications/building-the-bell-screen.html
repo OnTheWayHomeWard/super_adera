@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Building the bell screen | Super app: notifications, inbox and push</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+<button id="menu-btn" type="button" aria-label="Toggle menu">Menu</button>
+<span class="brand">Super app: notifications, inbox and push</span>
+<span class="spacer"></span>
+<button id="theme-btn" type="button" aria-label="Toggle light or dark theme">Theme</button>
+</header>
+<div class="layout">
+<nav class="sidebar" aria-label="Pages in this guide">
+<h4>This guide</h4>
+<ul><li><a href="index.html">Overview and contents</a></li><li><a href="how-delivery-works.html">How delivery works</a></li><li><a href="worked-example.html">Worked example</a></li><li><a href="inbox-api.html">Inbox API</a></li><li><a href="push-notifications.html">Push notifications</a></li><li><a href="preferences-and-muting.html">Preferences and muting</a></li><li><a href="languages.html">Languages</a></li><li><a href="building-the-bell-screen.html" class="current">Building the bell screen</a></li><li><a href="delivery-states.html">Delivery states</a></li><li><a href="errors.html">Error codes</a></li><li><a href="known-issues.html">Known issues and not built yet</a></li></ul>
+</nav>
+<main>
+<h1>Building the bell screen</h1>
+<p class="lead">Recipes for the unread badge, the list, paging, empty states and deep links using the inbox <code>data</code>.</p>
+<h2 id="overview">Overview</h2><p>Everything below uses only the endpoints in <a href="inbox-api.html">Inbox API</a>. There is no real-time channel (no websocket or server-sent events): the client learns about new items by a push, by polling, or when the app comes to the foreground.</p><h2 id="badge">The badge</h2><ul><li>Call <code>GET /api/v1/me/notifications/unread-count</code> when the app starts, when it returns to the foreground, when a push arrives, and after every mark-read. Show <code>count</code> on the bell; hide the badge at 0. Cap the display yourself (for example "99+"): the server does not cap.</li><li>The OS app-icon badge can use the same number. Remember it is per user and counts all mini apps together.</li><li>A fixed polling interval is a fallback only (the gateway allows 300 calls a minute per IP, shared by all users behind one IP: 60 seconds is plenty).</li></ul><h2 id="list">The list</h2><ol><li>Open: <code>GET /api/v1/me/notifications?size=20&amp;page=0</code>. Newest first.</li><li>Scroll to the end: request <code>page + 1</code>; stop when fewer than <code>size</code> items come back. De-duplicate by <code>id</code> (new items shift pages).</li><li>Pull to refresh: reload page 0 and merge by <code>id</code>.</li><li>"Unread" tab: same call with <code>unread=true</code>. Remember an item marked read while on this tab drops out of later pages.</li><li>Row: show the mini app's name and icon (look up <code>appId</code> in the app catalog you already hold; if the app is gone from the catalog, show a generic icon), <code>title</code>, <code>body</code> (as plain text), a relative time from <code>createdAt</code>, and an unread dot when <code>readAt == null</code>.</li><li>Empty: <code>200 []</code> on page 0 is an empty state ("No notifications yet"). Nothing in the response tells you why (never received, or all muted).</li><li>Group or filter by mini app on the client: the server has no per-app filter.</li></ol><h2 id="read">Marking read</h2><ul><li>Mark an item read when the user opens it: <code>PUT /api/v1/me/notifications/{id}/read</code>. Update the row optimistically and decrement the badge; if the call fails with <code>404</code> remove the row, otherwise retry later (it is idempotent).</li><li>"Mark all as read": <code>PUT /api/v1/me/notifications/read-all</code>, then set the badge to 0 and re-fetch the count (items that arrived meanwhile stay unread).</li><li>There is no "mark unread" and no delete: do not offer them.</li></ul><h2 id="deeplinks">Deep links from <code>data</code></h2><p>The partner decides the contents of <code>data</code>; Adera only guarantees it is a JSON object of at most 2048 bytes (stored in the inbox as a string). Adera defines <strong>no standard keys</strong> for it. In the seeded example the partner used <code>screen</code> and <code>orderId</code>.</p><pre><code>// decode, then route
+final data = jsonDecode(item["data"]) as Map&lt;String, dynamic&gt;;   // second decode: data is a JSON string
+final miniApp = catalog.byId(item["appId"]);
+if (miniApp != null) {
+  openMiniApp(miniApp, screen: data["screen"], params: data);   // the mini app interprets its own keys
+}</code></pre><ul><li><strong>Always route through the mini app.</strong> Use <code>appId</code> to open the mini app and hand it the decoded <code>data</code>; let the mini app interpret <code>screen</code>, ids and so on. Do not build a universal router for partner keys.</li><li><strong>Treat <code>data</code> as untrusted.</strong> It is partner-supplied text. Do not navigate to a URL found in it without checking it against the mini app's allowed origins, never execute it, and ignore keys you do not understand.</li><li>Handle <code>data == "{}"</code> (no deep link): opening the item should open the mini app's home, or just mark it read.</li><li>Handle a mini app that is no longer listed (paused, killed or removed): show the notification text, skip the deep link.</li><li>From a push, the same keys arrive in the push <code>data</code> (flat strings) together with <code>appId</code> and <code>notificationId</code>; for nested values prefer reading the inbox item.</li></ul><h2 id="checklist">Checklist</h2><ul><li>Register the FCM token on login and app start.</li><li>Badge from <code>unread-count</code>, not from counting a cached list.</li><li><code>jsonDecode</code> the <code>data</code> string.</li><li>Handle <code>401</code> (login again), <code>429</code> (back off, HTML body) and <code>503</code> (retry).</li><li>Do not assume an item exists the moment a partner says it sent one.</li></ul>
+<div class="pager"><a class="prev" href="languages.html"><small>Previous</small>Languages</a><a class="next" href="delivery-states.html"><small>Next</small>Delivery states</a></div>
+<p class="footer">Adera super-app guide &middot; notifications &middot; verified against the dev stack on 2026-10-26</p>
+</main>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

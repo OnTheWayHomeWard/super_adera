@@ -1,0 +1,372 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Registration and login with a one-time code | Adera guide</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+<button id="menu-btn" type="button" aria-label="Toggle menu">Menu</button>
+<span class="brand">Adera guide: sign-in and account</span>
+<span class="spacer"></span>
+<button id="theme-btn" type="button" aria-label="Toggle light or dark theme">Theme</button>
+</header>
+<div class="layout">
+<nav class="sidebar" aria-label="Pages in this guide">
+<h4>Super app: sign-in and account</h4>
+<ul><li><a href="index.html">Overview</a></li>
+<li><a href="quickstart.html">Quick start</a></li>
+<li><a href="authentication.html" class="current">Registration and login</a><ul><li><a href="#overview">Overview</a></li><li><a href="#new-or-returning">New or returning user: which flow to start</a></li><li><a href="#limits">Rate limits and per-recipient limits</a></li><li><a href="#identifiers">Identifiers: phone and email</a></li><li><a href="#endpoints">Endpoints</a></li><li><a href="#messages">Message ids the app should handle</a></li><li><a href="#dev-mode">Reading codes in the dev stack</a></li></ul></li>
+<li><a href="session-and-logout.html">Session and logout</a></li>
+<li><a href="profile.html">Profile</a></li>
+<li><a href="extra-data.html">Extra data</a></li>
+<li><a href="location.html">Location</a></li>
+<li><a href="avatar.html">Avatar</a></li>
+<li><a href="devices-and-push-tokens.html">Devices and push tokens</a></li>
+<li><a href="errors.html">Error table</a></li>
+<li><a href="known-issues.html">Known issues and not built yet</a></li></ul>
+</nav>
+<main>
+<h1>Registration and login with a one-time code</h1>
+<p class="lead">How a person signs up and signs in: the Kratos native flows behind the gateway (<code>/kratos/*</code>), what they cost, what they answer, and what registration creates.</p>
+<h2 id="overview">Overview</h2>
+<p>Adera has no passwords. A person proves they control a phone number or an email address by typing a one-time code, and that single act is both <strong>sign-up</strong> (first time) and <strong>login</strong> (every later time). The calls in this page are Ory Kratos' own <em>native app</em> self-service API; Adera wrote no code for them, but configured them (code method only, 30-day sessions, our own SMS/email delivery) and puts them behind the gateway under the prefix <code>/kratos</code>.</p>
+<p>Every flow has the same shape: <strong>(1)</strong> create a flow with a GET, <strong>(2)</strong> POST the identifier (phone or email) to the flow: Kratos asks our notification service to send a code, <strong>(3)</strong> POST the same identifier plus the <code>code</code>: Kratos answers <code>200</code> with a <code>session_token</code>. The token is what the app stores and sends as <code>Authorization: Bearer</code> on every later call.</p>
+
+<div class="table-wrap"><table><thead><tr><th></th><th>New user (registration)</th><th>Returning user (login)</th></tr></thead><tbody>
+<tr><td>1. create flow</td><td><code>GET /kratos/self-service/registration/api</code></td><td><code>GET /kratos/self-service/login/api</code></td></tr>
+<tr><td>2. send the code</td><td><code>POST /kratos/self-service/registration?flow=ID</code> with <code>traits.phone_number</code> or <code>traits.email</code></td><td><code>POST /kratos/self-service/login?flow=ID</code> with <code>identifier</code></td></tr>
+<tr><td>3. check the code</td><td>same POST plus <code>code</code></td><td>same POST plus <code>code</code></td></tr>
+<tr><td>result</td><td>account + profile row created, <code>200</code> with <code>session_token</code></td><td><code>200</code> with <code>session_token</code></td></tr>
+</tbody></table></div>
+<div class="callout"><span class="label">Base URL and headers</span>
+<p>All paths are relative to the gateway (<code>$GATEWAY</code>, in dev <code>http://127.0.0.1:9080</code>). Submit bodies are JSON with <code>Content-Type: application/json</code>. No <code>Authorization</code> header is needed to sign in. Do not send cookies: the gateway strips <code>Cookie</code> (and <code>Origin</code> on submits) because native flows must not carry them.</p>
+</div>
+<div class="callout warn"><span class="label">Read the answer by state, not only by HTTP status</span>
+<p>Kratos' API flows answer <code>400</code> when a step needs more input. After you submit the identifier, the <strong>normal, successful</strong> answer is <code>400</code> with <code>"state": "sent_email"</code> (the name says email but it is also used for SMS). Only a <code>200</code> carrying <code>session_token</code> means you are signed in.</p>
+</div>
+<h2 id="new-or-returning">New or returning user: which flow to start</h2>
+<p>The app has to choose between registration and login, and a person usually does not know which one applies to them. Recommended sequence (the cheapest in SMS and in rate limit):</p>
+<ol><li>Ask for the phone number (or email) once.</li><li>Start a <strong>login</strong> flow and submit the identifier. If Kratos answers <code>state: sent_email</code> (message id <code>1010014</code>), the account exists: continue with the code step of the login flow.</li><li>If it answers <code>state: choose_method</code> with message id <code>4000035</code> ("This account does not exist or has not setup sign in with code"), the person is <strong>new</strong>: no SMS was sent. Start a <strong>registration</strong> flow with the same identifier and continue there.</li></ol>
+<p>Why not registration first: registering an identifier that already has an account still answers <em>"a code has been sent"</em> (anti-enumeration) and really sends an SMS; the failure <code>4000007</code> ("An account with the same identifier ... exists already") only appears after the person typed the code. That costs an SMS, a code entry and a restart. Verified: registering a phone number that already had an account sent a registration SMS and answered <code>1040005</code>.</p>
+<p>After you have a session, you can tell a brand-new profile from a finished one with <code>GET /api/v1/me</code>: a new profile has <code>firstName: null</code>, <code>termsAcceptedVersion: null</code> and <code>createdAt</code> equal to <code>updatedAt</code>. Use <code>firstName == null</code> (and your own terms version) to decide whether to show onboarding; the profile endpoint has no separate "is new" flag. A registration response also carries <code>continue_with</code> (a <code>set_ory_session_token</code> action), a login response has <code>continue_with: null</code>.</p>
+<div class="callout warn"><span class="label">Login is not anti-enumeration</span>
+<p>A login attempt for an unknown identifier tells the caller the account does not exist (<code>4000035</code>), so anyone can test whether a number is registered. This is accepted for now (see Known issues). Do not build UI that exposes it beyond what you need.</p>
+</div>
+<h2 id="limits">Rate limits and per-recipient limits</h2>
+<p>Sending codes costs money (SMS), so there are three layers of protection. Design your UI for all of them.</p>
+<div class="table-wrap"><table><thead><tr><th>Layer</th><th>Limit</th><th>What the client sees</th></tr></thead><tbody>
+<tr><td>Gateway, <strong>POST</strong> on <code>/kratos/self-service/*</code> (every submit: registration, login, settings)</td><td><strong>10 per 60 s per client IP</strong> (Redis counter, route <code>kratos-self-service-submit</code>)</td><td><code>429</code> with an <strong>HTML</strong> body (see below), headers <code>X-RateLimit-Limit: 10</code> and <code>X-RateLimit-Remaining</code>. Wait for the next minute, then retry the same flow.</td></tr>
+<tr><td>Gateway, everything else under <code>/kratos/*</code> (create flow, whoami, sessions, logout)</td><td>120 per 60 s per client IP</td><td>same <code>429</code> HTML page</td></tr>
+<tr><td>Notification service, per <strong>recipient</strong></td><td>SMS: 5 per hour and 10 per day per number. Email: 10 per hour and 20 per day per address</td><td><strong>Nothing</strong>: Kratos still answers "code sent" but no message is delivered and the user simply never receives a code. Show a "did not get a code? try again in a while" hint and a resend button that is throttled by your app (not more than once a minute).</td></tr>
+<tr><td>Kratos code</td><td>6 digits, valid 5 minutes, single use</td><td>wrong, expired or used code: <code>400</code> with message <code>4010008</code> (login) or <code>4040003</code> (registration)</td></tr>
+<tr><td>Kratos flow</td><td>valid 10 minutes from creation</td><td>after that the flow answers <code>410</code>; start a new flow</td></tr>
+</tbody></table></div>
+<div class="callout warn"><span class="label">The IP limit is shared</span>
+<p>The gateway counts per source IP address. Many phones on one mobile-carrier NAT or one office Wi-Fi share the same 10 submits per minute. Handle <code>429</code> with a calm "too many attempts, try again in a minute" message and an automatic retry, never an error screen. A single sign-in costs 2 submits (3 for a new user who first tried login).</p>
+</div>
+<p>The real answer when the limit is reached (captured, the body is not JSON):</p>
+<pre class="out"><code>HTTP/1.1 429 Too Many Requests
+Content-Type: text/html
+
+&lt;html&gt;
+&lt;head&gt;&lt;title&gt;429 Too Many Requests&lt;/title&gt;&lt;/head&gt;
+&lt;body&gt;
+&lt;center&gt;&lt;h1&gt;429 Too Many Requests&lt;/h1&gt;&lt;/center&gt;
+&lt;hr&gt;&lt;center&gt;openresty&lt;/center&gt;
+&lt;p&gt;&lt;em&gt;Powered by &lt;a href="https://apisix.apache.org/"&gt;APISIX&lt;/a&gt;.&lt;/em&gt;&lt;/p&gt;&lt;/body&gt;
+&lt;/html&gt;</code></pre>
+<h2 id="identifiers">Identifiers: phone and email</h2>
+<div class="table-wrap"><table><thead><tr><th>Identifier</th><th>Field in registration</th><th>Field in login</th><th>Rules</th></tr></thead><tbody>
+<tr><td>Phone</td><td><code>traits.phone_number</code></td><td><code>identifier</code></td><td>International E.164 format with the country code, e.g. <code>+2519XXXXXXXX</code>. National format such as <code>0911223344</code> is refused (<code>4000041</code> "Enter a valid phone number"). Kratos normalises spaces: <code>+251 91 122 3344</code> was accepted. The code is sent by SMS.</td></tr>
+<tr><td>Email</td><td><code>traits.email</code></td><td><code>identifier</code></td><td>A valid address; an invalid one gives <code>4000040</code> "Enter a valid email address". The code is sent by email (subject "Use code NNNNNN to complete your account registration" or "... to log in").</td></tr>
+</tbody></table></div>
+<p>Send <strong>one</strong> identifier per registration. The account is identified by whichever you used; a person who registered with a phone and later signs in with an email address gets a <em>different</em> account (there is no account linking, see Known issues). The profile's <code>phone</code> or <code>email</code> is filled from the identifier used at registration; the other stays <code>null</code>.</p>
+<p>The SMS text in dev is <code>Your registration code is: 542546</code> (login: <code>Your login code is: ...</code>) followed by "It expires in 5 minutes." Messages are produced by the notification service, which also sends the email variant; the 6-digit code is the only thing the app has to understand.</p>
+<h2 id="endpoints">Endpoints</h2>
+<details class="endpoint" id="ep-reg-create">
+<summary><span class="method m-get">GET</span><span class="path">/kratos/self-service/registration/api</span><span class="sum">Start a registration flow</span></summary>
+<div class="body"><dl class="meta">
+<dt>Who may call</dt><dd>anyone, no session needed</dd>
+<dt>Auth</dt><dd>none</dd>
+<dt>Headers</dt><dd>none required</dd>
+<dt>Rate limit</dt><dd>120 per 60 s per IP (route <code>kratos-public</code>)</dd>
+<dt>Implemented by</dt><dd>Ory Kratos (config <code>infra/kratos/kratos.yml</code>, gateway route in <code>infra/apisix/apisix.yaml</code>)</dd>
+</dl>
+<h4>Purpose</h4>
+<p>Creates a registration flow and returns the form description. You need only its <code>id</code> (and <code>ui.action</code>, which already is the full submit URL). Why it exists: Kratos is headless; the flow object is the server-side state of this sign-up attempt (what was asked, which identifier, which step).</p>
+<h4>Parameters</h4>
+<p>None.</p>
+<h4>Example request</h4>
+<pre><code>curl -s "$GATEWAY/kratos/self-service/registration/api"</code></pre>
+<h4>Example response</h4>
+<pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json; charset=utf-8
+X-RateLimit-Limit: 120
+X-RateLimit-Remaining: 117
+
+{
+  "id": "05aaafac-ab5e-47aa-9662-4b0ac7e513d6",
+  "type": "api",
+  "expires_at": "2026-10-26T10:59:42.526803083Z",
+  "issued_at": "2026-10-26T10:49:42.526803083Z",
+  "request_url": "http://127.0.0.1:9080/self-service/registration/api",
+  "organization_id": null,
+  "state": "choose_method",
+  "ui": {
+    "action": "http://127.0.0.1:9080/kratos/self-service/registration?flow=05aaafac-ab5e-47aa-9662-4b0ac7e513d6",
+    "method": "POST",
+    "nodes": [
+      "default: csrf_token (hidden)",
+      "default: traits.email (email)",
+      "default: traits.phone_number (tel)",
+      "profile: method (submit)"
+    ]
+  }
+}</code></pre>
+<p><code>ui.nodes</code> is shown abridged to one line per node (the real answer has one object per node with <code>attributes</code> and <code>messages</code>). <code>csrf_token</code> exists in the answer but is empty for native flows: ignore it. <code>request_url</code> lacks the <code>/kratos</code> prefix because the gateway strips it; always use <code>ui.action</code> or build <code>$GATEWAY/kratos/self-service/registration?flow=&lt;id&gt;</code>.</p>
+<h4>Errors</h4>
+<div class="table-wrap"><table><thead><tr><th>Status</th><th>Body</th><th>When</th><th>What to do</th></tr></thead><tbody>
+<tr><td>429</td><td>HTML page</td><td>gateway limit</td><td>wait a minute, retry</td></tr>
+<tr><td>404</td><td>Kratos JSON <code>{"error":{"code":404,...}}</code></td><td>(when re-reading <code>GET /kratos/self-service/registration/flows?id=ID</code>) unknown flow id</td><td>start a new flow</td></tr>
+</tbody></table></div>
+<h4>Using it in the app</h4>
+<ul><li>A flow is valid 10 minutes (<code>expires_at</code>). Create it when the person presses "continue", not when the screen opens.</li><li>You can re-read a flow with <code>GET /kratos/self-service/registration/flows?id=&lt;flow id&gt;</code> (same object; verified, answers <code>200</code>).</li></ul>
+</div></details>
+<details class="endpoint" id="ep-reg-submit">
+<summary><span class="method m-post">POST</span><span class="path">/kratos/self-service/registration?flow={id}</span><span class="sum">Send the code, then verify it (registration)</span></summary>
+<div class="body"><dl class="meta">
+<dt>Who may call</dt><dd>anyone, no session needed</dd>
+<dt>Auth</dt><dd>none</dd>
+<dt>Headers</dt><dd><code>Content-Type: application/json</code></dd>
+<dt>Rate limit</dt><dd><strong>10 per 60 s per IP</strong> (route <code>kratos-self-service-submit</code>); plus the per-recipient SMS/email limits above</dd>
+</dl>
+<h4>Purpose</h4>
+<p>Used twice per sign-up. <strong>First call</strong>: the identifier only. Kratos asks the notification service to deliver a code and answers <code>400</code> with <code>state: sent_email</code>. <strong>Second call</strong>: the same identifier plus <code>code</code>. If the code is right, Kratos creates the identity (the account), calls the registration webhook (which creates the profile row), starts a session and answers <code>200</code> with the <code>session_token</code>.</p>
+<h4>Parameters</h4>
+<div class="table-wrap"><table><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why</th></tr></thead><tbody>
+<tr><td><code>flow</code></td><td>query</td><td>UUID</td><td>yes</td><td>id from the create call; not expired</td><td>which flow this submit belongs to</td></tr>
+<tr><td><code>method</code></td><td>body</td><td>string</td><td>yes</td><td>always <code>"code"</code></td><td>selects the one-time-code strategy (passwords are off)</td></tr>
+<tr><td><code>traits.phone_number</code></td><td>body</td><td>string</td><td>one of the two</td><td>E.164, e.g. <code>+2519XXXXXXXX</code></td><td>phone identifier, code is sent by SMS</td></tr>
+<tr><td><code>traits.email</code></td><td>body</td><td>string</td><td>one of the two</td><td>valid email</td><td>email identifier, code is sent by email</td></tr>
+<tr><td><code>code</code></td><td>body</td><td>string</td><td>second call only</td><td>6 digits, 5 minutes, single use</td><td>proves control of the identifier</td></tr>
+<tr><td><code>resend</code></td><td>body</td><td>string</td><td>optional</td><td>the value <code>"code"</code>, sent with the identifier and <code>method</code></td><td>asks for another code in the same flow (the flow shows a <code>resend</code> submit node; counts as a send for the per-recipient limit)</td></tr>
+</tbody></table></div>
+<h4>Step 1: send the code</h4>
+<pre><code>curl -s -X POST "$GATEWAY/kratos/self-service/registration?flow=$FLOW" \
+  -H "Content-Type: application/json" \
+  -d '{"method":"code","traits.phone_number":"+2519XXXXXXXX"}'</code></pre>
+<pre class="out"><code>HTTP/1.1 400 Bad Request
+Content-Type: application/json; charset=utf-8
+X-RateLimit-Limit: 10
+X-RateLimit-Remaining: 7
+
+{
+  "state": "sent_email",
+  "active": "code",
+  "ui": {
+    "messages": [
+      {
+        "id": 1040005,
+        "text": "A code has been sent to the address(es) you provided. If you have not received a message, check the spelling of the address and retry the registration.",
+        "type": "info"
+      }
+    ],
+    "nodes": [ "...code input, resend and screen (back) nodes..." ]
+  },
+  "...": "id, type, expires_at, issued_at, request_url as in the create call"
+}</code></pre>
+<p>This <code>400</code> is the expected answer, not a failure. Show the code entry screen.</p>
+<h4>Step 2: verify the code</h4>
+<pre><code>curl -s -X POST "$GATEWAY/kratos/self-service/registration?flow=$FLOW" \
+  -H "Content-Type: application/json" \
+  -d '{"method":"code","traits.phone_number":"+2519XXXXXXXX","code":"542546"}'</code></pre>
+<pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json; charset=utf-8
+X-RateLimit-Limit: 10
+X-RateLimit-Remaining: 6
+
+{
+  "session_token": "&lt;session_token&gt;",
+  "session": {
+    "id": "a8309c7f-02b5-46bb-b718-9adb2d0025aa",
+    "active": true,
+    "expires_at": "2026-11-25T10:49:43.584653029Z",
+    "authenticated_at": "2026-10-26T10:49:43.584653029Z",
+    "authenticator_assurance_level": "aal1",
+    "authentication_methods": [
+      { "method": "code", "aal": "aal1", "completed_at": "2026-10-26T10:49:43.584652703Z" }
+    ],
+    "issued_at": "2026-10-26T10:49:43.584653029Z",
+    "identity": {
+      "id": "5bc6d545-771d-44f5-91cb-55415b01e4e4",
+      "schema_id": "default",
+      "state": "active",
+      "traits": { "phone_number": "+2519******57" },
+      "created_at": "2026-10-26T10:49:43.578352Z",
+      "...": "schema_url, state_changed_at, metadata_public, updated_at, organization_id"
+    },
+    "devices": [ { "id": "66f34abc-0ead-4852-bfe6-c8116b3f2aff", "ip_address": "172.18.0.1", "user_agent": "Python-urllib/3.14", "location": "" } ]
+  },
+  "identity": "(the same object as session.identity)",
+  "continue_with": [
+    { "action": "set_ory_session_token", "ory_session_token": "&lt;session_token&gt;" }
+  ]
+}</code></pre>
+<p><code>session_token</code> is masked here; it is a long opaque string. <code>identity.id</code> (<code>5bc6d545-...</code>) is the <strong>user id</strong> used everywhere in Adera. The phone is masked.</p>
+<h4>Email registration</h4>
+<p>Identical, with <code>"traits.email": "person@example.com"</code> instead of the phone. Verified: the email reaches the user with the code in the body, and afterwards <code>GET /api/v1/me</code> has <code>email</code> set and <code>phone: null</code>.</p>
+<h4>Other answers</h4>
+<div class="table-wrap"><table><thead><tr><th>Status</th><th>Body (state and message id)</th><th>When</th><th>What the app should do</th></tr></thead><tbody>
+<tr><td>400</td><td><code>state: choose_method</code>, message <code>4000041</code> "Enter a valid phone number" (on the phone node; <code>context.value</code> echoes the input)</td><td>step 1 with a phone that is not valid E.164</td><td>show an inline error on the phone field</td></tr>
+<tr><td>400</td><td><code>state: choose_method</code>, message <code>4000040</code> "Enter a valid email address"</td><td>step 1 with an invalid email</td><td>inline error on the email field</td></tr>
+<tr><td>400</td><td>node messages <code>4000002</code> "Property email is missing." and "Property phone_number is missing."</td><td>step 1 with no identifier</td><td>ask for a phone or email</td></tr>
+<tr><td>400</td><td><code>state: sent_email</code>, message <code>4040003</code> "The registration code is invalid or has already been used."</td><td>wrong, expired or reused code</td><td>let the person retype; offer resend</td></tr>
+<tr><td>400</td><td><code>state: passed_challenge</code>, message <code>4000007</code> "An account with the same identifier ... exists already."</td><td>step 2 for an identifier that already has an account (captured in earlier in-house tests; step 1 for such an identifier was re-verified and answers "code sent")</td><td>switch to the login flow with the same identifier (a new code is needed)</td></tr>
+<tr><td>404</td><td>Kratos JSON error</td><td>unknown flow id</td><td>start a new flow</td></tr>
+<tr><td>410</td><td>Kratos <code>self_service_flow_expired</code></td><td>flow older than 10 minutes (per the Kratos API; not waited out here)</td><td>start a new flow</td></tr>
+<tr><td>429</td><td>HTML page</td><td>gateway limit</td><td>wait, retry</td></tr>
+<tr><td>(none)</td><td>step 1 answers "code sent" but nothing arrives</td><td>per-recipient limit reached</td><td>tell the user to wait; do not loop resend</td></tr>
+</tbody></table></div>
+<h4>What registration creates</h4>
+<ul><li><strong>An identity</strong> in Kratos (the account) with the phone or email as its only trait. Its <code>id</code> is the user id.</li><li><strong>A profile row</strong> in the user service: a web hook that Kratos calls right after the identity is created (<code>POST /internal/kratos/after-registration</code> with <code>identityId</code>, <code>email</code>, <code>phone</code>). Defaults: <code>id</code> = the Kratos identity id (so <code>identity.id</code> = <code>X-User-Id</code> = <code>app_user.id</code> = the <code>id</code> field of <code>GET /api/v1/me</code>), <code>status ACTIVE</code>, <code>verificationTier CONTACT</code>, <code>language en</code>, <code>timezone Africa/Addis_Ababa</code>, <code>market ET</code> (<code>US</code> if the phone starts with <code>+1</code>), empty <code>extra</code>.</li><li>The hook is <strong>non-blocking</strong>: a slow or stopped user service never prevents a sign-up. If the call is lost, the profile is created on the person's first call to any <code>/api/v1/me</code> endpoint from Kratos' own record (verified: after deleting the row, <code>GET /api/v1/me</code> returned a fresh profile with the phone filled in). So a valid session <em>always</em> ends up with a profile, and the app needs no special handling.</li><li><strong>A session</strong> (<code>hook: session</code>): you do not need a separate login after registering.</li></ul>
+</div></details>
+<details class="endpoint" id="ep-login-create">
+<summary><span class="method m-get">GET</span><span class="path">/kratos/self-service/login/api</span><span class="sum">Start a login flow</span></summary>
+<div class="body"><dl class="meta">
+<dt>Who may call</dt><dd>anyone not signed in</dd>
+<dt>Auth</dt><dd>none (for a normal login)</dd>
+<dt>Rate limit</dt><dd>120 per 60 s per IP</dd>
+<dt>Implemented by</dt><dd>Ory Kratos</dd>
+</dl>
+<h4>Purpose</h4>
+<p>Creates a login flow for a returning user (identifier plus code). The same endpoint with <code>?refresh=true</code> and the current token is how a still-valid session is <strong>renewed for another 30 days</strong> (see Session and logout).</p>
+<h4>Parameters</h4>
+<div class="table-wrap"><table><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th><th>Notes</th></tr></thead><tbody>
+<tr><td><code>refresh</code></td><td>query</td><td>boolean</td><td>no (default false)</td><td><code>true</code> together with header <code>X-Session-Token: $TOKEN</code> re-authenticates the current session and extends it</td></tr>
+<tr><td><code>X-Session-Token</code></td><td>header</td><td>string</td><td>only with refresh</td><td>the current session token</td></tr>
+</tbody></table></div>
+<h4>Example request</h4>
+<pre><code>curl -s "$GATEWAY/kratos/self-service/login/api"</code></pre>
+<h4>Example response</h4>
+<pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json; charset=utf-8
+
+{
+  "id": "61fef0bf-e47c-447b-a95d-e238d0c94d8e",
+  "type": "api",
+  "expires_at": "2026-10-26T11:00:46.125865027Z",
+  "issued_at": "2026-10-26T10:50:46.125865027Z",
+  "request_url": "http://127.0.0.1:9080/self-service/login/api",
+  "refresh": false,
+  "requested_aal": "aal1",
+  "state": "choose_method",
+  "ui": {
+    "action": "http://127.0.0.1:9080/kratos/self-service/login?flow=61fef0bf-e47c-447b-a95d-e238d0c94d8e",
+    "method": "POST",
+    "nodes": [ "default: identifier (text)", "code: method (submit)" ]
+  }
+}</code></pre>
+<h4>Errors</h4>
+<div class="table-wrap"><table><thead><tr><th>Status</th><th>Body</th><th>When</th><th>What to do</th></tr></thead><tbody>
+<tr><td>400</td><td>Kratos JSON, <code>error.id: session_already_available</code>, "you are already logged in"</td><td>the request carried a valid session token (header <code>X-Session-Token</code> or <code>Authorization</code>) without <code>refresh=true</code></td><td>do not send a token when starting a normal login; send it only for a refresh</td></tr>
+<tr><td>429</td><td>HTML page</td><td>gateway limit</td><td>wait, retry</td></tr>
+</tbody></table></div>
+</div></details>
+<details class="endpoint" id="ep-login-submit">
+<summary><span class="method m-post">POST</span><span class="path">/kratos/self-service/login?flow={id}</span><span class="sum">Send the code, then verify it (login)</span></summary>
+<div class="body"><dl class="meta">
+<dt>Who may call</dt><dd>anyone, no session needed</dd>
+<dt>Auth</dt><dd>none</dd>
+<dt>Headers</dt><dd><code>Content-Type: application/json</code></dd>
+<dt>Rate limit</dt><dd><strong>10 per 60 s per IP</strong> (shared with all other submits); per-recipient SMS/email limits</dd>
+</dl>
+<h4>Purpose</h4>
+<p>Same two-step pattern as registration, for an account that already exists. Step 1 sends a code to the number or address; step 2 checks it and returns a fresh <code>session_token</code> (a new session; the person's other devices keep theirs).</p>
+<h4>Parameters</h4>
+<div class="table-wrap"><table><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why</th></tr></thead><tbody>
+<tr><td><code>flow</code></td><td>query</td><td>UUID</td><td>yes</td><td>from the create call</td><td>which flow</td></tr>
+<tr><td><code>method</code></td><td>body</td><td>string</td><td>yes</td><td><code>"code"</code></td><td>one-time-code strategy</td></tr>
+<tr><td><code>identifier</code></td><td>body</td><td>string</td><td>yes</td><td>the phone (E.164) or email used at registration</td><td>which account</td></tr>
+<tr><td><code>code</code></td><td>body</td><td>string</td><td>second call only</td><td>6 digits, 5 minutes, single use</td><td>proof</td></tr>
+<tr><td><code>resend</code></td><td>body</td><td>string</td><td>optional</td><td><code>"code"</code></td><td>request another code</td></tr>
+</tbody></table></div>
+<h4>Step 1: send the code</h4>
+<pre><code>curl -s -X POST "$GATEWAY/kratos/self-service/login?flow=$FLOW" \
+  -H "Content-Type: application/json" \
+  -d '{"method":"code","identifier":"+2519XXXXXXXX"}'</code></pre>
+<pre class="out"><code>HTTP/1.1 400 Bad Request
+Content-Type: application/json; charset=utf-8
+
+{
+  "state": "sent_email",
+  "ui": {
+    "messages": [
+      {
+        "id": 1010014,
+        "text": "A code was sent to the address you provided. If you didn't receive it, please check the spelling of the address and try again.",
+        "type": "info"
+      }
+    ],
+    "nodes": [ "...identifier (hidden), code input, resend..." ]
+  },
+  "...": "id, type, expires_at, ..."
+}</code></pre>
+<h4>Step 2: verify the code</h4>
+<pre><code>curl -s -X POST "$GATEWAY/kratos/self-service/login?flow=$FLOW" \
+  -H "Content-Type: application/json" \
+  -d '{"method":"code","identifier":"+2519XXXXXXXX","code":"353245"}'</code></pre>
+<pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json; charset=utf-8
+
+{
+  "session_token": "&lt;session_token&gt;",
+  "session": {
+    "id": "80e50ee7-bcdd-4170-8731-07ba98d67829",
+    "active": true,
+    "expires_at": "2026-11-25T10:51:46.502815971Z",
+    "authenticated_at": "2026-10-26T10:51:46.502815971Z",
+    "authenticator_assurance_level": "aal1",
+    "issued_at": "2026-10-26T10:51:46.502815971Z",
+    "identity": { "id": "5bc6d545-771d-44f5-91cb-55415b01e4e4", "...": "traits, timestamps" }
+  },
+  "continue_with": null
+}</code></pre>
+<p>The session id differs from the registration session of the same user: every login is a new session of 30 days.</p>
+<h4>Other answers</h4>
+<div class="table-wrap"><table><thead><tr><th>Status</th><th>Body</th><th>When</th><th>What the app should do</th></tr></thead><tbody>
+<tr><td>400</td><td><code>state: sent_email</code>, message <code>4010008</code> "The login code is invalid or has already been used."</td><td>wrong, expired or reused code</td><td>let the person retype or resend</td></tr>
+<tr><td>400</td><td><code>state: choose_method</code>, message <code>4000035</code> "This account does not exist or has not setup sign in with code."</td><td>unknown identifier, <strong>or a malformed one (same text)</strong>. No SMS was sent.</td><td>treat as "new user": start a registration flow with the same identifier (see above)</td></tr>
+<tr><td>400</td><td><code>state: passed_challenge</code>, message <code>4010002</code> "Could not find a strategy to log you in with."</td><td>the same flow was submitted again after it already succeeded (verified by resubmitting the used code)</td><td>discard the flow; you already have a session</td></tr>
+<tr><td>404 / 410 / 429</td><td>as for registration</td><td></td><td>as for registration</td></tr>
+</tbody></table></div>
+<h4>Using it in the app</h4>
+<ul><li>Keep the flow id, the identifier and the countdown (5 minutes) in the screen state; on <code>4010008</code> stay on the code screen.</li><li>On success store the token and call <code>GET /api/v1/me</code> to load the profile (see Profile).</li><li>Registering and logging in on a second phone gives that phone its own session; both work at once.</li></ul>
+</div></details>
+<h2 id="messages">Message ids the app should handle</h2>
+<p>Kratos answers carry messages with a numeric <code>id</code> and an English <code>text</code>. <strong>Match on the id</strong> and show your own translated text (en, am, om); the English wording can change. Messages are at <code>ui.messages</code> (flow level) or <code>ui.nodes[].messages</code> (field level; the phone/email field).</p>
+<div class="table-wrap"><table><thead><tr><th>id</th><th>type</th><th>English text (as returned)</th><th>Seen at</th><th>Meaning for the app</th></tr></thead><tbody>
+<tr><td>1040005</td><td>info</td><td>A code has been sent to the address(es) you provided. ...</td><td>registration step 1</td><td>go to the code screen</td></tr>
+<tr><td>1010014</td><td>info</td><td>A code was sent to the address you provided. ...</td><td>login step 1</td><td>go to the code screen</td></tr>
+<tr><td>4040003</td><td>error</td><td>The registration code is invalid or has already been used.</td><td>registration step 2</td><td>wrong code</td></tr>
+<tr><td>4010008</td><td>error</td><td>The login code is invalid or has already been used.</td><td>login step 2</td><td>wrong code</td></tr>
+<tr><td>4000041</td><td>error</td><td>Enter a valid phone number</td><td>registration step 1</td><td>bad phone format</td></tr>
+<tr><td>4000040</td><td>error</td><td>Enter a valid email address</td><td>registration step 1</td><td>bad email</td></tr>
+<tr><td>4000002</td><td>error</td><td>Property email is missing. / Property phone_number is missing.</td><td>registration step 1</td><td>no identifier sent</td></tr>
+<tr><td>4000035</td><td>error</td><td>This account does not exist or has not setup sign in with code.</td><td>login step 1</td><td>unknown account: register instead</td></tr>
+<tr><td>4000007</td><td>error</td><td>An account with the same identifier (email, phone, username, ...) exists already.</td><td>registration step 2</td><td>account exists: log in instead</td></tr>
+<tr><td>4010002</td><td>error</td><td>Could not find a strategy to log you in with. ...</td><td>login, repeated submit</td><td>flow already used</td></tr>
+</tbody></table></div>
+<h2 id="dev-mode">Reading codes in the dev stack</h2>
+<p>In dev (<code>ADERA_ENV=dev</code>) nothing is really sent. The SMS provider is the console and the email provider is Mailpit. Two ways to get the code while testing:</p>
+<ul><li><code>GET http://127.0.0.1:8085/dev/messages?to=&lt;url-encoded phone or email&gt;</code> returns a JSON list <code>[{"at","channel","to","subject","body"}]</code> of recent messages to that recipient; take the entry with the greatest <code>at</code> (do not rely on its position in the list: it was newest-first when checked) and read the six digits from <code>body</code>. This endpoint exists only when the notification service runs with dev endpoints on.</li><li>Emails also show up in Mailpit's inbox at <code>http://127.0.0.1:8025</code>.</li><li>Messages arrive a fraction of a second after the step-1 answer: poll for up to a few seconds instead of reading once. Make sure the entry you pick is newer than your step-1 request, so you do not pick up an old code.</li><li>Use a number or address of your own for sign-in tests rather than the seeded "Demo ..." accounts: every code sent counts against that recipient's hourly limit, and other people share those accounts.</li></ul>
+
+<div class="pager"><a class="prev" href="quickstart.html"><small>Previous</small>Quick start</a><a class="next" href="session-and-logout.html"><small>Next</small>Session and logout</a></div>
+<p class="footer">Adera super-app guide: sign-in and account &middot; verified against the dev stack on 2026-10-26</p>
+</main>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

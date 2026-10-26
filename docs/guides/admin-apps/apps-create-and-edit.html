@@ -1,0 +1,405 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Create, edit and list apps | Admin: managing mini apps</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+<button id="menu-btn" type="button" aria-label="Toggle menu">Menu</button>
+<a class="brand" href="index.html">Admin: managing mini apps</a>
+<span class="spacer"></span>
+<button id="theme-btn" type="button" aria-label="Toggle light or dark theme">Theme</button>
+</header>
+<div class="layout">
+<nav class="sidebar" aria-label="Pages in this guide">
+<h4>This guide</h4>
+<ul><li><a href="index.html">Overview</a></li>
+<li><a href="roles-and-access.html">Roles and access</a></li>
+<li><a href="apps-create-and-edit.html" class="current">Create, edit, list apps</a><ul><li><a href="#overview">Overview</a></li><li><a href="#fields">Fields of an app</a></li><li><a href="#endpoints">Endpoints</a></li><li><a href="#not-built">Not built yet</a></li></ul></li>
+<li><a href="status-lifecycle.html">Status lifecycle</a></li>
+<li><a href="logo.html">Logo</a></li>
+<li><a href="capabilities.html">Capabilities</a></li>
+<li><a href="notification-limits.html">Notification limits</a></li>
+<li><a href="environments-and-ips.html">Environments and IPs</a></li>
+<li><a href="partner-keys.html">Partner keys</a></li>
+<li><a href="templates.html">Templates</a></li>
+<li><a href="payment-settings.html">Payment settings</a></li>
+<li><a href="notification-log-and-usage.html">Notification log and usage</a></li>
+<li><a href="reviews-reports-audit.html">Reviews, reports, audit</a></li>
+<li><a href="runbooks.html">Runbooks</a></li>
+<li><a href="errors.html">Errors</a></li>
+<li><a href="known-issues.html">Known issues</a></li>
+</ul></nav>
+<main>
+<h1>Create, edit and list apps</h1>
+<p class="lead">Create an app, read it, change it, and find apps by status.</p>
+<h2 id="overview">Overview</h2>
+<p>An app record is who the mini app is (names, description, logo, colours, publisher, contact), where it lives (entry URL, allowed origins) and how it is listed (categories, markets, priority). Everything else about an app (status, capabilities, limits, addresses, keys, templates, payment settings) has its own page. This page covers creating an app, reading it, editing it, and the two small helpers that summarise the whole catalog.</p>
+<div class="callout why"><span class="label">Why this exists</span>The catalog entry is what users see before they open a mini app, so the data has to be complete and trustworthy: a real support contact, a logo, the publisher's name. Creating an app is deliberately cheap (a new app starts as <code>DRAFT</code> and is invisible to users); it becomes visible only when an admin sets it LIVE.</div>
+<h2 id="fields">Fields of an app</h2>
+<p>The same fields are used to create an app (<code>POST</code>) and to change one (<code>PATCH</code>). On create, <code>slug</code> and <code>name</code> are required; everything else is optional. <strong>Unknown fields are rejected</strong> (<code>unknown field</code>), so a typo never silently does nothing.</p>
+<div class="table-wrap"><table><thead><tr><th>Field</th><th>Type</th><th>Required</th><th>Rules and default</th><th>Why it exists</th></tr></thead><tbody><tr><td><code>slug</code></td><td>string</td><td>create only</td><td>2 to 40 characters: lowercase letters, digits and dashes; must start and end with a letter or digit (<code>adera-fix</code> is fine, <code>-fix</code>, <code>Fix</code> and <code>fix_it</code> are not). <strong>Permanent</strong>: changing it later is refused. Must be unique (<code>409 slug_taken</code>).</td><td>Short stable name used in links and in the user catalog (<code>/api/v1/apps/adera-fix</code>).</td></tr><tr><td><code>name</code></td><td>object of strings</td><td>create</td><td>Keys <code>en</code>, <code>am</code>, <code>om</code>. <code>en</code> is required. Each text at most 100 characters; empty texts are dropped.</td><td>The title users see, in their language (English is the fallback).</td></tr><tr><td><code>description</code></td><td>object of strings</td><td>no</td><td>Same keys. Each text at most 1000 characters. Default: empty object.</td><td>The short description in the catalog.</td></tr><tr><td><code>brandColor</code></td><td>string or null</td><td>no</td><td><code>#RRGGBB</code> hex (stored upper-case). <code>null</code> clears it.</td><td>Accent colour for the app's tile and header.</td></tr><tr><td><code>categories</code></td><td>list of strings</td><td>no</td><td>Up to 10 items, each lowercase, starts with a letter, 2 to 31 characters of letters, digits, <code>_</code>, <code>-</code> (e.g. <code>home</code>, <code>travel</code>). Default: empty.</td><td>Lets the client group and filter the catalog.</td></tr><tr><td><code>markets</code></td><td>list of strings</td><td>no</td><td>Non-empty list of <code>ET</code>, <code>US</code> (case is normalised, duplicates removed). Default: <code>["ET"]</code>.</td><td>Which markets the app is offered in; the user catalog can be filtered by <code>?market=</code>.</td></tr><tr><td><code>publisherName</code></td><td>string or null</td><td>no</td><td>At most 150 characters.</td><td>Who runs the app, as shown to users.</td></tr><tr><td><code>publisherLegalName</code></td><td>string or null</td><td>no</td><td>At most 200 characters.</td><td>The registered company name, for the details page.</td></tr><tr><td><code>supportEmail</code></td><td>string or null</td><td>no</td><td>A valid email address (trimmed, lower-cased). <strong>Required before the app can go LIVE.</strong></td><td>Where users and staff reach the publisher.</td></tr><tr><td><code>supportPhone</code></td><td>string or null</td><td>no</td><td>At most 30 characters, free text (not validated as a phone number).</td><td>Optional phone contact.</td></tr><tr><td><code>website</code></td><td>string or null</td><td>no</td><td><code>https://</code> URL without spaces. See the known issue below about very long URLs.</td><td>The publisher's website.</td></tr><tr><td><code>entryUrl</code></td><td>string or null</td><td>no</td><td><code>https://</code> URL, or <code>http://localhost...</code> / <code>http://127.0.0.1...</code> for development. At most 500 characters.</td><td>The page the super app opens when a user taps the mini app.</td></tr><tr><td><code>allowedOrigins</code></td><td>list of strings</td><td>no</td><td>Up to 10 origins like <code>https://app.example.com</code>: scheme, host and optional port, <strong>no path and no trailing slash</strong>. Default: empty.</td><td>Origins that may talk to the super app's bridge. Stored and shown to staff; nothing enforces it yet (see Not built yet).</td></tr><tr><td><code>priority</code></td><td>integer</td><td>no</td><td>Whole number 0 to 100000. <strong>Lower is listed first.</strong> Default 100.</td><td>Order in the catalog (then by slug).</td></tr><tr><td><code>extra</code></td><td>object</td><td>no</td><td>Any JSON object up to 16384 bytes. On update it is <em>merged</em> key by key (see PATCH rules).</td><td>Free-form settings and notes that do not deserve a column (contact person, tier, region).</td></tr></tbody></table></div>
+<p>Read-only fields in every response: <code>id</code>, <code>logoImageId</code>, <code>logoUrl</code> (a temporary signed link, see <a href="logo.html">Logo</a>), <code>status</code>, <code>ratingAvg</code>, <code>ratingCount</code> (computed from visible reviews), <code>createdAt</code>, <code>updatedAt</code>. The contact fields are returned grouped as <code>publisher</code> (<code>name</code>, <code>legalName</code>, <code>supportEmail</code>, <code>supportPhone</code>, <code>website</code>) even though they are written as flat fields.</p>
+<div class="callout "><span class="label">Note</span><p>The backoffice form (<em>Mini apps &gt; New mini app</em>, and <em>App &gt; General</em>) has one input per field with the same limits, and shows the server's messages next to the field when it refuses.</p></div>
+<h2 id="endpoints">Endpoints</h2>
+<details class="endpoint" id="ep-create" open><summary><span class="method m-post">POST</span><span class="path">/admin/api/v1/apps</span><span class="sum">Create a mini app</span></summary><div class="body"><dl class="meta"><dt>Who may call</dt><dd>ADMIN or SUPER_ADMIN</dd><dt>Auth</dt><dd>Staff session Bearer token at assurance level aal2 (<code>Authorization: Bearer $TOKEN</code>)</dd><dt>Rate limit</dt><dd>300 requests per minute per client IP at the gateway (HTTP 429 beyond that)</dd><dt>Backoffice</dt><dd>Mini apps &gt; <em>New mini app</em></dd><dt>Audit name</dt><dd><code>app.create</code></dd><dt>Reversible</dt><dd>Not deletable; retire with status KILLED</dd></dl>
+<p><strong>Purpose.</strong> Creates a new mini app in status <code>DRAFT</code>, with empty allowed-address lists for DEV and PROD (so no partner server can call until an admin adds addresses). <strong>When to use it.</strong> When a partner has been approved to be onboarded; this is step 1 of the onboarding runbook.</p>
+<h4>Request body</h4>
+<p>All fields from the table above. Minimum: <code>slug</code> and <code>name</code>.</p>
+<pre><code>curl -sS -X POST "$GATEWAY/admin/api/v1/apps" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+  "slug": "doc-tmp-admin",
+  "name": {
+    "en": "Doc Temp Admin",
+    "am": "ዶክ ጊዜያዊ",
+    "om": "Doc Yeroo"
+  },
+  "description": {
+    "en": "A throwaway app used while writing the admin guide.",
+    "am": "ለመመሪያው የተፈጠረ ጊዜያዊ መተግበሪያ።"
+  },
+  "brandColor": "#0f9d58",
+  "categories": [
+    "home",
+    "travel"
+  ],
+  "markets": [
+    "ET",
+    "us"
+  ],
+  "publisherName": "Doc Temp Ltd",
+  "publisherLegalName": "Doc Temp Trading PLC",
+  "supportEmail": "Support@Doc-Temp.example",
+  "supportPhone": "+251911000000",
+  "website": "https://doc-temp.example",
+  "entryUrl": "https://app.doc-temp.example/start",
+  "allowedOrigins": [
+    "https://app.doc-temp.example"
+  ],
+  "priority": 50,
+  "extra": {
+    "tier": "pilot",
+    "contactPerson": "Doc Tester"
+  }
+}'</code></pre>
+<h4>Response (HTTP 200)</h4>
+<p>The new app. Note the normalisations the server applied: <code>brandColor</code> upper-cased, <code>markets</code> upper-cased, <code>supportEmail</code> lower-cased, status <code>DRAFT</code>.</p>
+<pre class="out"><code>HTTP 200 OK
+
+{
+  "id": "ff6510a9-de00-4fb2-97a4-ce4ad6e377dd",
+  "slug": "doc-tmp-admin",
+  "name": {
+    "en": "Doc Temp Admin",
+    "am": "ዶክ ጊዜያዊ",
+    "om": "Doc Yeroo"
+  },
+  "description": {
+    "en": "A throwaway app used while writing the admin guide.",
+    "am": "ለመመሪያው የተፈጠረ ጊዜያዊ መተግበሪያ።"
+  },
+  "logoImageId": null,
+  "logoUrl": null,
+  "brandColor": "#0F9D58",
+  "categories": [
+    "home",
+    "travel"
+  ],
+  "markets": [
+    "ET",
+    "US"
+  ],
+  "publisher": {
+    "name": "Doc Temp Ltd",
+    "legalName": "Doc Temp Trading PLC",
+    "supportEmail": "support@doc-temp.example",
+    "supportPhone": "+251911000000",
+    "website": "https://doc-temp.example"
+  },
+  "entryUrl": "https://app.doc-temp.example/start",
+  "allowedOrigins": [
+    "https://app.doc-temp.example"
+  ],
+  "status": "DRAFT",
+  "priority": 50,
+  "ratingAvg": 0,
+  "ratingCount": 0,
+  "extra": {
+    "tier": "pilot",
+    "contactPerson": "Doc Tester"
+  },
+  "createdAt": "2026-10-26T11:05:20.456350281Z",
+  "updatedAt": "2026-10-26T11:05:20.456350281Z"
+}</code></pre>
+<h4>Errors</h4>
+<div class="table-wrap"><table><thead><tr><th>Status</th><th><code>error</code></th><th>When it happens</th><th>What to do</th></tr></thead><tbody><tr><td>400</td><td><code>validation_failed</code></td><td>Any field breaks a rule; <code>fields</code> lists each bad field with a message.</td><td>Fix the fields named in <code>fields</code> and resend.</td></tr><tr><td>403</td><td><code>insufficient_role</code></td><td>A VIEWER called it.</td><td>Use an ADMIN.</td></tr><tr><td>409</td><td><code>slug_taken</code></td><td>An app with this slug already exists (including killed ones).</td><td>Pick another slug; slugs are never reused.</td></tr></tbody></table></div>
+<p>Real responses:</p>
+<pre class="out nocopy"><code>POST /admin/api/v1/apps  {"slug":"Doc_Tmp","brandColor":"green","markets":["XX"],"website":"http://x.example","priority":-1,"bogus":1}
+HTTP 400  {"error": "validation_failed", "fields": {"bogus": "unknown field", "slug": "required: 2-40 chars, lowercase letters, digits and dashes (e.g. adera-fix)", "name": "required (at least an English name)", "brandColor": "must look like #0F9D58", "markets": "must be a non-empty list of ET, US", "website": "must be an https:// URL", "priority": "must be a whole number from 0 to 100000 (lower is shown first)"}}
+
+POST /admin/api/v1/apps  {"slug":"a-","name":{"en":"x"}}
+HTTP 400  {"error": "validation_failed", "fields": {"slug": "required: 2-40 chars, lowercase letters, digits and dashes (e.g. adera-fix)"}}
+
+POST /admin/api/v1/apps  {"slug":"doc-tmp-admin","name":{"en":"x"}}
+HTTP 403  {"error": "insufficient_role"}
+
+POST /admin/api/v1/apps  {"slug":"doc-tmp-admin","name":{"en":"again"}}
+HTTP 409  {"error": "slug_taken"}</code></pre>
+<h4>Effects, side effects, audit</h4>
+<ul><li>Creates the app row, and two environment rows (DEV and PROD) with empty address lists.</li><li>Audit: <code>app.create</code> (target type <code>mini_app</code>, target id the app id, meta <code>{"slug": ...}</code>).</li><li>Nothing is visible to users and no partner can call yet. Reversible? There is no delete: set the status to KILLED to retire an app; the slug stays taken.</li></ul>
+<h4>Scenario</h4>
+<p>A food-delivery company signs the partnership. You create <code>doc-food</code> with its names in English and Amharic, publisher name, support email and entry URL. It stays DRAFT while you add the logo, capabilities, keys and addresses.</p>
+</div></details>
+<details class="endpoint" id="ep-list" open><summary><span class="method m-get">GET</span><span class="path">/admin/api/v1/apps</span><span class="sum">List mini apps (filter by status)</span></summary><div class="body"><dl class="meta"><dt>Who may call</dt><dd>Any staff role</dd><dt>Auth</dt><dd>Staff session Bearer token at assurance level aal2 (<code>Authorization: Bearer $TOKEN</code>)</dd><dt>Rate limit</dt><dd>300 requests per minute per client IP at the gateway (HTTP 429 beyond that)</dd><dt>Backoffice</dt><dd>Mini apps (the list: status filter, search box, sortable columns)</dd><dt>Audit name</dt><dd>none (read)</dd><dt>Reversible</dt><dd>n/a</dd></dl>
+<p><strong>Purpose.</strong> Lists apps of every status, ordered by <code>priority</code> (low first), then <code>slug</code>. Returns the same shape as create (no capabilities or keys; use the detail call for those). <strong>When to use it.</strong> To find an app's id, to see which apps are LIVE, to find all apps waiting in DRAFT.</p>
+<h4>Query parameters</h4>
+<div class="table-wrap"><table><thead><tr><th>Name</th><th>Type</th><th>Required</th><th>Meaning</th></tr></thead><tbody><tr><td><code>status</code></td><td>string</td><td>no</td><td><code>DRAFT</code>, <code>LIVE</code>, <code>PAUSED</code> or <code>KILLED</code>, any letter case. Anything else is <code>400 validation_failed</code>. Without it all statuses are returned (at most 200 apps).</td></tr></tbody></table></div>
+<pre><code>curl -sS -X GET "$GATEWAY/admin/api/v1/apps?status=draft" \
+  -H "Authorization: Bearer $TOKEN"</code></pre>
+<h4>Response (HTTP 200)</h4>
+<p>A JSON array of apps (here trimmed to the throwaway app, which was still a DRAFT; the <code>description</code> is left out to save space):</p>
+<pre class="out"><code>HTTP 200 OK
+
+[
+  {
+    "id": "ff6510a9-de00-4fb2-97a4-ce4ad6e377dd",
+    "slug": "doc-tmp-admin",
+    "name": {
+      "am": "ዶክ ጊዜያዊ",
+      "en": "Doc Temp Admin",
+      "om": "Doc Yeroo"
+    },
+    "logoImageId": null,
+    "logoUrl": null,
+    "brandColor": "#0F9D58",
+    "categories": [
+      "home",
+      "travel"
+    ],
+    "markets": [
+      "ET",
+      "US"
+    ],
+    "publisher": {
+      "name": "Doc Temp Ltd",
+      "legalName": "Doc Temp Trading PLC",
+      "supportEmail": "support@doc-temp.example",
+      "supportPhone": "+251911000000",
+      "website": "https://doc-temp.example"
+    },
+    "entryUrl": "https://app.doc-temp.example/start",
+    "allowedOrigins": [
+      "https://app.doc-temp.example"
+    ],
+    "status": "DRAFT",
+    "priority": 50,
+    "ratingAvg": 0.0,
+    "ratingCount": 0,
+    "extra": {
+      "tier": "pilot",
+      "contactPerson": "Doc Tester"
+    },
+    "createdAt": "2026-10-26T11:05:20.456350Z",
+    "updatedAt": "2026-10-26T11:05:20.456350Z"
+  }
+]</code></pre>
+<p>Without a filter the throwaway system returned 10 apps across the statuses DRAFT, KILLED, LIVE, PAUSED; with <code>?status=draft</code> it returned 3 (demo-flights, doc-tmp-admin, doc-tmp-partner).</p>
+<h4>Errors</h4>
+<div class="table-wrap"><table><thead><tr><th>Status</th><th><code>error</code></th><th>When it happens</th><th>What to do</th></tr></thead><tbody><tr><td>400</td><td><code>validation_failed</code></td><td><code>status</code> is not one of the four values.</td><td>Use DRAFT, LIVE, PAUSED or KILLED.</td></tr></tbody></table></div>
+<pre class="out nocopy"><code>GET /admin/api/v1/apps?status=ARCHIVED
+HTTP 400  {"error": "validation_failed", "fields": {"status": "must be DRAFT, LIVE, PAUSED or KILLED"}}</code></pre>
+<h4>How to use the result</h4>
+<ul><li>Use <code>id</code> in every other admin path. The slug is for humans.</li><li>To find apps that cannot go live yet use <code>GET /admin/api/v1/dashboard</code> (below): it lists drafts with what is missing.</li><li>There is no text search in the API; the backoffice list filters and sorts in the browser.</li></ul>
+</div></details>
+<details class="endpoint" id="ep-get" open><summary><span class="method m-get">GET</span><span class="path">/admin/api/v1/apps/{appId}</span><span class="sum">One app with all its settings</span></summary><div class="body"><dl class="meta"><dt>Who may call</dt><dd>Any staff role</dd><dt>Auth</dt><dd>Staff session Bearer token at assurance level aal2 (<code>Authorization: Bearer $TOKEN</code>)</dd><dt>Rate limit</dt><dd>300 requests per minute per client IP at the gateway (HTTP 429 beyond that)</dd><dt>Backoffice</dt><dd>Open an app: the page header and every tab (General, Capabilities, Notification limits, Environments and IPs, Partner keys, Payment, ...)</dd><dt>Audit name</dt><dd>none (read)</dd><dt>Reversible</dt><dd>n/a</dd></dl>
+<p><strong>Purpose.</strong> Everything about one app in one call: the app itself, its capabilities, payment settings, notification limits, allowed addresses per environment and partner keys (without secrets). <strong>When to use it.</strong> Before changing anything (to see the current state), and to check an app after onboarding.</p>
+<pre><code>curl -sS -X GET "$GATEWAY/admin/api/v1/apps/$APP_ID" \
+  -H "Authorization: Bearer $TOKEN"</code></pre>
+<h4>Response (HTTP 200)</h4>
+<p>Right after create (before any configuration):</p>
+<pre class="out"><code>HTTP 200 OK
+
+{
+  "app": {
+    "id": "ff6510a9-de00-4fb2-97a4-ce4ad6e377dd",
+    "slug": "doc-tmp-admin",
+    "logoImageId": null,
+    "logoUrl": null,
+    "brandColor": "#0F9D58",
+    "categories": [
+      "home",
+      "travel"
+    ],
+    "markets": [
+      "ET",
+      "US"
+    ],
+    "entryUrl": "https://app.doc-temp.example/start",
+    "allowedOrigins": [
+      "https://app.doc-temp.example"
+    ],
+    "status": "DRAFT",
+    "priority": 50,
+    "ratingAvg": 0.0,
+    "ratingCount": 0,
+    "extra": {
+      "tier": "pilot",
+      "contactPerson": "Doc Tester"
+    },
+    "createdAt": "2026-10-26T11:05:20.456350Z",
+    "updatedAt": "2026-10-26T11:05:20.456350Z"
+  },
+  "capabilities": [],
+  "payment": null,
+  "notificationLimits": [],
+  "environments": [
+    {
+      "environment": "DEV",
+      "allowedCidrs": []
+    },
+    {
+      "environment": "PROD",
+      "allowedCidrs": []
+    }
+  ],
+  "keys": []
+}</code></pre>
+<p>The parts, in order: <code>app</code> (as above); <code>capabilities</code> (one row per capability that was ever set: <code>capability</code>, <code>state</code> GRANTED/DENIED/SUSPENDED, <code>reason</code> object, <code>updatedAt</code>); <code>payment</code> (<code>null</code> until payment settings are saved); <code>notificationLimits</code> (rows per channel); <code>environments</code> (always DEV and PROD with <code>allowedCidrs</code>); <code>keys</code> (key id, environment, algorithm, fingerprint, label, status, expiresAt, createdAt, revokedAt).</p>
+<h4>Errors</h4>
+<div class="table-wrap"><table><thead><tr><th>Status</th><th><code>error</code></th><th>When it happens</th><th>What to do</th></tr></thead><tbody><tr><td>404</td><td><code>not_found</code></td><td>No app with this id.</td><td>Check the id (use the list call).</td></tr><tr><td>400</td><td><code>invalid_request</code></td><td>The path id is not a UUID.</td><td>Use the UUID, not the slug.</td></tr></tbody></table></div>
+<pre class="out nocopy"><code>GET /admin/api/v1/apps/$APP_ID
+HTTP 404  {"error": "not_found"}
+
+GET /admin/api/v1/apps/not-a-uuid
+HTTP 400  {"error": "invalid_request"}</code></pre>
+<h4>Gotchas</h4>
+<ul><li>The admin API takes the UUID only; the slug works in the <em>user</em> catalog, not here.</li><li><code>logoUrl</code> is a signed link that expires (default 60 minutes). Do not store it; fetch it again when you need it.</li></ul>
+</div></details>
+<details class="endpoint" id="ep-patch" open><summary><span class="method m-patch">PATCH</span><span class="path">/admin/api/v1/apps/{appId}</span><span class="sum">Edit an app (partial update)</span></summary><div class="body"><dl class="meta"><dt>Who may call</dt><dd>ADMIN or SUPER_ADMIN</dd><dt>Auth</dt><dd>Staff session Bearer token at assurance level aal2 (<code>Authorization: Bearer $TOKEN</code>)</dd><dt>Rate limit</dt><dd>300 requests per minute per client IP at the gateway (HTTP 429 beyond that)</dd><dt>Backoffice</dt><dd>App &gt; General (the edit form)</dd><dt>Audit name</dt><dd><code>app.update</code> (meta: names of the changed fields)</dd><dt>Reversible</dt><dd>Yes: send the old value again (no history of old values)</dd></dl>
+<p><strong>Purpose.</strong> Changes some fields of an app and leaves the rest alone. <strong>When to use it.</strong> To fix a typo, add a translation, set the support email so the app can go LIVE, change the order in the catalog, or store a note in <code>extra</code>.</p>
+<h4>PATCH semantics (read this)</h4>
+<div class="table-wrap"><table><thead><tr><th>Situation</th><th>What happens</th></tr></thead><tbody><tr><td>A field is <strong>absent</strong></td><td>Unchanged.</td></tr><tr><td>A text field is <code>null</code> (<code>brandColor</code>, <code>publisherName</code>, <code>publisherLegalName</code>, <code>supportEmail</code>, <code>supportPhone</code>, <code>website</code>, <code>entryUrl</code>)</td><td>Cleared. For <code>publisherName</code>, <code>publisherLegalName</code> and <code>supportPhone</code> an empty or blank string clears it too; for the others (email, URLs, colour) an empty string is a validation error, send <code>null</code>.</td></tr><tr><td><code>name</code> or <code>description</code> is sent</td><td>The <strong>whole object is replaced</strong>, not merged: sending <code>{"am": "..."}</code> for <code>name</code> is refused because <code>en</code> is required; sending a description without <code>om</code> removes the Oromo text. Always send every language you want to keep.</td></tr><tr><td><code>categories</code>, <code>markets</code>, <code>allowedOrigins</code> are sent</td><td>The whole list is replaced.</td></tr><tr><td><code>extra</code> is sent</td><td><strong>Merged</strong> key by key: keys you send are set, keys you do not send stay, and a key sent as <code>null</code> is removed. (The backoffice <em>Extra data</em> box does the same.)</td></tr><tr><td><code>slug</code> is sent</td><td>Always refused: <em>the slug is permanent and cannot be changed</em>.</td></tr><tr><td>An unknown field is sent</td><td>Refused with <code>unknown field</code>. Nothing is changed when any field is invalid (the update is all or nothing).</td></tr></tbody></table></div>
+<h4>Request example</h4>
+<p>Change the description, move the app up the list and edit <code>extra</code>: set <code>tier</code>, add <code>region</code>, remove <code>contactPerson</code>.</p>
+<pre><code>curl -sS -X PATCH "$GATEWAY/admin/api/v1/apps/$APP_ID" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+  "description": {
+    "en": "Updated description."
+  },
+  "priority": 10,
+  "extra": {
+    "tier": "gold",
+    "contactPerson": null,
+    "region": "addis"
+  }
+}'</code></pre>
+<h4>Response (HTTP 200)</h4>
+<p>The full updated app; note <code>extra</code>:</p>
+<pre class="out"><code>HTTP 200 OK
+
+{
+  "id": "ff6510a9-de00-4fb2-97a4-ce4ad6e377dd",
+  "slug": "doc-tmp-admin",
+  "description": {
+    "en": "Updated description."
+  },
+  "priority": 10,
+  "extra": {
+    "tier": "gold",
+    "region": "addis"
+  },
+  "updatedAt": "2026-10-26T11:05:20.528853263Z"
+}</code></pre>
+<h4>Clearing a field</h4>
+<pre><code>curl -sS -X PATCH "$GATEWAY/admin/api/v1/apps/$APP_ID" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+  "supportEmail": null,
+  "website": null
+}'</code></pre>
+<p>This removes the support email and the website; the app can no longer go LIVE until a support email is set again. The response is the full app (<code>publisher.supportEmail</code> and <code>publisher.website</code> are <code>null</code>).</p>
+<h4>Errors</h4>
+<div class="table-wrap"><table><thead><tr><th>Status</th><th><code>error</code></th><th>When it happens</th><th>What to do</th></tr></thead><tbody><tr><td>400</td><td><code>validation_failed</code></td><td>A field breaks a rule, the slug was sent, or a field is unknown.</td><td>Read <code>fields</code>.</td></tr><tr><td>400</td><td><code>invalid_request</code></td><td>The body is not valid JSON, or the path id is not a UUID.</td><td>Fix the JSON.</td></tr><tr><td>403</td><td><code>insufficient_role</code></td><td>VIEWER.</td><td>Use an ADMIN.</td></tr><tr><td>404</td><td><code>not_found</code></td><td>No such app.</td><td>Check the id.</td></tr><tr><td>409</td><td><code>conflict</code></td><td>The database refused a value (see the known issue: a <code>website</code> longer than 300 characters).</td><td>Shorten the value.</td></tr></tbody></table></div>
+<pre class="out nocopy"><code>PATCH /admin/api/v1/apps/$APP_ID  {"slug":"other"}
+HTTP 400  {"error": "validation_failed", "fields": {"slug": "the slug is permanent and cannot be changed"}}
+
+PATCH /admin/api/v1/apps/$APP_ID  {"colour":"#fff"}
+HTTP 400  {"error": "validation_failed", "fields": {"colour": "unknown field"}}
+
+PATCH /admin/api/v1/apps/$APP_ID  {"name":{"am":"ብቻ"}}
+HTTP 400  {"error": "validation_failed", "fields": {"name": "an English ('en') name is required"}}
+
+PATCH /admin/api/v1/apps/$APP_ID  {"priority":1}
+HTTP 403  {"error": "insufficient_role"}
+
+PATCH /admin/api/v1/apps/$APP_ID  {"website":"https://doc-temp.example/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa...   (355 characters)
+HTTP 409  {"error": "conflict"}</code></pre>
+<p>Every field rule at once (one request that breaks them all, to show the messages the server gives):</p>
+<pre class="out nocopy"><code>PATCH /admin/api/v1/apps/$APP_ID  {"priority":1.5,"categories":["Home","x"],"allowedOrigins":["https://app.example.com/"],"brandColor":"#12345","markets":[],"supportEmail":"not-an-e...
+HTTP 400  {"error": "validation_failed", "fields": {"name": "unsupported language 'fr' (use en, am, om)", "description": "en is longer than 1000 characters", "brandColor": "must look like #0F9D58", "categories": "each item must be lowercase words like 'home' or 'travel'", "markets": "must be a non-empty list of ET, US", "supportEmail": "must be a valid email address", "entryUrl": "must be an https:// URL", "allowedOrigins": "each item must be origins like https://fix.adera.et (no path)", "priority": "must be a whole number from 0 to 100000 (lower is shown first)", "extra": "must be a JSON object"}}</code></pre>
+<h4>Effects, audit</h4>
+<ul><li>Audit: <code>app.update</code>, meta <code>{"fields": [the names of the fields in the request]}</code> (the values are not logged; compare with the response, or keep your own change ticket).</li><li>Takes effect immediately for the catalog that users see (if the app is LIVE). There is no versioning of an app record: the audit log tells you who changed which fields and when, not the old values.</li><li>Changing <code>supportEmail</code> or the logo of a LIVE app does not change its status. Clearing the support email of a LIVE app does <em>not</em> take it offline; the readiness check runs only when the status is set.</li></ul>
+</div></details>
+<details class="endpoint" id="ep-dashboard" open><summary><span class="method m-get">GET</span><span class="path">/admin/api/v1/dashboard</span><span class="sum">Counts for the home page</span></summary><div class="body"><dl class="meta"><dt>Who may call</dt><dd>Any staff role</dd><dt>Auth</dt><dd>Staff session Bearer token at assurance level aal2 (<code>Authorization: Bearer $TOKEN</code>)</dd><dt>Rate limit</dt><dd>300 requests per minute per client IP at the gateway (HTTP 429 beyond that)</dd><dt>Backoffice</dt><dd>Dashboard</dd><dt>Audit name</dt><dd>none (read)</dd><dt>Reversible</dt><dd>n/a</dd></dl>
+<p><strong>Purpose.</strong> Real counts for the home page: apps per status, open reports, reviews, staff, and the drafts that are still missing something before they can go LIVE. <strong>When to use it.</strong> Daily check; or in a script that shows which draft apps are blocked and why.</p>
+<pre><code>curl -sS -X GET "$GATEWAY/admin/api/v1/dashboard" \
+  -H "Authorization: Bearer $TOKEN"</code></pre>
+<pre class="out"><code>HTTP 200 OK
+(draftApps trimmed to the throwaway app; counts come from the whole dev stack)
+
+{
+  "apps": {
+    "DRAFT": 2,
+    "LIVE": 4,
+    "PAUSED": 2,
+    "KILLED": 1,
+    "total": 9
+  },
+  "reports": {
+    "open": 7,
+    "total": 12
+  },
+  "reviews": {
+    "total": 17,
+    "hidden": 2,
+    "last7Days": 17
+  },
+  "staff": {
+    "active": 5,
+    "disabled": 1
+  },
+  "draftApps": [
+    {
+      "id": "ff6510a9-de00-4fb2-97a4-ce4ad6e377dd",
+      "slug": "doc-tmp-admin",
+      "name": {
+        "am": "ዶክ ጊዜያዊ",
+        "en": "Doc Temp Admin",
+        "om": "Doc Yeroo"
+      },
+      "missingForLive": [
+        "logo"
+      ]
+    }
+  ]
+}</code></pre>
+<ul><li><code>draftApps</code> holds up to the 10 newest DRAFT apps; <code>missingForLive</code> lists <code>logo</code> and/or <code>supportEmail</code> (the two LIVE requirements). An empty list means the app is ready.</li><li><code>reports.open</code> is the number of user reports still waiting for staff (see <a href="reviews-reports-audit.html">Reviews, reports, audit</a>).</li></ul>
+</div></details>
+<h2 id="not-built">Not built yet</h2>
+<ul><li>Deleting an app (use status KILLED).</li><li>Changing a slug.</li><li>Free-text search or paging on the app list (it returns at most 200 apps).</li><li><code>allowedOrigins</code> is stored and returned to staff but is not used by any service yet; it is meant for the future in-app bridge that opens the mini app's page.</li><li>A history of old values of an app record.</li></ul>
+
+<div class="pager"><a class="prev" href="roles-and-access.html"><small>Previous</small>Roles and access</a><a class="next" href="status-lifecycle.html"><small>Next</small>Status lifecycle</a></div>
+<p class="footer">Admin guide: managing mini apps. Examples were captured from a running dev stack (ADERA_ENV=dev) with a throwaway app and a temporary staff account, both removed afterwards. Ids, timestamps and key ids differ on your system.</p>
+</main>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

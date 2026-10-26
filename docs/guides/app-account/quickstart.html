@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Quick start: first run, copy and paste | Adera guide</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+<button id="menu-btn" type="button" aria-label="Toggle menu">Menu</button>
+<span class="brand">Adera guide: sign-in and account</span>
+<span class="spacer"></span>
+<button id="theme-btn" type="button" aria-label="Toggle light or dark theme">Theme</button>
+</header>
+<div class="layout">
+<nav class="sidebar" aria-label="Pages in this guide">
+<h4>Super app: sign-in and account</h4>
+<ul><li><a href="index.html">Overview</a></li>
+<li><a href="quickstart.html" class="current">Quick start</a><ul><li><a href="#prereq">Before you start</a></li><li><a href="#first-run">First run: register, fill the profile, register the device, log out</a></li><li><a href="#returning">Second run: the same person signs in again</a></li><li><a href="#what-the-app-does">The same sequence as an app does it</a></li><li><a href="#cleanup">Cleaning up after a test</a></li></ul></li>
+<li><a href="authentication.html">Registration and login</a></li>
+<li><a href="session-and-logout.html">Session and logout</a></li>
+<li><a href="profile.html">Profile</a></li>
+<li><a href="extra-data.html">Extra data</a></li>
+<li><a href="location.html">Location</a></li>
+<li><a href="avatar.html">Avatar</a></li>
+<li><a href="devices-and-push-tokens.html">Devices and push tokens</a></li>
+<li><a href="errors.html">Error table</a></li>
+<li><a href="known-issues.html">Known issues and not built yet</a></li></ul>
+</nav>
+<main>
+<h1>Quick start: first run, copy and paste</h1>
+<p class="lead">A complete first-run sequence you can paste into a shell: sign up with a phone code, use the profile, location, device and avatar APIs, log out, and sign in again.</p>
+<h2 id="prereq">Before you start</h2>
+<ul><li>A shell with <code>curl</code> and <code>jq</code>. The dev gateway is <code>http://127.0.0.1:9080</code> (<code>$GATEWAY</code>).</li><li>The dev stack runs in dev mode: the SMS provider is the console (nothing is sent) and the notification service exposes <code>/dev/messages</code> so you can read the one-time code. In production the person receives the code by SMS or email and step 3 is replaced by the user typing it.</li><li>A small image file named <code>photo.jpg</code> in the current directory for the avatar step (any JPEG, PNG, GIF or BMP under 5 MiB).</li><li>Use a phone number of your own (international format). Every sign-in step counts against the gateway limit of 10 submits per minute per IP and the per-number SMS limit of 5 per hour, so do not run this in a loop.</li><li>The whole script below was run end to end against the dev stack on 2026-10-26 (registration, profile, location, device, avatar, logout, then a returning login); the outputs in this guide come from those runs.</li></ul>
+<h2 id="first-run">First run: register, fill the profile, register the device, log out</h2>
+<p>Copy the block into a shell (it is plain bash). Each step prints what to look at. Variables set early (<code>$TOKEN</code>, <code>$USER_ID</code>) are reused by later steps.</p>
+<pre><code>export GATEWAY=http://127.0.0.1:9080
+export PHONE='+2519XXXXXXXX'        # a number of your own, international format (any well-formed number works in dev)
+
+# 1. Start a registration flow (valid 10 minutes)
+FLOW=$(curl -s "$GATEWAY/kratos/self-service/registration/api" | jq -r .id)
+echo "flow: $FLOW"
+
+# 2. Submit the phone: Kratos sends the code. HTTP 400 with state "sent_email" is the SUCCESS answer.
+curl -s -X POST "$GATEWAY/kratos/self-service/registration?flow=$FLOW" \
+  -H 'Content-Type: application/json' \
+  -d "{\"method\":\"code\",\"traits.phone_number\":\"$PHONE\"}" | jq '{state, message: .ui.messages[0].id}'
+
+# 3. DEV ONLY: read the code the console SMS provider "sent" (in production the user receives an SMS)
+sleep 2
+CODE=$(curl -s "http://127.0.0.1:8085/dev/messages?to=$(jq -rn --arg p "$PHONE" '$p|@uri')" \
+  | jq -r 'max_by(.at).body' | grep -oE '[0-9]{6}' | head -1)
+echo "code: $CODE"
+
+# 4. Submit phone + code: HTTP 200 returns the session token
+RESP=$(curl -s -X POST "$GATEWAY/kratos/self-service/registration?flow=$FLOW" \
+  -H 'Content-Type: application/json' \
+  -d "{\"method\":\"code\",\"traits.phone_number\":\"$PHONE\",\"code\":\"$CODE\"}")
+export TOKEN=$(echo "$RESP" | jq -r .session_token)
+export USER_ID=$(echo "$RESP" | jq -r .session.identity.id)
+echo "user id: $USER_ID   session expires: $(echo "$RESP" | jq -r .session.expires_at)"
+
+# 5. Read my profile (the profile row was created by the registration web hook)
+curl -s "$GATEWAY/api/v1/me" -H "Authorization: Bearer $TOKEN" | jq .
+
+# 6. Fill in the profile (only the keys that change)
+curl -s -X PATCH "$GATEWAY/api/v1/me" \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"firstName":"Selam","lastName":"Tadesse","language":"am","termsAcceptedVersion":"2026-10","extra":{"ui":{"theme":"dark"}}}' \
+  | jq '{firstName, language, termsAcceptedAt, extra}'
+
+# 7. Share a coarse location, then clear it
+curl -s -X PUT "$GATEWAY/api/v1/me/location" \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"countryCode":"ET","city":"Addis Ababa"}' | jq .location
+curl -s -X DELETE "$GATEWAY/api/v1/me/location" -H "Authorization: Bearer $TOKEN" | jq .location
+
+# 8. Register this installation for push (use your real FCM token; any string works in dev)
+curl -s -X PUT "$GATEWAY/api/v1/me/devices" \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"fcmToken":"dev-fcm-token-1","platform":"ANDROID","installationId":"my-install-0001","appVersion":"1.0.0","deviceName":"Test phone"}' | jq .
+curl -s "$GATEWAY/api/v1/me/devices" -H "Authorization: Bearer $TOKEN" | jq 'length'
+
+# 9. Upload an avatar (any JPEG, PNG, GIF or BMP up to 5 MiB; the server crops/resizes to 512 px)
+curl -s -X POST "$GATEWAY/api/v1/me/avatar" -H "Authorization: Bearer $TOKEN" -F "file=@photo.jpg" \
+  | jq '{avatarImageId, avatarUrl}'
+# show it: the avatarUrl is a signed link, fetch it WITHOUT the Authorization header
+curl -s -o avatar.jpg "$(curl -s "$GATEWAY/api/v1/me" -H "Authorization: Bearer $TOKEN" | jq -r .avatarUrl)" &amp;&amp; file avatar.jpg
+
+# 10. Log out this device: removes the push token and revokes the session (HTTP 204)
+curl -s -o /dev/null -w "logout: %{http_code}\n" -X POST "$GATEWAY/api/v1/me/logout" \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"fcmToken":"dev-fcm-token-1","installationId":"my-install-0001"}'
+# the old token is dead now (HTTP 401)
+curl -s -o /dev/null -w "after logout: %{http_code}\n" "$GATEWAY/api/v1/me" -H "Authorization: Bearer $TOKEN"</code></pre>
+<p>What you should see: step 2 prints <code>{"state":"sent_email","message":1040005}</code> (the code was sent); step 4 prints the user id and the 30-day expiry; step 5 shows a fresh profile with <code>firstName: null</code>, <code>language: "en"</code>, <code>market: "ET"</code>, <code>status: "ACTIVE"</code>; step 6 shows the updated fields and <code>termsAcceptedAt</code> set by the server; step 7 prints the location then <code>null</code>; step 8 prints the device and <code>1</code>; step 9 prints an <code>avatarImageId</code>, then <code>file</code> reports a 512x512 JPEG; logout prints <code>204</code> and the old token gives <code>401</code>.</p>
+<h2 id="returning">Second run: the same person signs in again</h2>
+<p>A returning user uses the login endpoints and the field <code>identifier</code>. The profile you saved is still there.</p>
+<pre><code># Returning user: the same flow with the login endpoints and "identifier"
+FLOW=$(curl -s "$GATEWAY/kratos/self-service/login/api" | jq -r .id)
+curl -s -X POST "$GATEWAY/kratos/self-service/login?flow=$FLOW" \
+  -H 'Content-Type: application/json' \
+  -d "{\"method\":\"code\",\"identifier\":\"$PHONE\"}" | jq '{state, message: .ui.messages[0].id}'
+# (dev) read the newest code for $PHONE as in step 3, then:
+sleep 2
+CODE=$(curl -s "http://127.0.0.1:8085/dev/messages?to=$(jq -rn --arg p "$PHONE" '$p|@uri')" \
+  | jq -r 'max_by(.at).body' | grep -oE '[0-9]{6}' | head -1)
+export TOKEN=$(curl -s -X POST "$GATEWAY/kratos/self-service/login?flow=$FLOW" \
+  -H 'Content-Type: application/json' \
+  -d "{\"method\":\"code\",\"identifier\":\"$PHONE\",\"code\":\"$CODE\"}" | jq -r .session_token)
+curl -s "$GATEWAY/api/v1/me" -H "Authorization: Bearer $TOKEN" | jq '{id, firstName, language}'</code></pre>
+<p>Expected: <code>{"state":"sent_email","message":1010014}</code>, then <code>{"id":"...","firstName":"Selam","language":"am"}</code>. If the login flow answers message <code>4000035</code> instead, the number has no account: use the registration flow (the app should try login first, then fall back to registration; see Registration and login).</p>
+<h2 id="what-the-app-does">The same sequence as an app does it</h2>
+<ol><li>Launch: read the token from secure storage. None: show sign-in. Present: <code>GET /api/v1/me</code>. <code>200</code>: go on. <code>401</code>: delete the token, show sign-in. <code>403</code>: blocking screen. <code>5xx</code>/offline: retry, keep the token.</li><li>Sign-in screen: ask for phone or email once. <code>GET /kratos/self-service/login/api</code>, <code>POST</code> the identifier. <code>4000035</code>: switch to the registration flow with the same identifier. <code>1010014</code>/<code>1040005</code>: show the code screen with a 5-minute countdown.</li><li>Code screen: <code>POST</code> identifier plus code to the same flow. <code>200</code>: store <code>session_token</code> (and <code>session.expires_at</code>). <code>400</code> with <code>4010008</code>/<code>4040003</code>: wrong code, let them retry. <code>429</code>: wait and retry.</li><li>After sign-in: <code>GET /api/v1/me</code>; if <code>firstName</code> is <code>null</code> run onboarding (<code>PATCH /api/v1/me</code>, optional <code>PUT /location</code>, optional avatar).</li><li>Push: get the FCM token and <code>PUT /api/v1/me/devices</code> (with a stored installation id); repeat on every token refresh.</li><li>Sign out: <code>POST /api/v1/me/logout</code> with the FCM token and installation id, then clear local state.</li></ol>
+<h2 id="cleanup">Cleaning up after a test</h2>
+<p>The script logs the session out. The account itself stays (the platform has no customer-facing account deletion yet, see Known issues and not built yet). In the dev stack the test account can be removed by the platform owner; do not reuse the seeded demo accounts for experiments.</p>
+
+<div class="pager"><a class="prev" href="index.html"><small>Previous</small>Overview</a><a class="next" href="authentication.html"><small>Next</small>Registration and login</a></div>
+<p class="footer">Adera super-app guide: sign-in and account &middot; verified against the dev stack on 2026-10-26</p>
+</main>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

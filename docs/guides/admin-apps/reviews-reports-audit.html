@@ -1,0 +1,262 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Reviews, reports and audit | Admin: managing mini apps</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+<button id="menu-btn" type="button" aria-label="Toggle menu">Menu</button>
+<a class="brand" href="index.html">Admin: managing mini apps</a>
+<span class="spacer"></span>
+<button id="theme-btn" type="button" aria-label="Toggle light or dark theme">Theme</button>
+</header>
+<div class="layout">
+<nav class="sidebar" aria-label="Pages in this guide">
+<h4>This guide</h4>
+<ul><li><a href="index.html">Overview</a></li>
+<li><a href="roles-and-access.html">Roles and access</a></li>
+<li><a href="apps-create-and-edit.html">Create, edit, list apps</a></li>
+<li><a href="status-lifecycle.html">Status lifecycle</a></li>
+<li><a href="logo.html">Logo</a></li>
+<li><a href="capabilities.html">Capabilities</a></li>
+<li><a href="notification-limits.html">Notification limits</a></li>
+<li><a href="environments-and-ips.html">Environments and IPs</a></li>
+<li><a href="partner-keys.html">Partner keys</a></li>
+<li><a href="templates.html">Templates</a></li>
+<li><a href="payment-settings.html">Payment settings</a></li>
+<li><a href="notification-log-and-usage.html">Notification log and usage</a></li>
+<li><a href="reviews-reports-audit.html" class="current">Reviews, reports, audit</a><ul><li><a href="#overview">Overview</a></li><li><a href="#how-users">What users do (for context)</a></li><li><a href="#endpoints">Endpoints</a></li><li><a href="#audit">The audit log</a></li><li><a href="#not-built">Not built yet</a></li></ul></li>
+<li><a href="runbooks.html">Runbooks</a></li>
+<li><a href="errors.html">Errors</a></li>
+<li><a href="known-issues.html">Known issues</a></li>
+</ul></nav>
+<main>
+<h1>Reviews, reports and audit</h1>
+<p class="lead">Moderate an app's reviews and reports, and read what staff did to it.</p>
+<h2 id="overview">Overview</h2>
+<p>Three things about an app that staff watch over, besides its configuration: what <strong>users say</strong> about it (reviews and reports) and <strong>what staff did</strong> to it (the audit log). All of them are under <code>/admin/api/v1</code>; reading is for any staff role (except the audit log: ADMIN and above), changing is ADMIN and above.</p>
+<div class="callout why"><span class="label">Why this exists</span>An app's rating and reviews are public. If a review is abusive, or a user reports an app as a scam, staff must be able to hide the review or act on the report quickly, and later prove what they did. The audit log is that proof.</div>
+<h2 id="how-users">What users do (for context)</h2>
+<ul><li>A signed-in user can rate a <strong>LIVE</strong> app 1 to 5 stars with an optional comment (up to 2000 characters), once per app (sending again edits their review), and delete it: <code>PUT/DELETE /api/v1/apps/{slug}/my-review</code>. Reviews are shown anonymously (no user id) in the catalog.</li><li>A user can report a LIVE app from the 3-dot menu: <code>POST /api/v1/apps/{slug}/report</code> with a <code>reason</code> (<code>SPAM</code>, <code>SCAM</code>, <code>INAPPROPRIATE</code>, <code>BROKEN</code>, <code>OTHER</code>) and optional <code>details</code> (up to 2000 characters). A second report by the same user while the first is still open returns the first one (no pile-ups).</li><li>Both are refused (<code>404</code>) while the app is not LIVE. The average rating and count (<code>ratingAvg</code>, <code>ratingCount</code> on the app) are computed from <strong>visible</strong> reviews only.</li></ul>
+<p>Real example: a demo user rated the throwaway app 2 stars and reported it as <code>BROKEN</code> (both removed at the end of the test):</p>
+<pre class="out nocopy"><code>PUT /api/v1/apps/doc-tmp-admin/my-review
+{
+  "rating": 2,
+  "comment": "Doc test review (will be removed)"
+}
+-&gt; {"id": "8c730183-cc17-4f81-9da7-4d008d3921a3", "rating": 2, "comment": "Doc test review (will be removed)", "createdAt": "2026-10-26T11:07:33.308235237Z", "updatedAt": "2026-10-26T11:07:33.308235237Z"}
+
+POST /api/v1/apps/doc-tmp-admin/report
+{
+  "reason": "BROKEN",
+  "details": "Doc test report (will be removed)"
+}
+-&gt; {"status": "received", "reportId": "3cf597be-1eeb-4d56-a825-22626b1f1615"}</code></pre>
+<h2 id="endpoints">Endpoints</h2>
+<details class="endpoint" id="ep-reviews-app" open><summary><span class="method m-get">GET</span><span class="path">/admin/api/v1/apps/{appId}/reviews</span><span class="sum">Reviews of one app</span></summary><div class="body"><dl class="meta"><dt>Who may call</dt><dd>Any staff role</dd><dt>Auth</dt><dd>Staff session Bearer token at assurance level aal2 (<code>Authorization: Bearer $TOKEN</code>)</dd><dt>Rate limit</dt><dd>300 requests per minute per client IP at the gateway (HTTP 429 beyond that)</dd><dt>Backoffice</dt><dd>App &gt; <em>Reviews</em></dd><dt>Audit name</dt><dd>none (read)</dd><dt>Reversible</dt><dd>n/a</dd></dl>
+<p><strong>Purpose.</strong> Every review of one app, newest first, <strong>including hidden ones</strong>, with the user id (staff only). <strong>When to use it.</strong> After a complaint about an app's reviews, or before deciding to pause an app with a falling rating.</p>
+<h4>Query</h4>
+<div class="table-wrap"><table><thead><tr><th>Name</th><th>Type</th><th>Required</th><th>Meaning</th></tr></thead><tbody><tr><td><code>page</code></td><td>integer</td><td>no</td><td>0-based page, default 0.</td></tr><tr><td><code>size</code></td><td>integer</td><td>no</td><td>Default 50, at most 100.</td></tr></tbody></table></div>
+<pre><code>curl -sS -X GET "$GATEWAY/admin/api/v1/apps/$APP_ID/reviews" \
+  -H "Authorization: Bearer $TOKEN"</code></pre>
+<pre class="out"><code>HTTP 200 OK
+
+[
+  {
+    "appId": "ff6510a9-de00-4fb2-97a4-ce4ad6e377dd",
+    "userId": "5a34a478-6d70-45a9-89d3-a09eaa446ff3",
+    "rating": 2,
+    "comment": "Doc test review (will be removed)",
+    "createdAt": "2026-10-26T11:07:33.308235Z",
+    "id": "8c730183-cc17-4f81-9da7-4d008d3921a3",
+    "status": "VISIBLE",
+    "updatedAt": "2026-10-26T11:07:33.308235Z"
+  }
+]</code></pre>
+<p>No total header on this one (use the cross-app call below if you need a count). An app with no reviews returns <code>[]</code>.</p>
+</div></details>
+<details class="endpoint" id="ep-reviews-all" open><summary><span class="method m-get">GET</span><span class="path">/admin/api/v1/reviews</span><span class="sum">Reviews across apps</span></summary><div class="body"><dl class="meta"><dt>Who may call</dt><dd>Any staff role</dd><dt>Auth</dt><dd>Staff session Bearer token at assurance level aal2 (<code>Authorization: Bearer $TOKEN</code>)</dd><dt>Rate limit</dt><dd>300 requests per minute per client IP at the gateway (HTTP 429 beyond that)</dd><dt>Backoffice</dt><dd>Moderation &gt; <em>Reviews</em> (status and app filters)</dd><dt>Audit name</dt><dd>none (read)</dd><dt>Reversible</dt><dd>n/a</dd></dl>
+<p><strong>Purpose.</strong> Reviews across all apps (or one), with the app's slug, filtered by moderation status. <strong>When to use it.</strong> Daily moderation: look at the newest reviews of every app.</p>
+<h4>Query</h4>
+<div class="table-wrap"><table><thead><tr><th>Name</th><th>Type</th><th>Required</th><th>Meaning</th></tr></thead><tbody><tr><td><code>status</code></td><td>string</td><td>no</td><td><code>VISIBLE</code> or <code>HIDDEN</code> (any letter case). Anything else: <code>400 validation_failed</code>.</td></tr><tr><td><code>appId</code></td><td>UUID</td><td>no</td><td>Only this app.</td></tr><tr><td><code>page</code>, <code>size</code></td><td>integers</td><td>no</td><td>Page (0-based) and size (default 50, at most 100).</td></tr></tbody></table></div>
+<pre><code>curl -sS -X GET "$GATEWAY/admin/api/v1/reviews?appId=$APP_ID&amp;status=visible" \
+  -H "Authorization: Bearer $TOKEN"</code></pre>
+<pre class="out"><code>HTTP 200 OK
+X-Total-Count: 1
+
+[
+  {
+    "id": "8c730183-cc17-4f81-9da7-4d008d3921a3",
+    "appId": "ff6510a9-de00-4fb2-97a4-ce4ad6e377dd",
+    "appSlug": "doc-tmp-admin",
+    "userId": "5a34a478-6d70-45a9-89d3-a09eaa446ff3",
+    "rating": 2,
+    "comment": "Doc test review (will be removed)",
+    "status": "VISIBLE",
+    "createdAt": "2026-10-26T11:07:33.308235Z",
+    "updatedAt": "2026-10-26T11:07:33.308235Z"
+  }
+]</code></pre>
+<p><code>X-Total-Count</code> is the number of matching reviews.</p>
+</div></details>
+<details class="endpoint" id="ep-review-moderate" open><summary><span class="method m-patch">PATCH</span><span class="path">/admin/api/v1/reviews/{reviewId}</span><span class="sum">Hide or restore a review</span></summary><div class="body"><dl class="meta"><dt>Who may call</dt><dd>ADMIN or SUPER_ADMIN</dd><dt>Auth</dt><dd>Staff session Bearer token at assurance level aal2 (<code>Authorization: Bearer $TOKEN</code>)</dd><dt>Rate limit</dt><dd>300 requests per minute per client IP at the gateway (HTTP 429 beyond that)</dd><dt>Backoffice</dt><dd>Moderation &gt; Reviews and App &gt; Reviews (Hide / Show)</dd><dt>Audit name</dt><dd><code>review.moderate</code></dd><dt>Reversible</dt><dd>Yes</dd></dl>
+<p><strong>Purpose.</strong> Hides or restores a review. <strong>When to use it.</strong> A review is abusive, contains personal data, or is clearly a fake; or you hid one by mistake.</p>
+<h4>Body</h4>
+<div class="table-wrap"><table><thead><tr><th>Field</th><th>Type</th><th>Required</th><th>Meaning</th></tr></thead><tbody><tr><td><code>status</code></td><td>string</td><td>yes</td><td><code>VISIBLE</code> or <code>HIDDEN</code> (any letter case).</td></tr></tbody></table></div>
+<pre><code>curl -sS -X PATCH "$GATEWAY/admin/api/v1/reviews/$REVIEW_ID" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+  "status": "HIDDEN"
+}'</code></pre>
+<h4>Response (HTTP 200)</h4>
+<pre class="out"><code>HTTP 200 OK
+
+{
+  "appId": "ff6510a9-de00-4fb2-97a4-ce4ad6e377dd",
+  "userId": "5a34a478-6d70-45a9-89d3-a09eaa446ff3",
+  "rating": 2,
+  "comment": "Doc test review (will be removed)",
+  "createdAt": "2026-10-26T11:07:33.308235Z",
+  "id": "8c730183-cc17-4f81-9da7-4d008d3921a3",
+  "status": "HIDDEN",
+  "updatedAt": "2026-10-26T11:07:33.379396131Z"
+}</code></pre>
+<div class="table-wrap"><table><thead><tr><th>Status</th><th><code>error</code></th><th>When it happens</th><th>What to do</th></tr></thead><tbody><tr><td>400</td><td><code>validation_failed</code></td><td><code>status</code> is not VISIBLE or HIDDEN.</td><td>Fix the value.</td></tr><tr><td>403</td><td><code>insufficient_role</code></td><td>VIEWER.</td><td>Use an ADMIN.</td></tr><tr><td>404</td><td><code>not_found</code></td><td>No such review.</td><td>Check the id.</td></tr></tbody></table></div>
+<pre class="out nocopy"><code>PATCH /admin/api/v1/reviews/$REVIEW_ID  {"status":"DELETED"}
+HTTP 400  {"error": "validation_failed", "fields": {"status": "must be VISIBLE or HIDDEN"}}
+
+PATCH /admin/api/v1/reviews/$REVIEW_ID  {"status":"VISIBLE"}
+HTTP 403  {"error": "insufficient_role"}</code></pre>
+<h4>Effects, audit</h4>
+<ul><li>The review disappears from (or returns to) the public list, and the app's <code>ratingAvg</code> and <code>ratingCount</code> are recomputed at once. The user is not told and can still read their own review.</li><li>Audit: <code>review.moderate</code> (target type <code>app_review</code>, target id the review id, meta <code>{"status", "appId"}</code>). Reversible: set the other status.</li></ul>
+</div></details>
+<details class="endpoint" id="ep-reports-list" open><summary><span class="method m-get">GET</span><span class="path">/admin/api/v1/reports</span><span class="sum">List user reports</span></summary><div class="body"><dl class="meta"><dt>Who may call</dt><dd>Any staff role</dd><dt>Auth</dt><dd>Staff session Bearer token at assurance level aal2 (<code>Authorization: Bearer $TOKEN</code>)</dd><dt>Rate limit</dt><dd>300 requests per minute per client IP at the gateway (HTTP 429 beyond that)</dd><dt>Backoffice</dt><dd>Moderation &gt; <em>Reports</em>; App &gt; <em>Reports</em></dd><dt>Audit name</dt><dd>none (read)</dd><dt>Reversible</dt><dd>n/a</dd></dl>
+<p><strong>Purpose.</strong> User reports about apps, newest first, with the reporter's user id and the handling state. <strong>When to use it.</strong> Daily: work the queue of OPEN reports. Per app: before deciding on a status change.</p>
+<h4>Query</h4>
+<div class="table-wrap"><table><thead><tr><th>Name</th><th>Type</th><th>Required</th><th>Meaning</th></tr></thead><tbody><tr><td><code>status</code></td><td>string</td><td>no</td><td><code>OPEN</code>, <code>REVIEWED</code> or <code>DISMISSED</code>.</td></tr><tr><td><code>appId</code></td><td>UUID</td><td>no</td><td>Only this app.</td></tr><tr><td><code>page</code>, <code>size</code></td><td>integers</td><td>no</td><td>Page (0-based) and size (default 50, at most 100).</td></tr></tbody></table></div>
+<pre><code>curl -sS -X GET "$GATEWAY/admin/api/v1/reports?appId=$APP_ID&amp;status=open" \
+  -H "Authorization: Bearer $TOKEN"</code></pre>
+<pre class="out"><code>HTTP 200 OK
+X-Total-Count: 1
+
+[
+  {
+    "id": "3cf597be-1eeb-4d56-a825-22626b1f1615",
+    "appId": "ff6510a9-de00-4fb2-97a4-ce4ad6e377dd",
+    "appSlug": "doc-tmp-admin",
+    "userId": "5a34a478-6d70-45a9-89d3-a09eaa446ff3",
+    "reason": "BROKEN",
+    "details": "Doc test report (will be removed)",
+    "status": "OPEN",
+    "handledBy": null,
+    "handledAt": null,
+    "createdAt": "2026-10-26T11:07:33.327695Z"
+  }
+]</code></pre>
+<p>Fields: <code>reason</code>, <code>details</code> (the user's words), <code>status</code>, <code>handledBy</code> and <code>handledAt</code> (null while OPEN), <code>appSlug</code> for display. <code>X-Total-Count</code> counts the matches; the dashboard shows the number of OPEN reports.</p>
+</div></details>
+<details class="endpoint" id="ep-report-handle" open><summary><span class="method m-patch">PATCH</span><span class="path">/admin/api/v1/reports/{reportId}</span><span class="sum">Resolve, dismiss or reopen a report</span></summary><div class="body"><dl class="meta"><dt>Who may call</dt><dd>ADMIN or SUPER_ADMIN</dd><dt>Auth</dt><dd>Staff session Bearer token at assurance level aal2 (<code>Authorization: Bearer $TOKEN</code>)</dd><dt>Rate limit</dt><dd>300 requests per minute per client IP at the gateway (HTTP 429 beyond that)</dd><dt>Backoffice</dt><dd>Moderation &gt; Reports (Resolve, Dismiss, Reopen)</dd><dt>Audit name</dt><dd><code>report.handle</code></dd><dt>Reversible</dt><dd>Yes</dd></dl>
+<p><strong>Purpose.</strong> Records what staff did with a report. <strong>When to use it.</strong> After you investigated: mark it <code>REVIEWED</code> (acted on or confirmed), <code>DISMISSED</code> (no problem found), or put it back to <code>OPEN</code>.</p>
+<h4>Body</h4>
+<div class="table-wrap"><table><thead><tr><th>Field</th><th>Type</th><th>Required</th><th>Meaning</th></tr></thead><tbody><tr><td><code>status</code></td><td>string</td><td>yes</td><td><code>OPEN</code>, <code>REVIEWED</code> or <code>DISMISSED</code>.</td></tr></tbody></table></div>
+<pre><code>curl -sS -X PATCH "$GATEWAY/admin/api/v1/reports/$REPORT_ID" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+  "status": "REVIEWED"
+}'</code></pre>
+<h4>Response (HTTP 200)</h4>
+<pre class="out"><code>HTTP 200 OK
+
+{
+  "appId": "ff6510a9-de00-4fb2-97a4-ce4ad6e377dd",
+  "userId": "5a34a478-6d70-45a9-89d3-a09eaa446ff3",
+  "reason": "BROKEN",
+  "details": "Doc test report (will be removed)",
+  "createdAt": "2026-10-26T11:07:33.327695Z",
+  "handledAt": "2026-10-26T11:07:33.428151437Z",
+  "handledBy": "0e5171f6-687c-4312-9212-971e28305d8d",
+  "id": "3cf597be-1eeb-4d56-a825-22626b1f1615",
+  "status": "REVIEWED"
+}</code></pre>
+<div class="table-wrap"><table><thead><tr><th>Status</th><th><code>error</code></th><th>When it happens</th><th>What to do</th></tr></thead><tbody><tr><td>400</td><td><code>validation_failed</code></td><td><code>status</code> is not one of the three.</td><td>Fix the value.</td></tr><tr><td>403</td><td><code>insufficient_role</code></td><td>VIEWER.</td><td>Use an ADMIN.</td></tr><tr><td>404</td><td><code>not_found</code></td><td>No such report.</td><td>Check the id.</td></tr></tbody></table></div>
+<pre class="out nocopy"><code>PATCH /admin/api/v1/reports/$REPORT_ID  {"status":"CLOSED"}
+HTTP 400  {"error": "validation_failed", "fields": {"status": "must be OPEN, REVIEWED or DISMISSED"}}</code></pre>
+<h4>Effects, audit</h4>
+<ul><li>Sets <code>status</code>, <code>handledBy</code> (the staff id) and <code>handledAt</code>. Nothing else happens automatically: a REVIEWED report does <em>not</em> pause the app. To act on an app, change its status (see the status page), then close the report.</li><li>Audit: <code>report.handle</code> (target type <code>app_report</code>, target id the report id, meta <code>{"status", "appId"}</code>).</li></ul>
+</div></details>
+<h2 id="audit">The audit log</h2>
+<p>Every change staff make is written, in the same database transaction as the change, to an append-only audit log: who (staff id, email and role), what (action name), on which object, details, from which IP, and when. A change and its audit event are committed together or not at all.</p>
+<div class="table-wrap"><table><thead><tr><th>Action</th><th>Target type</th><th>Target id</th><th>Meta</th><th>Written by</th></tr></thead><tbody><tr><td><code>app.create</code></td><td>mini_app</td><td>app id</td><td>slug</td><td>Create an app</td></tr><tr><td><code>app.update</code></td><td>mini_app</td><td>app id</td><td>fields (names of changed fields)</td><td>Edit an app</td></tr><tr><td><code>app.status</code></td><td>mini_app</td><td>app id</td><td>from, to</td><td>Set status</td></tr><tr><td><code>app.logo</code></td><td>mini_app</td><td>app id</td><td>imageId</td><td>Upload logo</td></tr><tr><td><code>app.logo.remove</code></td><td>mini_app</td><td>app id</td><td>(none)</td><td>Remove logo (only if one existed)</td></tr><tr><td><code>capability.set</code></td><td>mini_app</td><td>app id</td><td>capability, state</td><td>Grant, deny, suspend</td></tr><tr><td><code>limit.set</code></td><td>mini_app</td><td>app id</td><td>channel, limits (text)</td><td>Notification limits</td></tr><tr><td><code>environment.set</code></td><td>mini_app</td><td>app id</td><td>environment, allowedCidrs</td><td>Allowed addresses</td></tr><tr><td><code>payment.set</code></td><td>mini_app</td><td>app id</td><td>currencies, allowHold</td><td>Payment settings</td></tr><tr><td><code>key.register</code></td><td>partner_key</td><td><strong>key id</strong></td><td>appId, environment, fingerprint</td><td>Register or generate a key</td></tr><tr><td><code>key.revoke</code></td><td>partner_key</td><td><strong>key id</strong></td><td>appId</td><td>Revoke a key</td></tr><tr><td><code>review.moderate</code></td><td>app_review</td><td>review id</td><td>status, appId</td><td>Hide or restore a review</td></tr><tr><td><code>report.handle</code></td><td>app_report</td><td>report id</td><td>status, appId</td><td>Handle a report</td></tr><tr><td><code>staff.create</code>, <code>staff.update</code></td><td>staff</td><td>staff id</td><td>email/role/status</td><td>Staff management (not covered here)</td></tr></tbody></table></div>
+<p>Reads are not audited. <strong>Template changes are not audited</strong> (see Known issues). Events from other services (for example user status changes) land in the same log.</p>
+<details class="endpoint" id="ep-audit" open><summary><span class="method m-get">GET</span><span class="path">/admin/api/v1/audit</span><span class="sum">Read the audit log</span></summary><div class="body"><dl class="meta"><dt>Who may call</dt><dd>ADMIN or SUPER_ADMIN (VIEWER gets <code>403 insufficient_role</code>)</dd><dt>Auth</dt><dd>Staff session Bearer token at assurance level aal2 (<code>Authorization: Bearer $TOKEN</code>)</dd><dt>Rate limit</dt><dd>300 requests per minute per client IP at the gateway (HTTP 429 beyond that)</dd><dt>Backoffice</dt><dd>App &gt; <em>Audit</em> (events for that app), and the <em>Audit log</em> screen (all events, with actor filter)</dd><dt>Audit name</dt><dd>none (reads are not audited)</dd><dt>Reversible</dt><dd>n/a (append-only; there is no way to edit or delete events through the API)</dd></dl>
+<p><strong>Purpose.</strong> Reads the audit log, newest first, filtered. <strong>When to use it.</strong> "Who paused this app?", "when was this key revoked?", "what did this admin do last week?".</p>
+<h4>Query parameters</h4>
+<div class="table-wrap"><table><thead><tr><th>Name</th><th>Type</th><th>Required</th><th>Meaning</th></tr></thead><tbody><tr><td><code>target</code></td><td>string</td><td>no</td><td>The target id, exactly: an app id, a key id (<code>ak_prod_...</code>), a review id, a staff id.</td></tr><tr><td><code>targetType</code></td><td>string</td><td>no</td><td><code>mini_app</code>, <code>partner_key</code>, <code>app_review</code>, <code>app_report</code>, <code>staff</code>, ...</td></tr><tr><td><code>action</code></td><td>string</td><td>no</td><td><strong>Starts with</strong>: <code>app.</code> finds every app event, <code>app.status</code> that one (and longer names), <code>key.</code> both key events.</td></tr><tr><td><code>actor</code></td><td>UUID</td><td>no</td><td>The staff id of the person (the <code>id</code> from <code>/me</code>). Not an email.</td></tr><tr><td><code>from</code>, <code>to</code></td><td>ISO-8601 instant</td><td>no</td><td><code>from</code> inclusive, <code>to</code> exclusive.</td></tr><tr><td><code>limit</code>, <code>offset</code></td><td>integers</td><td>no</td><td>Default 50, at most 200; offset default 0.</td></tr></tbody></table></div>
+<pre><code>curl -sS -X GET "$GATEWAY/admin/api/v1/audit?target=$APP_ID&amp;action=app.status&amp;limit=3" \
+  -H "Authorization: Bearer $TOKEN"</code></pre>
+<p>The first (newest) of the matching events; the header <code>X-Total-Count</code> counted 8 events for this app:</p>
+<pre class="out"><code>HTTP 200 OK
+X-Total-Count: 8
+
+[
+  {
+    "id": "5abffb03-457a-4371-b69e-12f69085cd53",
+    "actorId": "0e5171f6-687c-4312-9212-971e28305d8d",
+    "actorEmail": "tempstaff-12f22c5c@adera.local",
+    "actorRole": "ADMIN",
+    "action": "app.status",
+    "targetType": "mini_app",
+    "targetId": "ff6510a9-de00-4fb2-97a4-ce4ad6e377dd",
+    "meta": {
+      "to": "LIVE",
+      "from": "PAUSED"
+    },
+    "ip": "172.18.0.1",
+    "at": "2026-10-26T11:07:49.560389Z"
+  }
+]</code></pre>
+<p>Events about keys have the <em>key id</em> as target. To list them filter by type (and by actor if you like):</p>
+<pre><code>curl -sS -X GET "$GATEWAY/admin/api/v1/audit?targetType=partner_key&amp;actor=$STAFF_ID&amp;limit=2" \
+  -H "Authorization: Bearer $TOKEN"</code></pre>
+<pre class="out"><code>HTTP 200 OK
+X-Total-Count: 11
+
+[
+  {
+    "id": "da3c3a28-3163-4050-ba7e-8eb0efea1608",
+    "actorId": "0e5171f6-687c-4312-9212-971e28305d8d",
+    "actorEmail": "tempstaff-12f22c5c@adera.local",
+    "actorRole": "ADMIN",
+    "action": "key.revoke",
+    "targetType": "partner_key",
+    "targetId": "ak_dev_65333575a0a95b504b182ef4",
+    "meta": {
+      "appId": "ff6510a9-de00-4fb2-97a4-ce4ad6e377dd"
+    },
+    "ip": "172.18.0.1",
+    "at": "2026-10-26T11:05:21.488212Z"
+  }
+]</code></pre>
+<div class="table-wrap"><table><thead><tr><th>Status</th><th><code>error</code></th><th>When it happens</th><th>What to do</th></tr></thead><tbody><tr><td>400</td><td><code>validation_failed</code></td><td><code>actor</code> is not a UUID, or <code>from</code>/<code>to</code> is not an ISO instant.</td><td>Fix the format.</td></tr><tr><td>403</td><td><code>insufficient_role</code></td><td>VIEWER.</td><td>Only ADMIN and above read the audit log.</td></tr></tbody></table></div>
+<pre class="out nocopy"><code>GET /admin/api/v1/audit?actor=bob&amp;from=yesterday
+HTTP 400  {"error": "validation_failed", "fields": {"actor": "must be a staff id (uuid)", "from": "must be an ISO-8601 instant like 2026-10-01T00:00:00Z"}}
+
+GET /admin/api/v1/audit
+HTTP 403  {"error": "insufficient_role"}</code></pre>
+<ul><li><code>actorEmail</code> is filled from the staff table; it is <code>null</code> for events whose actor is not (or no longer) a staff member.</li><li><code>ip</code> is the staff member's address as the gateway saw it.</li><li>To see <em>everything</em> that happened to one app you need two calls: <code>target=$APP_ID</code> for the app's own events, and <code>targetType=partner_key</code> for key events (match <code>meta.appId</code> yourself). The backoffice <em>App &gt; Audit</em> tab shows only the first kind.</li></ul>
+</div></details>
+<h2 id="not-built">Not built yet</h2>
+<ul><li>Replying to a review, notifying the reviewer or the partner when a review is hidden.</li><li>Automatic actions on reports (for instance pausing an app after N scam reports).</li><li>Exporting the audit log, or a filter on <code>meta</code> fields such as <code>appId</code>.</li></ul>
+
+<div class="pager"><a class="prev" href="notification-log-and-usage.html"><small>Previous</small>Notification log and usage</a><a class="next" href="runbooks.html"><small>Next</small>Runbooks</a></div>
+<p class="footer">Admin guide: managing mini apps. Examples were captured from a running dev stack (ADERA_ENV=dev) with a throwaway app and a temporary staff account, both removed afterwards. Ids, timestamps and key ids differ on your system.</p>
+</main>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Staff management | Admin: users, staff, moderation and audit</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+<button id="menu-btn" type="button" aria-label="Toggle menu">Menu</button>
+<span class="brand">Admin: users, staff, moderation and audit</span>
+<span class="spacer"></span>
+<button id="theme-btn" type="button" aria-label="Toggle light or dark theme">Theme</button>
+</header>
+<div class="layout">
+<nav class="sidebar" aria-label="Pages in this guide"><h4>Admin: users, staff, moderation and audit</h4><ul><li><a href="index.html">Overview and conventions</a></li>
+<li><a href="roles-and-access.html">Staff sign-in, roles and permissions</a></li>
+<li><a href="dashboard.html">Dashboard, system and health</a></li>
+<li><a href="users.html">Registered users</a></li>
+<li><a href="moderation-reviews.html">Moderation: reviews</a></li>
+<li><a href="moderation-reports.html">Moderation: reports</a></li>
+<li><a href="staff.html" class="current">Staff management</a><ul><li><a href="#overview">Overview</a></li><li><a href="#ep-staff-list">GET /staff</a></li><li><a href="#ep-staff-add">POST /staff</a></li><li><a href="#firstlogin">How the new person signs in</a></li><li><a href="#ep-staff-patch">PATCH /staff/{id}</a></li><li><a href="#protections">Protections</a></li><li><a href="#bootstrap">The bootstrap super admin</a></li><li><a href="#scenarios">Worked scenarios</a></li><li><a href="#errors">Errors</a></li><li><a href="#notbuilt">Not built yet</a></li></ul></li>
+<li><a href="audit-log.html">Audit log</a></li>
+<li><a href="notifications-overview.html">Notification visibility</a></li>
+<li><a href="runbooks.html">Runbooks</a></li>
+<li><a href="errors.html">Error codes</a></li>
+<li><a href="known-issues.html">Known issues and not built yet</a></li>
+</ul></nav>
+<main>
+<h1>Staff management</h1>
+<p class="lead">SUPER_ADMIN only: list, add, change role, deactivate and reactivate staff, how a new colleague signs in for the first time, the safety rules, and the bootstrap super admin.</p>
+<section><h2 id="overview">Overview</h2>
+<p><em>Staff</em> are the people who can sign in to the admin API and the backoffice. Only a <strong>SUPER_ADMIN</strong> manages them: list, add by email and role, change role, deactivate and reactivate. In the backoffice this is the screen <strong>Staff</strong> (menu entry visible to super admins only). The role lives in the person's Kratos identity (<code>metadata_public.role</code>), the staff table in registry-service mirrors it for listing, status and audit; the API keeps both in step.</p>
+<div class="callout why"><span class="label">Why a separate staff list</span><p>Customers and staff share one identity system (Kratos). The staff table says who is allowed to act as staff. Being in Kratos is not enough: <code>not_staff</code> is answered to everybody who is not an ACTIVE row with a role.</p></div></section>
+<section><h2 id="list">List staff</h2>
+<details class="endpoint" id="ep-staff-list"><summary><span class="method m-get">GET</span><span class="path">/admin/api/v1/staff</span><span class="sum">Everyone who is, or was, staff</span></summary><div class="body"><dl class="meta"><dt>Why</dt><dd>See who has access and at what level; find the id to change a role or to filter the audit log by person.</dd><dt>Auth</dt><dd>Staff aal2 Bearer, role <strong>SUPER_ADMIN</strong> only (ADMIN and VIEWER: <code>403 insufficient_role</code>)</dd><dt>Rate limit</dt><dd>300/min/IP</dd><dt>Backoffice</dt><dd>Staff (table with tags <em>you</em>, <em>bootstrap super admin</em>, <em>created by bootstrap</em>)</dd></dl><h4>Request</h4><pre><code>curl -sS "$GATEWAY/admin/api/v1/staff" -H "Authorization: Bearer $SUPER_TOKEN"</code></pre><h4>Response 200 (trimmed to three of the rows)</h4><pre class="out"><code>HTTP/1.1 200 OK
+
+[
+  {
+    "id": "0b648e27-181c-4650-87d7-441a5f07fb00",
+    "email": "admin@adera.local",
+    "role": "SUPER_ADMIN",
+    "status": "ACTIVE",
+    "createdAt": "2026-10-25T00:23:28.949725Z",
+    "updatedAt": "2026-10-25T00:23:28.949725Z",
+    "bootstrap": true,
+    "createdBy": null
+  },
+  {
+    "id": "ea448767-b315-42e8-86a6-4d1c41e46500",
+    "email": "demo-viewer-1@adera.local",
+    "role": "VIEWER",
+    "status": "ACTIVE",
+    "createdAt": "2026-10-25T12:42:04.224040Z",
+    "updatedAt": "2026-10-25T12:42:04.224040Z",
+    "bootstrap": false,
+    "createdBy": "7d7649dd-c347-4dfd-bc2d-d8c30d4452d1"
+  },
+  {
+    "id": "c5c20be5-1ddf-4463-9f55-bf72ffc91691",
+    "email": "demo-admin-2@adera.local",
+    "role": "ADMIN",
+    "status": "DISABLED",
+    "createdAt": "2026-10-25T12:42:04.912654Z",
+    "updatedAt": "2026-10-25T12:42:06.609336Z",
+    "bootstrap": false,
+    "createdBy": "7d7649dd-c347-4dfd-bc2d-d8c30d4452d1"
+  }
+]</code></pre><div class="table-wrap"><table><thead><tr><th>Field</th><th>Meaning</th></tr></thead><tbody><tr><td><code>id</code></td><td>The Kratos identity id. Same as <code>actorId</code> in the audit log and as <code>id</code> returned by <code>GET /me</code>.</td></tr><tr><td><code>email</code></td><td>Lower-case sign-in address.</td></tr><tr><td><code>role</code></td><td><code>VIEWER</code>, <code>ADMIN</code> or <code>SUPER_ADMIN</code>. Kept even for DISABLED rows (it is what reactivation restores).</td></tr><tr><td><code>status</code></td><td><code>ACTIVE</code> (can work) or <code>DISABLED</code> (cannot).</td></tr><tr><td><code>createdAt</code>, <code>updatedAt</code></td><td>Row creation and last role/status change.</td></tr><tr><td><code>bootstrap</code></td><td>True for the person whose email equals the current <code>BOOTSTRAP_SUPER_ADMIN_EMAIL</code>.</td></tr><tr><td><code>createdBy</code></td><td>Staff id of the super admin who added the person; <code>null</code> when created by the bootstrap at start-up (or by a script).</td></tr></tbody></table></div><p>The list is not paged and is ordered oldest first.</p>
+<h4>Errors</h4><pre class="out"><code>HTTP/1.1 403 Forbidden
+
+{
+  "error": "insufficient_role"
+}</code></pre></div></details>
+</section>
+<section><h2 id="add">Add a colleague</h2>
+<details class="endpoint" id="ep-staff-add"><summary><span class="method m-post">POST</span><span class="path">/admin/api/v1/staff</span><span class="sum">Make an email address a staff member with a role</span></summary><div class="body"><dl class="meta"><dt>Why</dt><dd>Give a colleague access. The person need not have signed in before: the identity is created if it does not exist.</dd><dt>Auth</dt><dd>Staff aal2 Bearer, role <strong>SUPER_ADMIN</strong></dd><dt>Audit action</dt><dd><code>staff.create</code> (first time) or <code>staff.update</code> (the address already had a staff row), target type <code>staff</code></dd><dt>Reversible</dt><dd>Yes: deactivate (see below). The row is never deleted.</dd><dt>Backoffice</dt><dd>Staff > <em>Add staff member</em> (default role VIEWER)</dd></dl><h4>Body</h4><div class="table-wrap"><table><thead><tr><th>Field</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why it exists</th></tr></thead><tbody><tr><td><code>email</code></td><td>string</td><td>yes</td><td>A valid email address (<code>name@domain.tld</code>, name up to 64 characters); trimmed and lower-cased.</td><td>Their sign-in address: the emailed code goes here.</td></tr><tr><td><code>role</code></td><td>string</td><td>yes</td><td><code>VIEWER</code>, <code>ADMIN</code> or <code>SUPER_ADMIN</code> (any case)</td><td>Their access level.</td></tr></tbody></table></div><p>Unknown extra fields are ignored on this endpoint (unlike PATCH).</p>
+<h4>Request</h4><pre><code>curl -sS -X POST "$GATEWAY/admin/api/v1/staff" \
+  -H "Authorization: Bearer $SUPER_TOKEN" -H "Content-Type: application/json" \
+  -d '{"email":"tempstaff-doc72fbf@adera.local","role":"VIEWER"}'</code></pre><h4>Response 200</h4><pre class="out"><code>HTTP/1.1 200 OK
+
+{
+  "id": "d553ee53-d4b3-4650-93bf-5ed098e244e7",
+  "email": "tempstaff-doc72fbf@adera.local",
+  "role": "VIEWER",
+  "status": "ACTIVE",
+  "createdAt": "2026-10-26T10:59:38.576319028Z",
+  "updatedAt": "2026-10-26T10:59:38.576319028Z",
+  "bootstrap": false,
+  "createdBy": "3b9394a9-6b8e-427f-9bac-2e5ef9b04307"
+}</code></pre><p>The answer is the staff record (status code 200, not 201).</p>
+<h4>What happens</h4><ul><li>If Kratos already has an identity with that email (somebody who signed in before, or a customer who registered with that email), the role is <strong>granted on that identity</strong>. Otherwise a new Kratos identity is created, active, with the role. The staff row is inserted ACTIVE with <code>createdBy</code> = you.</li><li>Calling it again for an address that is already staff is <strong>idempotent</strong>: it changes the role to the one you give, sets the status back to ACTIVE and writes <code>staff.update</code> (verified: the second call with <code>ADMIN</code> for an upper-cased address returned the same id with role ADMIN, and the person's next call already had admin rights).</li><li>Nothing is emailed to the new person. Tell them yourself where to sign in.</li></ul>
+<pre class="out"><code>HTTP/1.1 200 OK
+
+{
+  "id": "d553ee53-d4b3-4650-93bf-5ed098e244e7",
+  "email": "tempstaff-doc72fbf@adera.local",
+  "role": "ADMIN",
+  "status": "ACTIVE",
+  "createdAt": "2026-10-26T10:59:38.576319Z",
+  "updatedAt": "2026-10-26T10:59:39.670065364Z",
+  "bootstrap": false,
+  "createdBy": "3b9394a9-6b8e-427f-9bac-2e5ef9b04307"
+}</code></pre><h4>Errors (verified)</h4><div class="table-wrap"><table><thead><tr><th>Status / error</th><th>When</th></tr></thead><tbody><tr><td><code>400 validation_failed</code> <code>fields.email</code></td><td>Missing or not an email address</td></tr><tr><td><code>400 validation_failed</code> <code>fields.role</code></td><td>Missing or not one of the three roles</td></tr><tr><td><code>403 insufficient_role</code></td><td>Caller is not a SUPER_ADMIN</td></tr><tr><td><code>503 identity_service_unavailable</code></td><td>Kratos cannot be reached; nothing is changed</td></tr></tbody></table></div><pre class="out"><code>HTTP/1.1 400 Bad Request
+
+{
+  "error": "validation_failed",
+  "fields": {
+    "email": "must be a valid email address"
+  }
+}</code></pre><pre class="out"><code>HTTP/1.1 400 Bad Request
+
+{
+  "error": "validation_failed",
+  "fields": {
+    "role": "must be one of VIEWER, ADMIN, SUPER_ADMIN"
+  }
+}</code></pre><h4>Gotcha</h4><p>Granting a role by email to an address that belongs to an ordinary customer turns that customer's account into a staff account (the same identity). Use a work address that is not a customer.</p>
+</div></details>
+</section>
+<section><h2 id="firstlogin">How the new person signs in the first time</h2>
+<p>Verified end to end with a throwaway account:</p>
+<ol><li>You add the address (above). The person has <strong>no authenticator yet</strong>.</li><li>They request an emailed code and enter it (the sign-in flow on the roles page, or the backoffice Login screen). The session is aal1. Calling the admin API now answers <code>403 mfa_required</code>.</li><li>They enrol an authenticator app on that session (backoffice: the page shows a QR code and the secret). Right after enrolment the same session is aal2 and the admin API works with the role you gave.</li></ol>
+<h3>Before the authenticator step</h3><pre class="out"><code>HTTP/1.1 403 Forbidden
+
+{
+  "error": "mfa_required"
+}</code></pre><h3>After enrolling</h3><pre class="out"><code>HTTP/1.1 200 OK
+
+{
+  "role": "VIEWER",
+  "id": "d553ee53-d4b3-4650-93bf-5ed098e244e7"
+}</code></pre><p>Their second and later sign-ins ask for the emailed code and then the authenticator code. If they lose the authenticator see the lost-authenticator runbook.</p>
+</section>
+<section><h2 id="patch">Change role, deactivate, reactivate</h2>
+<details class="endpoint" id="ep-staff-patch"><summary><span class="method m-patch">PATCH</span><span class="path">/admin/api/v1/staff/{identityId}</span><span class="sum">Change a staff member's role and/or status</span></summary><div class="body"><dl class="meta"><dt>Why</dt><dd>Promote or demote a colleague; cut off a person who left (deactivate) or give access back (reactivate).</dd><dt>Auth</dt><dd>Staff aal2 Bearer, role <strong>SUPER_ADMIN</strong></dd><dt>Audit action</dt><dd><code>staff.update</code> (target type <code>staff</code>, meta <code>{role, status}</code> = the values after the change)</dd><dt>Reversible</dt><dd>Yes</dd><dt>Backoffice</dt><dd>Staff: <em>Change role</em> (disabled until you pick a different role), <em>Deactivate</em> / <em>Reactivate</em> (with confirmation)</dd></dl><h4>Path</h4><p><code>identityId</code>: the <code>id</code> from the staff list.</p>
+<h4>Body</h4><div class="table-wrap"><table><thead><tr><th>Field</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why it exists</th></tr></thead><tbody><tr><td><code>role</code></td><td>string</td><td>no</td><td><code>VIEWER</code>, <code>ADMIN</code>, <code>SUPER_ADMIN</code></td><td>New role.</td></tr><tr><td><code>status</code></td><td>string</td><td>no</td><td><code>ACTIVE</code> or <code>DISABLED</code></td><td>Deactivate or reactivate.</td></tr></tbody></table></div><p>Send either or both; an absent field stays unchanged. Any other field: <code>400 validation_failed</code> with <code>"&lt;field&gt;": "unknown field"</code>. All problems are reported at once.</p>
+<h4>Request: change role</h4><pre><code>curl -sS -X PATCH "$GATEWAY/admin/api/v1/staff/$STAFF_ID" \
+  -H "Authorization: Bearer $SUPER_TOKEN" -H "Content-Type: application/json" \
+  -d '{"role":"VIEWER"}'</code></pre><pre class="out"><code>HTTP/1.1 200 OK
+
+{
+  "id": "d553ee53-d4b3-4650-93bf-5ed098e244e7",
+  "email": "tempstaff-doc72fbf@adera.local",
+  "role": "VIEWER",
+  "status": "ACTIVE",
+  "createdAt": "2026-10-26T10:59:38.576319Z",
+  "updatedAt": "2026-10-26T10:59:39.698250579Z",
+  "bootstrap": false,
+  "createdBy": "3b9394a9-6b8e-427f-9bac-2e5ef9b04307"
+}</code></pre><h4>Request: deactivate</h4><pre><code>curl -sS -X PATCH "$GATEWAY/admin/api/v1/staff/$STAFF_ID" \
+  -H "Authorization: Bearer $SUPER_TOKEN" -H "Content-Type: application/json" \
+  -d '{"status":"DISABLED"}'</code></pre><pre class="out"><code>HTTP/1.1 200 OK
+
+{
+  "id": "d553ee53-d4b3-4650-93bf-5ed098e244e7",
+  "email": "tempstaff-doc72fbf@adera.local",
+  "role": "VIEWER",
+  "status": "DISABLED",
+  "createdAt": "2026-10-26T10:59:38.576319Z",
+  "updatedAt": "2026-10-26T10:59:39.720741940Z",
+  "bootstrap": false,
+  "createdBy": "3b9394a9-6b8e-427f-9bac-2e5ef9b04307"
+}</code></pre><h4>Request: reactivate</h4><pre><code>curl -sS -X PATCH "$GATEWAY/admin/api/v1/staff/$STAFF_ID" \
+  -H "Authorization: Bearer $SUPER_TOKEN" -H "Content-Type: application/json" \
+  -d '{"status":"ACTIVE"}'</code></pre><pre class="out"><code>HTTP/1.1 200 OK
+
+{
+  "id": "d553ee53-d4b3-4650-93bf-5ed098e244e7",
+  "email": "tempstaff-doc72fbf@adera.local",
+  "role": "VIEWER",
+  "status": "ACTIVE",
+  "createdAt": "2026-10-26T10:59:38.576319Z",
+  "updatedAt": "2026-10-26T11:01:06.039977126Z",
+  "bootstrap": false,
+  "createdBy": "3b9394a9-6b8e-427f-9bac-2e5ef9b04307"
+}</code></pre><h4>Effects (all verified)</h4><div class="table-wrap"><table><thead><tr><th>Action</th><th>What changes for the colleague</th></tr></thead><tbody><tr><td>Change role</td><td>Applies to their <strong>next call</strong>, no new sign-in: a viewer promoted to ADMIN could read <code>GET /audit</code> immediately; demoted back, the same token got <code>403 insufficient_role</code>.</td></tr><tr><td>Deactivate (<code>DISABLED</code>)</td><td>The role is removed from their Kratos identity and <strong>all their sessions are revoked</strong>: the next call with the old token answers <code>401 unauthorized</code>. They can still pass the emailed code and the authenticator step (the authenticator stays enrolled), but the admin API then answers <code>403 not_staff</code>. Their stored role is kept.</td></tr><tr><td>Reactivate</td><td>Status back to ACTIVE and the stored role is written to Kratos again. They must sign in again (sessions were revoked); a session created while they were disabled works again at once (verified).</td></tr></tbody></table></div><pre class="out"><code>HTTP/1.1 401 Unauthorized
+
+{
+  "error": "unauthorized"
+}</code></pre><pre class="out"><code>HTTP/1.1 403 Forbidden
+
+{
+  "error": "not_staff"
+}</code></pre><pre class="out"><code>HTTP/1.1 200 OK
+
+{
+  "role": "VIEWER",
+  "id": "d553ee53-d4b3-4650-93bf-5ed098e244e7"
+}</code></pre><h4>Errors (verified)</h4><div class="table-wrap"><table><thead><tr><th>Status / error</th><th>When</th></tr></thead><tbody><tr><td><code>400 validation_failed</code></td><td>Bad <code>role</code> or <code>status</code>, or an unknown field</td></tr><tr><td><code>400 invalid_request</code></td><td><code>identityId</code> is not a UUID</td></tr><tr><td><code>403 insufficient_role</code></td><td>Caller is not SUPER_ADMIN</td></tr><tr><td><code>404 not_found</code></td><td>No staff row with that id</td></tr><tr><td><code>409 cannot_demote_self</code></td><td>You tried to lower or disable <strong>your own</strong> account while you are an active super admin</td></tr><tr><td><code>409 last_super_admin</code></td><td>The change would leave no active super admin (a safety net, see protections)</td></tr></tbody></table></div><pre class="out"><code>HTTP/1.1 400 Bad Request
+
+{
+  "error": "validation_failed",
+  "fields": {
+    "email": "unknown field",
+    "role": "must be one of VIEWER, ADMIN, SUPER_ADMIN",
+    "status": "must be ACTIVE or DISABLED"
+  }
+}</code></pre><pre class="out"><code>HTTP/1.1 409 Conflict
+
+{
+  "error": "cannot_demote_self"
+}</code></pre></div></details>
+</section>
+<section><h2 id="protections">Protections</h2>
+<div class="table-wrap"><table><thead><tr><th>Rule</th><th>How it works</th><th>Verified</th></tr></thead><tbody><tr><td>No self-demotion</td><td>A super admin cannot change their own role away from SUPER_ADMIN or set themselves DISABLED: <code>409 cannot_demote_self</code>. Setting your own role to SUPER_ADMIN again is accepted (a no-op that still writes an audit row).</td><td>Live: both refusals and the no-op.</td></tr><tr><td>Never zero super admins</td><td>Removing SUPER_ADMIN or activity from the <strong>last</strong> active super admin is refused with <code>409 last_super_admin</code>. In practice the self rule already covers this: the caller must itself be an active super admin and cannot target itself, so at least two active super admins exist whenever the rule is evaluated. It remains as a second safety net (for example if the Kratos role and the staff row ever disagree).</td><td>From code only: it cannot be provoked through the API in a healthy system, and the guide did not touch the bootstrap account.</td></tr><tr><td>Roles cannot be edited by users</td><td><code>metadata_public.role</code> in Kratos can only be written with the Kratos admin API, never through a self-service flow.</td><td>Design (Kratos identity schema).</td></tr><tr><td>Staff are never deleted</td><td>There is no delete: DISABLED is the removed state. The audit log keeps their id (the actor email shows as null once the staff row is gone, for example for temporary accounts deleted by test scripts).</td><td>Code.</td></tr></tbody></table></div><div class="callout warn"><span class="label">Keep two super admins</span><p>If the only super admin loses the authenticator, nobody can add staff or recover through the API. Keep at least two, on different phones. The bootstrap recovery below is the fallback.</p></div></section>
+<section><h2 id="bootstrap">The bootstrap super admin</h2>
+<p>A fresh install has nobody who can add staff. At start-up registry-service reads the environment variable <code>BOOTSTRAP_SUPER_ADMIN_EMAIL</code> (in the repository <code>.env</code>, and as a deployment setting in production) and, <strong>only when no active super admin exists</strong>, makes that address a SUPER_ADMIN (creating the Kratos identity if needed). It retries in the background for about a minute because Kratos may still be starting, and logs <em>Created the first super admin from BOOTSTRAP_SUPER_ADMIN_EMAIL</em>. The person then signs in with that address and enrols an authenticator, exactly as in the first sign-in above. In the staff list this person has <code>bootstrap: true</code>.</p>
+<h3>How to change it afterwards</h3><ol><li>Add your real people as SUPER_ADMIN through the Staff screen (or <code>POST /staff</code>) while you can still sign in.</li><li>Optionally deactivate the old bootstrap account (it is a normal account).</li><li>Change <code>BOOTSTRAP_SUPER_ADMIN_EMAIL</code> to an address you control (or leave it blank to disable bootstrapping) and restart registry-service for it to be read. The new value has <strong>no effect while any active super admin exists</strong>; it only matters for recovery. The <code>bootstrap</code> tag in the staff list simply follows whichever address the variable holds.</li></ol>
+<div class="callout warn"><span class="label">Recovery when every super admin is gone</span><p>If all super admins are disabled or lost, set <code>BOOTSTRAP_SUPER_ADMIN_EMAIL</code> to an address you control and restart registry-service. Because no active super admin exists, it grants that address SUPER_ADMIN (and re-activates it if the address already had a disabled staff row). Sign in with that address, enrol the authenticator, then add the others. Do this only on the machine that runs the stack; it is not an API.</p></div></section>
+<section><h2 id="scenarios">Worked scenarios</h2>
+<ul><li><strong>Add a colleague</strong>, <strong>remove a colleague</strong> and <strong>recover from a lost authenticator</strong>: see the runbooks page for step by step procedures.</li><li><strong>Promote a viewer to admin for a week</strong>: PATCH <code>role: ADMIN</code>; change it back afterwards. Both moves are in the audit log (<code>staff.update</code>).</li></ul>
+</section>
+<section><h2 id="errors">Errors</h2>
+<p>Listed with each endpoint; the full table is on the error codes page.</p>
+</section>
+<section><h2 id="notbuilt">Not built yet</h2>
+<ul><li>No "reset authenticator" button or API: it needs the Kratos admin API on the server (runbook).</li><li>No invitation email: nothing is sent when a colleague is added.</li><li>No delete of staff rows, no list filtering or paging, no last-sign-in time.</li><li>No change of a staff member's email address.</li></ul>
+</section>
+
+<div class="pager"><a class="prev" href="moderation-reports.html"><small>Previous</small>Moderation: reports</a><a class="next" href="audit-log.html"><small>Next</small>Audit log</a></div>
+<p class="footer">Adera admin guide &middot; verified against the running dev stack on 2026-10-26</p>
+</main>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

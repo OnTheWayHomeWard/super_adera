@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Known issues and not built yet | Admin: users, staff, moderation and audit</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+<button id="menu-btn" type="button" aria-label="Toggle menu">Menu</button>
+<span class="brand">Admin: users, staff, moderation and audit</span>
+<span class="spacer"></span>
+<button id="theme-btn" type="button" aria-label="Toggle light or dark theme">Theme</button>
+</header>
+<div class="layout">
+<nav class="sidebar" aria-label="Pages in this guide"><h4>Admin: users, staff, moderation and audit</h4><ul><li><a href="index.html">Overview and conventions</a></li>
+<li><a href="roles-and-access.html">Staff sign-in, roles and permissions</a></li>
+<li><a href="dashboard.html">Dashboard, system and health</a></li>
+<li><a href="users.html">Registered users</a></li>
+<li><a href="moderation-reviews.html">Moderation: reviews</a></li>
+<li><a href="moderation-reports.html">Moderation: reports</a></li>
+<li><a href="staff.html">Staff management</a></li>
+<li><a href="audit-log.html">Audit log</a></li>
+<li><a href="notifications-overview.html">Notification visibility</a></li>
+<li><a href="runbooks.html">Runbooks</a></li>
+<li><a href="errors.html">Error codes</a></li>
+<li><a href="known-issues.html" class="current">Known issues and not built yet</a><ul><li><a href="#issues">Known issues</a></li><li><a href="#tooling">Tooling gotcha</a></li><li><a href="#notbuilt">Not built yet</a></li></ul></li>
+</ul></nav>
+<main>
+<h1>Known issues and not built yet</h1>
+<p class="lead">Bugs and inconsistencies found while verifying the admin API for this guide, with how to reproduce them, and the features that do not exist yet.</p>
+<section><h2 id="issues">Known issues found while writing this guide</h2>
+<div class="table-wrap"><table><thead><tr><th>#</th><th>Issue</th><th>Repro / evidence</th><th>Severity</th></tr></thead><tbody><tr><td>1</td><td><code>GET /admin/api/v1/users/notauuid</code> returns Spring's default 400 body, not <code>{"error": ...}</code>.</td><td>Repro: call it with any non-UUID id. Verified answer: <code>{"timestamp":...,"status":400,"error":"Bad Request","path":...}</code>. The other services answer <code>invalid_request</code>.</td><td>Low</td></tr><tr><td>2</td><td>Reopening a report (status OPEN) keeps <code>handledBy</code> and <code>handledAt</code>, now naming the person who reopened it.</td><td>Repro: PATCH a report to REVIEWED, then OPEN; the response still has both fields set. The seeded data contains OPEN reports with a handler.</td><td>Low</td></tr><tr><td>3</td><td>Hiding a review or handling a report cannot record a reason.</td><td>Repro: send <code>{"status":"HIDDEN","reason":"spam"}</code>; the extra field is silently ignored and the audit meta holds only <code>status</code> and <code>appId</code>. The user status change, by contrast, requires a reason.</td><td>Medium (audit completeness)</td></tr><tr><td>4</td><td>Notification template changes are not audited, although the backoffice's audit filter offers the target type <code>template</code>.</td><td>Repro: create or edit a template, then <code>GET /audit?targetType=template</code> returns <code>[]</code>. No code in notification-service writes audit events.</td><td>Medium</td></tr><tr><td>5</td><td><code>limit.set</code> audit events store the limits as a text rendering of a Java object.</td><td>Repro: <code>GET /audit?action=limit.set&amp;limit=1</code>: <code>meta.limits</code> is <code>"LimitRow[channel=IN_APP, maxPerUserPerDay=null, ...]"</code> instead of a JSON object.</td><td>Low</td></tr><tr><td>6</td><td>A filter with an unknown status is accepted silently on reports and notifications, but rejected on reviews and users.</td><td>Repro: <code>GET /reports?status=bogus</code> and <code>GET /notification/notifications?status=BOGUS</code> answer <code>200 []</code>; <code>GET /reviews?status=bogus</code> and <code>GET /users?status=bogus</code> answer <code>400</code>. A typo looks like an empty queue.</td><td>Low</td></tr><tr><td>7</td><td>A VIEWER can learn whether a given phone or email is registered.</td><td>Repro: as a viewer <code>GET /users?q=+251900000011</code> finds and shows the masked row. Search runs on unmasked data by design.</td><td>Decide whether this is acceptable</td></tr><tr><td>8</td><td><code>GET /notification/usage</code> uses snake_case keys (<code>distinct_users_today</code>) while the whole API uses camelCase.</td><td>Repro: <code>GET /notification/usage?appId=...</code>.</td><td>Low</td></tr><tr><td>9</td><td><code>X-Total-Count</code> is not exposed to other-origin browsers.</td><td>The gateway CORS config exposes only <code>X-Request-Id</code>. The backoffice is same-origin so it works; a web client on another origin cannot read the totals of reviews, reports, audit and notifications.</td><td>Low (matters for external web clients)</td></tr><tr><td>10</td><td><code>GET /apps/{appId}/reviews</code> answers <code>200 []</code> for an unknown app and has no total, unlike <code>GET /reviews?appId=</code>.</td><td>Repro: call it with a random UUID.</td><td>Low</td></tr><tr><td>11</td><td><code>POST /staff</code> ignores unknown body fields while <code>PATCH /staff/{id}</code> rejects them.</td><td>Repro: add <code>"foo":1</code> to the POST body: accepted.</td><td>Low</td></tr><tr><td>12</td><td><code>last_super_admin</code> cannot be triggered through the API in practice.</td><td>The caller must be an active super admin and cannot target themselves, so two active super admins always exist when the check runs. It is a safety net, not a bug.</td><td>Info</td></tr></tbody></table></div></section>
+<section><h2 id="tooling">Tooling gotcha (dev stack)</h2>
+<p><code>python3 -I tests/e2e/tempstaff.py clean</code> removes <strong>every</strong> <code>tempstaff-*@adera.local</code> account, including one that another script or person is using at that moment (their Kratos identity and staff row disappear, so their token stops working). Run it only when nobody else is running e2e scripts. The login limit of 10 submits per minute per IP also makes parallel scripts fail with <code>429</code>; they need to retry.</p>
+</section>
+<section><h2 id="notbuilt">Not built yet (collected from all pages)</h2>
+<ul><li>Erasing a user's personal data, or removing their Kratos identity, from the dashboard (<code>DELETED</code> is a flag).</li><li>Bulk user actions, user notes, profile editing by staff, login history.</li><li>A reason on review and report moderation; notes, assignment or notifications on reports.</li><li>A reset-authenticator button or API; an invitation email for new staff; deleting or filtering the staff list; changing a staff member's email.</li><li>Audit export, search inside <code>meta</code>, alerting, and audit of template changes, sign-ins and reads.</li><li>Search of notifications by recipient, re-send or cancel of a notification, visibility of the sign-in SMS and email log in the dashboard (it is in <code>notification.send_log</code>).</li><li>A build/version/uptime endpoint for the System page.</li></ul>
+</section>
+
+<div class="pager"><a class="prev" href="errors.html"><small>Previous</small>Error codes</a></div>
+<p class="footer">Adera admin guide &middot; verified against the running dev stack on 2026-10-26</p>
+</main>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

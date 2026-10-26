@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The profile API: /api/v1/me | Adera guide</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+<button id="menu-btn" type="button" aria-label="Toggle menu">Menu</button>
+<span class="brand">Adera guide: sign-in and account</span>
+<span class="spacer"></span>
+<button id="theme-btn" type="button" aria-label="Toggle light or dark theme">Theme</button>
+</header>
+<div class="layout">
+<nav class="sidebar" aria-label="Pages in this guide">
+<h4>Super app: sign-in and account</h4>
+<ul><li><a href="index.html">Overview</a></li>
+<li><a href="quickstart.html">Quick start</a></li>
+<li><a href="authentication.html">Registration and login</a></li>
+<li><a href="session-and-logout.html">Session and logout</a></li>
+<li><a href="profile.html" class="current">Profile</a><ul><li><a href="#overview">Overview</a></li><li><a href="#fields">The profile object</a></li><li><a href="#endpoints">Endpoints</a></li></ul></li>
+<li><a href="extra-data.html">Extra data</a></li>
+<li><a href="location.html">Location</a></li>
+<li><a href="avatar.html">Avatar</a></li>
+<li><a href="devices-and-push-tokens.html">Devices and push tokens</a></li>
+<li><a href="errors.html">Error table</a></li>
+<li><a href="known-issues.html">Known issues and not built yet</a></li></ul>
+</nav>
+<main>
+<h1>The profile API: /api/v1/me</h1>
+<p class="lead">Read and update the signed-in user's own profile: every field, what is editable, and exactly how each value is validated.</p>
+<h2 id="overview">Overview</h2>
+<p>The profile is the person's own record in Adera: who they are, their language and market, an avatar, a location they chose to share, and a free-form <code>extra</code> object for app preferences. There is exactly one profile per account, it is created automatically at sign-up, and its <code>id</code> is the Kratos identity id (the same id the session returns). The app can only ever read and change <strong>its own</strong> profile: the user id comes from the verified token, never from the request.</p>
+<div class="table-wrap"><table><thead><tr><th>Method and path</th><th>Purpose</th><th>Page</th></tr></thead><tbody>
+<tr><td><code>GET /api/v1/me</code></td><td>read the profile</td><td>this page</td></tr>
+<tr><td><code>PATCH /api/v1/me</code></td><td>change fields (partial update, including <code>extra</code>)</td><td>this page, Extra data</td></tr>
+<tr><td><code>PUT /api/v1/me/location</code>, <code>DELETE /api/v1/me/location</code></td><td>share / clear a location</td><td>Location</td></tr>
+<tr><td><code>POST /api/v1/me/avatar</code>, <code>DELETE /api/v1/me/avatar</code></td><td>set / remove the avatar picture</td><td>Avatar</td></tr>
+<tr><td><code>PUT|GET|DELETE /api/v1/me/devices</code></td><td>push tokens</td><td>Devices and push tokens</td></tr>
+<tr><td><code>POST /api/v1/me/logout</code></td><td>sign this device out</td><td>Session and logout</td></tr>
+</tbody></table></div>
+<p>All of these need <code>Authorization: Bearer $TOKEN</code>, share the gateway limit of 300 requests per minute per IP (the avatar upload has its own 20 per minute) and answer in the error shapes listed on the Error table page. Every successful profile call returns the <strong>whole profile</strong> (same shape as <code>GET</code>), so the app can replace its local copy with each answer.</p>
+<h2 id="fields">The profile object</h2>
+<div class="table-wrap"><table><thead><tr><th>Field</th><th>Type</th><th>Editable</th><th>Meaning and notes</th></tr></thead><tbody>
+<tr><td><code>id</code></td><td>UUID string</td><td>no</td><td>the user id (= Kratos identity id)</td></tr>
+<tr><td><code>email</code></td><td>string or null</td><td>no</td><td>copy of the email the account was registered with; <code>null</code> for phone accounts. Not editable here (it is the login identifier)</td></tr>
+<tr><td><code>phone</code></td><td>string or null</td><td>no</td><td>E.164 phone the account was registered with; <code>null</code> for email accounts. Not editable here. Mask it when you display it near others</td></tr>
+<tr><td><code>firstName</code>, <code>lastName</code></td><td>string or null</td><td>yes</td><td>up to 100 characters each; <code>null</code> until the person fills them in</td></tr>
+<tr><td><code>gender</code></td><td>string or null</td><td>yes</td><td><code>MALE</code>, <code>FEMALE</code>, <code>OTHER</code>, <code>PREFER_NOT_TO_SAY</code></td></tr>
+<tr><td><code>dateOfBirth</code></td><td>date <code>YYYY-MM-DD</code> or null</td><td>yes</td><td>a real past date, not before 1900</td></tr>
+<tr><td><code>language</code></td><td>string</td><td>yes</td><td><code>en</code>, <code>am</code> (Amharic) or <code>om</code> (Oromo); default <code>en</code>. The notification service renders messages for this user in this language, so keep it equal to the language the person picked in the app</td></tr>
+<tr><td><code>market</code></td><td>string</td><td>yes</td><td><code>ET</code> (Ethiopia) or <code>US</code>; default <code>ET</code> (<code>US</code> for a phone starting <code>+1</code>). The app passes it to the mini-app catalog (<code>?market=</code>) to list the apps offered in that market</td></tr>
+<tr><td><code>timezone</code></td><td>string</td><td>yes</td><td>IANA name such as <code>Africa/Addis_Ababa</code> (default)</td></tr>
+<tr><td><code>avatarImageId</code></td><td>UUID or null</td><td>via avatar API</td><td>id of the stored picture; changes with every upload, so it is a good cache key</td></tr>
+<tr><td><code>avatarUrl</code></td><td>string or null</td><td>via avatar API</td><td>short-lived signed link (60 minutes) to the picture; see Avatar</td></tr>
+<tr><td><code>location</code></td><td>object or null</td><td>via location API</td><td><code>{countryCode, region, city, latitude, longitude, updatedAt}</code> or <code>null</code> when nothing is shared</td></tr>
+<tr><td><code>verificationTier</code></td><td>string</td><td>no</td><td><code>CONTACT</code> (code-verified phone/email), <code>ID</code>, <code>PROVIDER</code>. Everyone is <code>CONTACT</code> today; no endpoint changes it</td></tr>
+<tr><td><code>status</code></td><td>string</td><td>no (staff)</td><td><code>ACTIVE</code>, <code>SUSPENDED</code> or <code>DELETED</code>. A client normally only ever sees <code>ACTIVE</code> here, because the other two are refused with <code>403</code> before the profile is read (see Session and logout)</td></tr>
+<tr><td><code>termsAcceptedVersion</code>, <code>termsAcceptedAt</code></td><td>string / timestamp or null</td><td>yes (version)</td><td>which version of the terms the person accepted (up to 32 characters, chosen by the app) and when the server recorded it. <code>termsAcceptedAt</code> is set by the server</td></tr>
+<tr><td><code>extra</code></td><td>object</td><td>yes</td><td>free-form JSON owned by the app; see Extra data</td></tr>
+<tr><td><code>createdAt</code>, <code>updatedAt</code></td><td>timestamp</td><td>no</td><td>ISO-8601 UTC. <code>updatedAt</code> moves on every successful change (even an empty <code>PATCH {}</code>)</td></tr>
+</tbody></table></div>
+<p>Timestamps are UTC with a variable number of fractional digits (6 to 9); parse them with a tolerant ISO-8601 parser. Fields that are <code>null</code> are always present (never omitted).</p>
+<h2 id="endpoints">Endpoints</h2>
+<details class="endpoint" id="ep-me-get">
+<summary><span class="method m-get">GET</span><span class="path">/api/v1/me</span><span class="sum">Read my profile</span></summary>
+<div class="body"><dl class="meta">
+<dt>Who may call</dt><dd>signed-in user, account not blocked</dd>
+<dt>Auth</dt><dd><code>Authorization: Bearer $TOKEN</code></dd>
+<dt>Rate limit</dt><dd>300 per 60 s per IP (route <code>me</code>)</dd>
+<dt>Implemented by</dt><dd><code>services/user-service/.../profile/ProfileController.java</code></dd>
+</dl>
+<h4>Purpose</h4>
+<p>Returns the signed-in user's profile. It is the first call after sign-in: it tells the app who the user is, whether onboarding is complete, and the current avatar link. It also records that the person was seen recently (at most once every 5 minutes; not shown to the app). If the registration web hook ever failed, this call creates the missing profile from Kratos' record.</p>
+<h4>Parameters</h4>
+<p>None.</p>
+<h4>Example request</h4>
+<pre><code>curl -s "$GATEWAY/api/v1/me" -H "Authorization: Bearer $TOKEN"</code></pre>
+<h4>Example response (a minute after registering)</h4>
+<pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+X-RateLimit-Limit: 300
+X-RateLimit-Remaining: 299
+
+{
+  "id": "5bc6d545-771d-44f5-91cb-55415b01e4e4",
+  "email": null,
+  "phone": "+2519******57",
+  "firstName": null,
+  "lastName": null,
+  "gender": null,
+  "dateOfBirth": null,
+  "language": "en",
+  "market": "ET",
+  "timezone": "Africa/Addis_Ababa",
+  "avatarImageId": null,
+  "avatarUrl": null,
+  "location": null,
+  "verificationTier": "CONTACT",
+  "status": "ACTIVE",
+  "termsAcceptedVersion": null,
+  "termsAcceptedAt": null,
+  "extra": {},
+  "createdAt": "2026-10-26T10:49:43.643301Z",
+  "updatedAt": "2026-10-26T10:49:43.643301Z"
+}</code></pre>
+<h4>Errors</h4>
+<div class="table-wrap"><table><thead><tr><th>Status</th><th>Body</th><th>When</th><th>What to do</th></tr></thead><tbody>
+<tr><td>401</td><td>empty</td><td>no/invalid/expired token</td><td>sign in again</td></tr>
+<tr><td>403</td><td><code>{"error":"account_suspended"}</code> / <code>account_deleted</code></td><td>account blocked by staff</td><td>blocking screen</td></tr>
+<tr><td>404</td><td><code>{"error":"not_found"}</code></td><td>the identity no longer exists in Kratos and there is no profile (not reproduced; a profile is normally always created)</td><td>sign out</td></tr>
+<tr><td>503</td><td><code>{"error":"identity_service_unavailable"}</code></td><td>Kratos unreachable</td><td>retry later; keep the token</td></tr>
+<tr><td>429</td><td>HTML page</td><td>limit</td><td>back off</td></tr>
+</tbody></table></div>
+<h4>Using it in the app</h4>
+<ul><li>Show onboarding when <code>firstName</code> is <code>null</code> (or your terms version is not yet accepted).</li><li>Cache the profile and refresh it on app start; do not poll it. Every <code>PATCH</code>, location and avatar call returns the fresh profile anyway.</li><li>A trailing slash (<code>/api/v1/me/</code>) is a <code>404</code> from the service: use the path exactly.</li></ul>
+</div></details>
+<details class="endpoint" id="ep-me-patch">
+<summary><span class="method m-patch">PATCH</span><span class="path">/api/v1/me</span><span class="sum">Update my profile (partial)</span></summary>
+<div class="body"><dl class="meta">
+<dt>Who may call</dt><dd>signed-in user, account not blocked</dd>
+<dt>Auth</dt><dd><code>Authorization: Bearer $TOKEN</code></dd>
+<dt>Headers</dt><dd><code>Content-Type: application/json</code></dd>
+<dt>Rate limit</dt><dd>300 per 60 s per IP</dd>
+<dt>Implemented by</dt><dd><code>ProfileController#update</code>, validation in <code>ProfilePatch.java</code></dd>
+</dl>
+<h4>Purpose</h4>
+<p>Changes some fields of the profile. Send only what changes: a key that is absent is left alone; a key sent as <code>null</code> clears the field (where the field may be empty). All problems are validated first and reported together: if any field is invalid, <strong>nothing</strong> is saved. Unknown keys are rejected, so a typo cannot silently do nothing.</p>
+<h4>Request body (all fields optional)</h4>
+<div class="table-wrap"><table><thead><tr><th>Field</th><th>Type</th><th>Validation</th><th>Null / blank</th></tr></thead><tbody>
+<tr><td><code>firstName</code></td><td>string</td><td>trimmed, max 100 characters</td><td><code>null</code> or blank clears it (blank becomes <code>null</code>)</td></tr>
+<tr><td><code>lastName</code></td><td>string</td><td>trimmed, max 100 characters</td><td>same</td></tr>
+<tr><td><code>gender</code></td><td>string</td><td>one of MALE, FEMALE, OTHER, PREFER_NOT_TO_SAY, case-insensitive (<code>female</code> is stored as <code>FEMALE</code>)</td><td><code>null</code> clears</td></tr>
+<tr><td><code>dateOfBirth</code></td><td>string</td><td>ISO date <code>YYYY-MM-DD</code>; not in the future, not before year 1900 (compared with today in UTC)</td><td><code>null</code> clears</td></tr>
+<tr><td><code>language</code></td><td>string</td><td><code>am</code>, <code>en</code> or <code>om</code> (case-insensitive, stored lower-case)</td><td><strong>cannot</strong> be cleared: <code>null</code> gives <code>validation_failed</code></td></tr>
+<tr><td><code>market</code></td><td>string</td><td><code>ET</code> or <code>US</code> (case-insensitive, stored upper-case)</td><td>cannot be cleared</td></tr>
+<tr><td><code>timezone</code></td><td>string</td><td>a valid IANA zone id, e.g. <code>Africa/Addis_Ababa</code>, <code>America/New_York</code></td><td>cannot be cleared</td></tr>
+<tr><td><code>termsAcceptedVersion</code></td><td>string</td><td>max 32 characters</td><td>a non-null value stores the version <strong>and sets <code>termsAcceptedAt</code> to now</strong> (again on every PATCH that includes it); <code>null</code> clears both</td></tr>
+<tr><td><code>extra</code></td><td>object</td><td>a JSON object, merged into the stored one (JSON Merge Patch), max 16384 bytes; see Extra data</td><td><code>null</code> as the whole value is rejected; <code>null</code> <em>inside</em> it removes a key</td></tr>
+</tbody></table></div>
+<p>Any other key (<code>email</code>, <code>phone</code>, <code>status</code>, <code>id</code>, <code>avatarUrl</code>, <code>location</code>, ...) is answered with <code>"unknown field"</code>.</p>
+<h4>Example request</h4>
+<pre><code>curl -s -X PATCH "$GATEWAY/api/v1/me" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"firstName":"Selam","lastName":"Tadesse","gender":"female","dateOfBirth":"1995-04-12","language":"am","timezone":"Africa/Addis_Ababa","termsAcceptedVersion":"2026-10","extra":{"occupation":"nurse","prefs":{"theme":"dark"}}}'</code></pre>
+<h4>Example response</h4>
+<pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+
+{
+  "id": "5bc6d545-771d-44f5-91cb-55415b01e4e4",
+  "email": null,
+  "phone": "+2519******57",
+  "firstName": "Selam",
+  "lastName": "Tadesse",
+  "gender": "FEMALE",
+  "dateOfBirth": "1995-04-12",
+  "language": "am",
+  "market": "ET",
+  "timezone": "Africa/Addis_Ababa",
+  "avatarImageId": null,
+  "avatarUrl": null,
+  "location": null,
+  "verificationTier": "CONTACT",
+  "status": "ACTIVE",
+  "termsAcceptedVersion": "2026-10",
+  "termsAcceptedAt": "2026-10-26T10:49:52.309459356Z",
+  "extra": {
+    "occupation": "nurse",
+    "prefs": { "theme": "dark" }
+  },
+  "createdAt": "2026-10-26T10:49:43.643301Z",
+  "updatedAt": "2026-10-26T10:49:52.309459356Z"
+}</code></pre>
+<h4>Example: clearing fields</h4>
+<pre><code>curl -s -X PATCH "$GATEWAY/api/v1/me" -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" -d '{"lastName":null,"gender":null}'</code></pre>
+<p>Answer <code>200</code> with the whole profile where <code>lastName</code> and <code>gender</code> are <code>null</code> and everything else is unchanged (verified). Sending <code>{"firstName":"   "}</code> also clears the first name (blank text becomes <code>null</code>).</p>
+<h4>Example: several problems at once</h4>
+<pre><code>curl -s -X PATCH "$GATEWAY/api/v1/me" -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"gender":"robot","dateOfBirth":"2999-01-01","language":"fr","market":"XX","timezone":"Mars/Base","email":"a@b.c","extra":"str"}'</code></pre>
+<pre class="out"><code>HTTP/1.1 400 Bad Request
+Content-Type: application/json
+
+{
+  "error": "validation_failed",
+  "fields": {
+    "email": "unknown field",
+    "gender": "must be one of MALE, FEMALE, OTHER, PREFER_NOT_TO_SAY",
+    "dateOfBirth": "must be a real past date (YYYY-MM-DD)",
+    "language": "must be one of am, en, om",
+    "market": "must be one of ET, US",
+    "timezone": "must be a valid IANA time zone, e.g. Africa/Addis_Ababa",
+    "extra": "must be a JSON object (use null values inside it to remove keys)"
+  }
+}</code></pre>
+<p>Field messages are English developer text; key the UI on the field name and show your own message. Other messages seen: <code>"max 100 characters"</code> (first/last name), <code>"must be an ISO date (YYYY-MM-DD)"</code> (unparsable date such as <code>12/04/1995</code>), <code>"max 32 characters"</code> (terms version).</p>
+<h4>Errors</h4>
+<div class="table-wrap"><table><thead><tr><th>Status</th><th>Body</th><th>When</th><th>What to do</th></tr></thead><tbody>
+<tr><td>400</td><td><code>validation_failed</code> with <code>fields</code></td><td>any field invalid, unknown key, <code>extra</code> not an object or too large</td><td>show the messages next to the fields</td></tr>
+<tr><td>400</td><td><code>{"error":"invalid_json"}</code></td><td>body is not valid JSON, or is JSON but not an object (e.g. <code>[1]</code>); also a missing body</td><td>fix the client</td></tr>
+<tr><td>401 / 403 / 429 / 503</td><td>see the Error table</td><td></td><td></td></tr>
+<tr><td>409</td><td><code>{"error":"conflict"}</code></td><td>a uniqueness rule in the database fired. Cannot happen with the fields PATCH accepts today</td><td>-</td></tr>
+</tbody></table></div>
+<h4>Using it in the app</h4>
+<ul><li>Send only the changed keys. An empty <code>{}</code> succeeds and only bumps <code>updatedAt</code>.</li><li>There is no version check: two devices editing the same scalar field overwrite each other (last write wins). <code>extra</code> merges key by key, so independent keys survive.</li><li>When the person changes the app language, <code>PATCH {"language":"om"}</code> so push messages follow.</li><li>Terms: send <code>termsAcceptedVersion</code> once, when the person accepts; resending refreshes <code>termsAcceptedAt</code>.</li></ul>
+</div></details>
+
+<div class="pager"><a class="prev" href="session-and-logout.html"><small>Previous</small>Session and logout</a><a class="next" href="extra-data.html"><small>Next</small>Extra data</a></div>
+<p class="footer">Adera super-app guide: sign-in and account &middot; verified against the dev stack on 2026-10-26</p>
+</main>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

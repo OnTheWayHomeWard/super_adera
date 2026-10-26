@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pseudonymous user ids | Adera partner API</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+<button id="menu-btn" type="button" aria-label="Toggle menu">Menu</button>
+<a class="brand" href="index.html">Adera partner API</a>
+<span class="spacer"></span>
+<button id="theme-btn" type="button" aria-label="Toggle light or dark theme">Theme</button>
+</header>
+<div class="layout">
+<nav class="sidebar" aria-label="Pages">
+<h4>Mini-app backend API</h4>
+<ul><li><a href="index.html">Overview and contents</a></li><li><a href="quickstart.html">Quick start</a></li><li><a href="signing.html">Signing requests (ADERA-SIG-1)</a></li><li><a href="environments-and-ips.html">Environments, IPs and keys</a></li><li><a href="user-ids.html" class="current">Pseudonymous user ids</a><ul><li><a href="#overview">Overview</a></li><li><a href="#format">What it looks like</a></li><li><a href="#per-app">Properties</a></li><li><a href="#obtaining">How a partner obtains an id today</a></li><li><a href="#users-control">What the user controls</a></li><li><a href="#not-built">Not built yet</a></li></ul></li><li><a href="templates.html">Templates</a></li><li><a href="sending-notifications.html">Sending notifications</a></li><li><a href="statuses-and-callbacks.html">Statuses, retries and callbacks</a></li><li><a href="limits-and-quotas.html">Limits and quotas</a></li><li><a href="sandbox-and-testing.html">Sandbox and testing checklist</a></li><li><a href="errors.html">Error codes</a></li><li><a href="data-available-to-mini-apps.html">What data a mini app gets</a></li><li><a href="known-issues.html">Known issues and not built yet</a></li></ul>
+</nav>
+<main>
+<h1>Pseudonymous user ids</h1>
+<p class="lead">How Adera identifies a user to your mini app without telling you who they are: what the <code>u_p_...</code> id is, why it is different in every mini app, and how a partner obtains one today (it cannot yet).</p>
+
+<h2 id="overview">Overview</h2>
+<p>You never address a person by phone number, email address or Adera account id. You address them by their <strong>pseudonymous id for your app</strong>, a string like <code>u_p_639f130c5885168c50d6eecf129cf633</code>. You send it as <code>userId</code> in <a href="sending-notifications.html"><code>POST /v1/notifications</code></a>. Adera looks up which person it stands for, reads their phone, email, language and mute settings on its side, and delivers.</p>
+<div class="callout why"><span class="label">Why it exists</span><p>Privacy and blast-radius control. If a partner's database leaks, the ids in it cannot be linked to a person, to the same person's id in another mini app, or to Adera's own records. A partner also cannot build a contact list: it can only reach users who opened its app, one template at a time.</p></div>
+
+<h2 id="format">What it looks like</h2>
+<ul>
+<li><code>u_p_</code> followed by 32 lowercase hexadecimal characters (the first 128 bits of an HMAC-SHA256 computed with a secret only Adera holds over the user id and the app id).</li>
+<li>When you <em>send</em> an id, Adera accepts the pattern <code>u_p_</code> plus 1 to 60 letters, digits or underscores (so that the synthetic test ids <code>u_p_test_...</code> fit). Anything else is <code>400 validation_failed</code> on field <code>userId</code>.</li>
+<li>Treat it as an opaque string: do not parse it, do not assume the length, store it as text.</li>
+</ul>
+
+<h2 id="per-app">Properties</h2>
+<div class="table-wrap"><table><thead><tr><th>Property</th><th>What it means for you</th></tr></thead><tbody>
+<tr><td><strong>Per app</strong></td><td>The same user has a different id in every mini app, because the app id goes into the computation. The id from one mini app does not work in another: Adera looks ids up per app, so another app's id is unknown to yours (<code>422 user_unreachable</code>). Verified on the dev stack: one demo user got <code>u_p_639f130c...</code> for the throwaway app and <code>u_p_fe2b3855...</code> for another app id.</td></tr>
+<tr><td><strong>Stable</strong></td><td>It is deterministic: the same user in the same app always has the same id, minting it twice returns the same value (verified). Store it as your user key for that person.</td></tr>
+<tr><td><strong>Not reversible by you</strong></td><td>Only Adera's table maps it back to a person. You cannot derive an id from a phone number, and you cannot find a phone number from an id.</td></tr>
+<tr><td><strong>Exists only after it was issued</strong></td><td>An id that was never issued is indistinguishable from a deleted user: <code>422 user_unreachable</code> (verified with <code>u_p_00000000000000000000000000000000</code>).</td></tr>
+<tr><td><strong>Active users only</strong></td><td>If the person is later suspended or deletes their Adera account, the id still exists but every request answers <code>422 user_unreachable</code>, and notifications already accepted end as <code>UNREACHABLE</code>. The API deliberately does not say which of "unknown", "suspended" or "deleted" it is, so it cannot be used to find out who is on Adera.</td></tr>
+<tr><td><strong>Personal data on your side</strong></td><td>It does not identify a person to outsiders, but together with your own records it identifies a person to <em>you</em>. Protect it like any user id.</td></tr>
+</tbody></table></div>
+
+<h2 id="obtaining">How a partner obtains an id today</h2>
+<div class="callout danger"><span class="label">Internal only today</span><p>There is <strong>no partner-facing way</strong> to obtain a <code>u_p_...</code> id yet. The mechanism that is meant to give you one, the frontend bridge (the Adera app telling your mini app who opened it, with the user's consent), is <strong>not built</strong>. Today an id is created only by an internal Adera call that is not reachable through the gateway. Until the bridge exists, ids reach a partner only because Adera staff or developers hand them over for test users.</p></div>
+<p>What exists today, verified:</p>
+<ul>
+<li><strong>Issuing (internal):</strong> <code>POST /internal/aliases</code> on the user service with header <code>X-Internal-Secret</code> and body <code>{"appId": "&lt;app uuid&gt;", "userId": "&lt;adera user uuid&gt;"}</code> answers <code>{"alias": "u_p_..."}</code>. It is idempotent. It answers <code>401 {"error":"unauthorized"}</code> without the secret and <code>404 {"error":"not_found"}</code> when the user does not exist. Called through the public gateway it is not routed at all (<code>404 {"error_msg":"404 Route Not Found"}</code>), so a partner cannot reach it. The <code>appId</code> is not checked against the registry.</li>
+<li><strong>Resolving (internal):</strong> the notification service resolves an id back to a user with <code>GET /internal/aliases/resolve</code>, for each notification you send.</li>
+<li><strong>Real exchange</strong> on the dev stack (secret not shown):
+<pre class="out nocopy"><code>POST http://127.0.0.1:8086/internal/aliases      (user service, dev port, X-Internal-Secret: ***)
+{"appId": "e50fd74c-8d27-4e2b-bc34-02678e06d243", "userId": "c3b1c779-3459-480a-a0c9-b34f37b8fb61"}
+
+200 {"alias": "u_p_639f130c5885168c50d6eecf129cf633"}
+(second call, same inputs)    200 {"alias": "u_p_639f130c5885168c50d6eecf129cf633"}
+(other appId, same user)      200 {"alias": "u_p_fe2b38554ec0ffde1ae5203adf6e6c8f"}
+(no secret)                   401 {"error": "unauthorized"}
+(through the gateway)         404 {"error_msg": "404 Route Not Found"}
+(user id that does not exist) 404 {"error": "not_found"}</code></pre></li>
+</ul>
+<p><span class="badge ours">Adera staff</span> To test a partner integration against DEV with real (seeded) users, a developer mints the ids for chosen test users with the call above and gives them to the partner; or the partner uses the synthetic ids <code>u_p_test_*</code> that need no minting (<a href="sandbox-and-testing.html">Sandbox</a>). There is no endpoint in the dashboard API to mint or look up aliases.</p>
+
+<h2 id="users-control">What the user controls</h2>
+<p>A user can mute your app per channel in the Adera app (<code>mute in-app</code>, <code>mute SMS</code>, <code>mute email</code>, stored per user and per app). A muted channel makes your request answer <code>200 SUPPRESSED</code>; see <a href="limits-and-quotas.html#muted">muted users</a>. You cannot read the setting; you only see its effect.</p>
+
+<h2 id="not-built">Not built yet</h2>
+<ul>
+<li>The frontend bridge that hands a mini app the user's id when they open it (with consent). Until then partners have no way to learn ids on their own.</li>
+<li>A partner-facing lookup of any kind (id to profile, phone to id). By design there is no phone-to-id lookup; whether a consented profile lookup will exist is not decided here.</li>
+<li>A way to learn that an id's user has been deleted other than the generic <code>422 user_unreachable</code> or a final <code>UNREACHABLE</code> status.</li>
+</ul>
+
+<div class="pager"><a class="prev" href="environments-and-ips.html"><small>Previous</small>Environments, IPs and keys</a><a class="next" href="templates.html"><small>Next</small>Templates</a></div>
+<p class="footer">Adera mini-app backend API guide &middot; verified against the dev deployment on 2026-10-26</p>
+</main>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

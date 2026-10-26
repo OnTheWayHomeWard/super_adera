@@ -1,0 +1,234 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Notification log and usage | Admin: managing mini apps</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+<button id="menu-btn" type="button" aria-label="Toggle menu">Menu</button>
+<a class="brand" href="index.html">Admin: managing mini apps</a>
+<span class="spacer"></span>
+<button id="theme-btn" type="button" aria-label="Toggle light or dark theme">Theme</button>
+</header>
+<div class="layout">
+<nav class="sidebar" aria-label="Pages in this guide">
+<h4>This guide</h4>
+<ul><li><a href="index.html">Overview</a></li>
+<li><a href="roles-and-access.html">Roles and access</a></li>
+<li><a href="apps-create-and-edit.html">Create, edit, list apps</a></li>
+<li><a href="status-lifecycle.html">Status lifecycle</a></li>
+<li><a href="logo.html">Logo</a></li>
+<li><a href="capabilities.html">Capabilities</a></li>
+<li><a href="notification-limits.html">Notification limits</a></li>
+<li><a href="environments-and-ips.html">Environments and IPs</a></li>
+<li><a href="partner-keys.html">Partner keys</a></li>
+<li><a href="templates.html">Templates</a></li>
+<li><a href="payment-settings.html">Payment settings</a></li>
+<li><a href="notification-log-and-usage.html" class="current">Notification log and usage</a><ul><li><a href="#overview">Overview</a></li><li><a href="#statuses">Statuses and reasons</a></li><li><a href="#endpoints">Endpoints</a></li><li><a href="#why-not-arrive">Why did it not arrive? A step-by-step answer</a></li><li><a href="#not-built">Not built yet</a></li></ul></li>
+<li><a href="reviews-reports-audit.html">Reviews, reports, audit</a></li>
+<li><a href="runbooks.html">Runbooks</a></li>
+<li><a href="errors.html">Errors</a></li>
+<li><a href="known-issues.html">Known issues</a></li>
+</ul></nav>
+<main>
+<h1>Notification log and usage</h1>
+<p class="lead">What a mini app sent, what happened to each message, usage against the limits, and how to answer "why did it not arrive?".</p>
+<h2 id="overview">Overview</h2>
+<p>Four read-only views, all under <code>/admin/api/v1/notification/</code>, show what a mini app has sent through the partner API: a searchable <strong>log</strong>, one notification with every <strong>delivery attempt and callback</strong>, <strong>counts</strong>, and <strong>usage against the limits</strong>. Any staff role may read them. They never show the message values, user ids or aliases, because those can contain personal data.</p>
+<div class="callout why"><span class="label">Why this exists</span>When a partner says "your platform did not deliver my message" you must be able to answer in a minute, with facts: was it accepted, what was decided, which provider said what, did we report back. These views are that evidence.</div>
+<div class="callout "><span class="label">Note</span><p>These calls are handled by the notification service behind the same gateway route and the same staff check as the rest of the admin API (rate limit 300 per minute per IP, aal2 token). Times are UTC.</p></div>
+<h2 id="statuses">Statuses and reasons</h2>
+<div class="table-wrap"><table><thead><tr><th>Status</th><th>Meaning</th><th>Final?</th></tr></thead><tbody><tr><td><code>QUEUED</code></td><td>Accepted and waiting for the delivery worker.</td><td>no</td></tr><tr><td><code>PROCESSING</code></td><td>A worker is delivering it right now.</td><td>no</td></tr><tr><td><code>RETRYING</code></td><td>A temporary problem (provider timeout, a dependency down). Will try again; <code>reason</code> says why and <code>nextAttemptAt</code> when.</td><td>no</td></tr><tr><td><code>SENT</code></td><td>Handed to the provider (SMS, email) or stored in the user's inbox (in-app). For SMS and email this means the provider accepted it, not that the phone received it.</td><td>yes</td></tr><tr><td><code>FAILED</code></td><td>Gave up: the provider rejected it permanently (bad number or address), or 8 attempts were used.</td><td>yes</td></tr><tr><td><code>UNREACHABLE</code></td><td>The user cannot be reached: account deleted or suspended, or no phone or email on file for the chosen channel.</td><td>yes</td></tr><tr><td><code>SUPPRESSED</code></td><td>Deliberately not sent: the user muted this app on that channel, or the live allowlist excluded the recipient.</td><td>yes</td></tr><tr><td><code>EXPIRED</code></td><td>Kept trying until the message's time-to-live ran out (default 24 hours, partner can ask for 1 minute to 7 days).</td><td>yes</td></tr></tbody></table></div>
+<div class="table-wrap"><table><thead><tr><th><code>reason</code></th><th>Seen with</th><th>Meaning</th></tr></thead><tbody><tr><td><code>recipient_opted_out</code></td><td>SUPPRESSED</td><td>The user turned off this app's notifications for this channel (done at acceptance or just before delivery). Nothing to fix; it is the user's choice.</td></tr><tr><td><code>not_allowlisted</code></td><td>SUPPRESSED</td><td>Real providers are in use and a "live allowlist" (a safety list used during rollout) does not include this recipient.</td></tr><tr><td><code>user_unreachable</code></td><td>UNREACHABLE</td><td>The user was deleted or suspended between acceptance and delivery.</td></tr><tr><td><code>no_phone</code>, <code>no_email</code></td><td>UNREACHABLE</td><td>The user has no phone or email for the chosen channel any more.</td></tr><tr><td><code>twilio_http_NNN</code>, <code>resend_http_NNN</code></td><td>FAILED, RETRYING</td><td>The SMS or email provider answered HTTP NNN. 4xx other than 408 and 429 are permanent (FAILED at once); 5xx, 408, 429 and timeouts are retried.</td></tr><tr><td><code>max_attempts:...</code></td><td>FAILED</td><td>All 8 delivery attempts were used; the text after the colon is the last problem.</td></tr><tr><td><code>user_directory_unavailable</code></td><td>RETRYING</td><td>Adera's own user service could not be reached; retried.</td></tr><tr><td><code>expired</code> (or the last problem)</td><td>EXPIRED</td><td>The time-to-live ran out before a successful delivery.</td></tr></tbody></table></div>
+<p>Retries: after a failed attempt the next one is scheduled after 30 s, 1 min, 2 min, 4 min, ... at most 1 hour apart (give or take 10 percent), up to 8 attempts or the message's expiry, whichever comes first.</p>
+<h4>Attempts, callbacks</h4>
+<div class="table-wrap"><table><thead><tr><th>Item</th><th>Values and meaning</th></tr></thead><tbody><tr><td><code>attemptLog[].outcome</code></td><td><code>OK</code> (provider accepted), <code>SKIPPED</code> (not tried, e.g. <code>no_devices</code>: the user has no registered device so no push; the inbox entry was still created; or <code>not_allowlisted</code>), <code>TRANSIENT</code> (temporary failure, will retry), <code>PERMANENT</code> (will not retry).</td></tr><tr><td><code>attemptLog[].provider</code></td><td><code>console</code> (dev SMS), <code>mailpit</code> (dev email), <code>twilio</code>, <code>resend</code>, the push provider (<code>fcm</code>, or the dev fake), or <code>sandbox</code> for the <code>u_p_test_*</code> test users in DEV.</td></tr><tr><td><code>attemptLog[].errorCode</code></td><td>For example <code>twilio_http_400</code>, <code>token_unregistered</code> (a dead push token, now retired), <code>push_unavailable</code>.</td></tr><tr><td><code>callbacks[]</code></td><td>The status report Adera posts to the partner's <code>callbackUrl</code> when the message reaches a final status. <code>status</code>: <code>PENDING</code> (will retry), <code>PROCESSING</code>, <code>DELIVERED</code> (the partner answered 2xx), <code>FAILED</code> (gave up after 8 attempts, or the address is not allowed). <code>lastHttpStatus</code>, <code>lastError</code> (<code>unreachable</code>, <code>http_500</code>, <code>scheme_not_https</code>, <code>host_not_resolvable</code>, <code>address_not_public</code>, ...), <code>nextAttemptAt</code>. A failing callback never affects the message itself: it only means the partner did not get its report.</td></tr></tbody></table></div>
+<h2 id="endpoints">Endpoints</h2>
+<details class="endpoint" id="ep-n-list" open><summary><span class="method m-get">GET</span><span class="path">/admin/api/v1/notification/notifications</span><span class="sum">Search the notification log</span></summary><div class="body"><dl class="meta"><dt>Who may call</dt><dd>Any staff role</dd><dt>Auth</dt><dd>Staff session Bearer token at assurance level aal2 (<code>Authorization: Bearer $TOKEN</code>)</dd><dt>Rate limit</dt><dd>300 requests per minute per client IP at the gateway (HTTP 429 beyond that)</dd><dt>Backoffice</dt><dd>App &gt; <em>Notification log</em> (status, channel, kind, date filters), and the global <em>Notifications</em> screen for all apps</dd><dt>Audit name</dt><dd>none (read)</dd><dt>Reversible</dt><dd>n/a</dd></dl>
+<p><strong>Purpose.</strong> Notifications newest first, across all apps or one. <strong>When to use it.</strong> To see what an app sent in a period, to find the notification a partner asks about, to spot a spike of FAILED.</p>
+<h4>Query parameters</h4>
+<div class="table-wrap"><table><thead><tr><th>Name</th><th>Type</th><th>Required</th><th>Meaning</th></tr></thead><tbody><tr><td><code>appId</code></td><td>UUID</td><td>no</td><td>Only this app. Absent: all apps.</td></tr><tr><td><code>status</code></td><td>string</td><td>no</td><td>One of the statuses above (any letter case).</td></tr><tr><td><code>channel</code></td><td>string</td><td>no</td><td><code>SMS</code>, <code>EMAIL</code>, <code>IN_APP</code>.</td></tr><tr><td><code>environment</code></td><td>string</td><td>no</td><td><code>DEV</code> or <code>PROD</code> (a deployment only ever has its own, so this mostly matters on a database that was migrated).</td></tr><tr><td><code>kind</code></td><td>string</td><td>no</td><td>Template kind: <code>DIRECT</code> or <code>IN_APP</code>.</td></tr><tr><td><code>from</code>, <code>to</code></td><td>ISO-8601 instant</td><td>no</td><td>Created at or after <code>from</code> (inclusive), before <code>to</code> (exclusive). Bad format: <code>400 validation_failed</code>.</td></tr><tr><td><code>limit</code>, <code>offset</code></td><td>integers</td><td>no</td><td>Paging: default 50, at most 200; offset default 0.</td></tr></tbody></table></div>
+<pre><code>curl -sS -X GET "$GATEWAY/admin/api/v1/notification/notifications?appId=$APP_ID&amp;limit=2" \
+  -H "Authorization: Bearer $TOKEN"</code></pre>
+<p>The response header <code>X-Total-Count</code> is the number of matching rows, whatever <code>limit</code> says. The body (trimmed to two of the four rows):</p>
+<pre class="out"><code>HTTP 200 OK
+X-Total-Count: 4
+
+[
+  {
+    "id": "8e1ff749-4355-4dc9-8d18-aee2ed9f04ce",
+    "appId": "ff6510a9-de00-4fb2-97a4-ce4ad6e377dd",
+    "externalId": "doc-order-1006c",
+    "environment": "DEV",
+    "status": "SENT",
+    "channel": "SMS",
+    "reason": null,
+    "attempts": 1,
+    "kind": "DIRECT",
+    "createdAt": "2026-10-26T11:06:45.983Z",
+    "completedAt": "2026-10-26T11:06:46.713Z"
+  },
+  {
+    "id": "82b940a9-5f68-414f-9a7f-e0720dac535a",
+    "appId": "ff6510a9-de00-4fb2-97a4-ce4ad6e377dd",
+    "externalId": "doc-order-1006",
+    "environment": "DEV",
+    "status": "SENT",
+    "channel": "EMAIL",
+    "reason": null,
+    "attempts": 1,
+    "kind": "DIRECT",
+    "createdAt": "2026-10-26T11:05:57.867Z",
+    "completedAt": "2026-10-26T11:05:58.539Z"
+  }
+]</code></pre>
+<p>A filtered call (suppressed, in-app, DEV, since 1 October) returns the one message sent to the muted test user:</p>
+<pre class="out"><code>GET .../notifications?appId=$APP_ID&amp;status=suppressed&amp;channel=in_app&amp;environment=dev&amp;kind=in_app&amp;from=2026-10-01T00:00:00Z&amp;limit=10
+
+[
+  {
+    "id": "0bd1ce1e-26f7-421c-a0c8-3431e02f2285",
+    "appId": "ff6510a9-de00-4fb2-97a4-ce4ad6e377dd",
+    "externalId": "doc-order-1002",
+    "environment": "DEV",
+    "status": "SUPPRESSED",
+    "channel": "IN_APP",
+    "reason": "recipient_opted_out",
+    "attempts": 0,
+    "kind": "IN_APP",
+    "createdAt": "2026-10-26T11:05:57.783Z",
+    "completedAt": "2026-10-26T11:05:57.783Z"
+  }
+]</code></pre>
+<p>Fields: <code>id</code> (use it in the detail call), <code>appId</code>, <code>externalId</code> (the partner's own id: the thing they quote to you), <code>environment</code>, <code>status</code>, <code>channel</code>, <code>reason</code>, <code>attempts</code> (delivery attempts made so far), <code>kind</code>, <code>createdAt</code>, <code>completedAt</code> (null until final).</p>
+<div class="table-wrap"><table><thead><tr><th>Status</th><th><code>error</code></th><th>When it happens</th><th>What to do</th></tr></thead><tbody><tr><td>400</td><td><code>validation_failed</code></td><td><code>from</code> or <code>to</code> is not an ISO-8601 instant, or <code>appId</code> is not a UUID (<code>invalid_request</code>).</td><td>Use <code>2026-10-01T00:00:00Z</code>.</td></tr></tbody></table></div>
+<pre class="out nocopy"><code>GET /admin/api/v1/notification/notifications?from=yesterday
+HTTP 400  {"error": "validation_failed", "fields": {"from": "must be an ISO-8601 instant like 2026-10-01T00:00:00Z"}}</code></pre>
+<ul><li>There is no filter on <code>externalId</code>: narrow with <code>appId</code> plus a time window and look for it in the result (or ask the partner for the notification id from their own <code>GET /v1/notifications/{externalId}</code> answer).</li><li>Unknown <code>status</code>, <code>channel</code> and so on are not errors; they simply match nothing.</li></ul>
+</div></details>
+<details class="endpoint" id="ep-n-detail" open><summary><span class="method m-get">GET</span><span class="path">/admin/api/v1/notification/notifications/{id}</span><span class="sum">One notification with attempts and callbacks</span></summary><div class="body"><dl class="meta"><dt>Who may call</dt><dd>Any staff role</dd><dt>Auth</dt><dd>Staff session Bearer token at assurance level aal2 (<code>Authorization: Bearer $TOKEN</code>)</dd><dt>Rate limit</dt><dd>300 requests per minute per client IP at the gateway (HTTP 429 beyond that)</dd><dt>Backoffice</dt><dd>Notification log &gt; open a row (Attempts and Callbacks tables)</dd><dt>Audit name</dt><dd>none (read)</dd><dt>Reversible</dt><dd>n/a</dd></dl>
+<p><strong>Purpose.</strong> One notification with every delivery attempt and every callback: the answer to "why did it not arrive?". <strong>When to use it.</strong> After you found the row in the list.</p>
+<pre><code>curl -sS -X GET "$GATEWAY/admin/api/v1/notification/notifications/$NOTIFICATION_ID" \
+  -H "Authorization: Bearer $TOKEN"</code></pre>
+<pre class="out"><code>HTTP 200 OK
+
+{
+  "id": "dda14451-2d22-43a9-8cf4-2c62b3afb1c2",
+  "appId": "ff6510a9-de00-4fb2-97a4-ce4ad6e377dd",
+  "externalId": "doc-order-1001",
+  "environment": "DEV",
+  "status": "SENT",
+  "channel": "IN_APP",
+  "reason": null,
+  "attempts": 1,
+  "kind": "IN_APP",
+  "templateId": "6a93b9c4-21a6-4a14-ae90-8db963fc52fb",
+  "templateVersion": 2,
+  "createdAt": "2026-10-26T11:05:53.746Z",
+  "nextAttemptAt": "2026-10-26T11:05:53.746Z",
+  "expiresAt": "2026-10-27T11:05:53.745Z",
+  "completedAt": "2026-10-26T11:05:54.526Z",
+  "attemptLog": [
+    {
+      "channel": "IN_APP",
+      "provider": "sandbox",
+      "outcome": "OK",
+      "errorCode": null,
+      "at": "2026-10-26T11:05:54.525Z"
+    }
+  ],
+  "callbacks": [
+    {
+      "status": "PENDING",
+      "attempts": 2,
+      "lastHttpStatus": null,
+      "lastError": "unreachable",
+      "nextAttemptAt": "2026-10-26T11:08:57.030Z"
+    }
+  ]
+}</code></pre>
+<p>Reading it: <code>status</code> SENT after one attempt (<code>attemptLog</code>: provider <code>sandbox</code> because the user was a DEV test user); the partner asked for a callback, and it is still <code>PENDING</code> after 2 attempts because the partner's address was unreachable. <code>templateId</code> and <code>templateVersion</code> tell you which words were used (the version at acceptance). <code>expiresAt</code> is when Adera stops trying; <code>nextAttemptAt</code> is only meaningful while the message is not final.</p>
+<div class="table-wrap"><table><thead><tr><th>Status</th><th><code>error</code></th><th>When it happens</th><th>What to do</th></tr></thead><tbody><tr><td>404</td><td><code>not_found</code></td><td>No such notification.</td><td>Check the id.</td></tr><tr><td>400</td><td><code>invalid_request</code></td><td>The id is not a UUID.</td><td>Use the UUID.</td></tr></tbody></table></div>
+<pre class="out nocopy"><code>GET /admin/api/v1/notification/notifications/$NOTIFICATION_ID
+HTTP 404  {"error": "not_found"}</code></pre>
+</div></details>
+<details class="endpoint" id="ep-n-stats" open><summary><span class="method m-get">GET</span><span class="path">/admin/api/v1/notification/stats</span><span class="sum">Counts by status and channel</span></summary><div class="body"><dl class="meta"><dt>Who may call</dt><dd>Any staff role</dd><dt>Auth</dt><dd>Staff session Bearer token at assurance level aal2 (<code>Authorization: Bearer $TOKEN</code>)</dd><dt>Rate limit</dt><dd>300 requests per minute per client IP at the gateway (HTTP 429 beyond that)</dd><dt>Backoffice</dt><dd>Dashboard (notification counts)</dd><dt>Audit name</dt><dd>none (read)</dd><dt>Reversible</dt><dd>n/a</dd></dl>
+<p><strong>Purpose.</strong> Real counts: everything, the last 24 hours, by status and by channel; optionally for one app. <strong>When to use it.</strong> A glance for "is something wrong right now" (a growing FAILED count).</p>
+<h4>Query</h4>
+<div class="table-wrap"><table><thead><tr><th>Name</th><th>Type</th><th>Required</th><th>Meaning</th></tr></thead><tbody><tr><td><code>appId</code></td><td>UUID</td><td>no</td><td>Only this app.</td></tr></tbody></table></div>
+<pre><code>curl -sS -X GET "$GATEWAY/admin/api/v1/notification/stats?appId=$APP_ID" \
+  -H "Authorization: Bearer $TOKEN"</code></pre>
+<pre class="out"><code>HTTP 200 OK
+
+{
+  "total": 4,
+  "last24h": {
+    "total": 4,
+    "byStatus": {
+      "SENT": 3,
+      "SUPPRESSED": 1
+    }
+  },
+  "byStatus": {
+    "SENT": 3,
+    "SUPPRESSED": 1
+  },
+  "byChannel": {
+    "EMAIL": 1,
+    "IN_APP": 2,
+    "SMS": 1
+  }
+}</code></pre>
+<p>Every status or channel with no messages is simply absent from the maps.</p>
+</div></details>
+<details class="endpoint" id="ep-n-usage" open><summary><span class="method m-get">GET</span><span class="path">/admin/api/v1/notification/usage</span><span class="sum">Usage against the limits</span></summary><div class="body"><dl class="meta"><dt>Who may call</dt><dd>Any staff role</dd><dt>Auth</dt><dd>Staff session Bearer token at assurance level aal2 (<code>Authorization: Bearer $TOKEN</code>)</dd><dt>Rate limit</dt><dd>300 requests per minute per client IP at the gateway (HTTP 429 beyond that)</dd><dt>Backoffice</dt><dd>App &gt; <em>Usage</em> (meters: sent today vs max per day, users reached vs max distinct users, lifetime vs max total; the environment switch)</dd><dt>Audit name</dt><dd>none (read)</dd><dt>Reversible</dt><dd>n/a</dd></dl>
+<p><strong>Purpose.</strong> How much of each limit an app has used: messages sent today, distinct users reached today and lifetime total, per channel. <strong>When to use it.</strong> Before raising a quota; when a partner reports <code>quota_exceeded</code>; for a monthly review of SMS cost.</p>
+<h4>Query</h4>
+<div class="table-wrap"><table><thead><tr><th>Name</th><th>Type</th><th>Required</th><th>Meaning</th></tr></thead><tbody><tr><td><code>appId</code></td><td>UUID</td><td>yes</td><td>The app.</td></tr><tr><td><code>environment</code></td><td>string</td><td>no</td><td><code>DEV</code> or <code>PROD</code>. Default: this deployment's environment.</td></tr></tbody></table></div>
+<pre><code>curl -sS -X GET "$GATEWAY/admin/api/v1/notification/usage?appId=$APP_ID" \
+  -H "Authorization: Bearer $TOKEN"</code></pre>
+<pre class="out"><code>HTTP 200 OK
+
+[
+  {
+    "channel": "EMAIL",
+    "lifetime": 1,
+    "today": 1,
+    "distinct_users_today": 1
+  },
+  {
+    "channel": "IN_APP",
+    "lifetime": 1,
+    "today": 1,
+    "distinct_users_today": 1
+  },
+  {
+    "channel": "SMS",
+    "lifetime": 1,
+    "today": 1,
+    "distinct_users_today": 1
+  }
+]</code></pre>
+<ul><li><code>today</code> = messages accepted today (UTC) on that channel; <code>distinct_users_today</code> = different users reached today; <code>lifetime</code> = all messages ever on that channel in that environment. Compare them with <code>maxPerDay</code>, <code>maxDistinctUsersPerDay</code> and <code>maxTotal</code> from the app detail (<code>notificationLimits</code>).</li><li>Note the one <strong>snake_case</strong> field name, <code>distinct_users_today</code>; the others are lower camel case. Use the names exactly as shown.</li><li>A channel appears only after its first message; an app that never sent anything gets an empty list <code>[]</code>, and so does the other environment:</li></ul>
+<pre class="out"><code>GET .../usage?appId=$APP_ID&amp;environment=prod
+
+[]</code></pre>
+<ul><li>There is no per-user usage in the API (user ids are not exposed). The per-user daily cap is enforced but not listed.</li></ul>
+</div></details>
+<h2 id="why-not-arrive">Why did it not arrive? A step-by-step answer</h2>
+<p>Start with what the partner tells you: their own <code>externalId</code> (or the error code they got), the time, the app.</p>
+<ol><li><strong>Was it accepted at all?</strong> Look in the log for the app and the time window (<code>GET .../notifications?appId=...&amp;from=...</code>). <strong>Not in the log</strong> means the request was refused, and the partner got an error. Ask for it. The common ones: <code>ip_not_allowed</code> (fix the addresses), <code>key_revoked_or_expired</code> / <code>invalid_signature</code> / <code>wrong_environment</code> (keys), <code>app_draft</code> / <code>app_paused</code> / <code>app_killed</code> (status), <code>capability_not_granted</code> (capabilities), <code>template_inactive</code> / <code>template_expired</code> / <code>template_not_yet_valid</code> (templates), <code>param_invalid</code> (their values), <code>quota_exceeded</code> (limits: check usage), <code>user_unreachable</code> (the user is deleted, suspended, unknown to that app, or has no contact for the channel). The full list is on the Errors page.</li><li><strong>It is in the log: read <code>status</code>.</strong> <code>QUEUED</code> or <code>RETRYING</code> for a long time: look at the detail (<code>reason</code>, <code>nextAttemptAt</code>); check that the delivery worker and the provider are healthy (System page). <code>SUPPRESSED</code> / <code>recipient_opted_out</code>: the user muted the app; nothing to fix. <code>FAILED</code>: read <code>attemptLog</code>; <code>twilio_http_400</code>-style codes mean the number or address was rejected. <code>UNREACHABLE</code>: the account is gone or has no phone/email. <code>EXPIRED</code>: a long provider outage.</li><li><strong>SENT but the user says nothing arrived.</strong> For <code>IN_APP</code>: the inbox entry exists (the user sees it when opening the app); a missing push usually means <code>SKIPPED / no_devices</code> or <code>token_unregistered</code> in the attempts (the user has no valid device registered). For SMS and email: <em>SENT</em> means the provider accepted it; delivery to the handset or mailbox is not tracked, so check the user's number or address and the provider's own console.</li><li><strong>It arrived on the wrong channel.</strong> The partner never chooses the channel. A DIRECT template goes by SMS when the user has a phone and <code>notify.sms</code> is granted, otherwise by email. A suspended SMS capability quietly moves traffic to email.</li><li><strong>The partner says the status report never came.</strong> Look at <code>callbacks</code> in the detail: <code>PENDING</code> with <code>lastError: unreachable</code> or <code>http_500</code> is the partner's server; <code>FAILED</code> with <code>scheme_not_https</code> or <code>address_not_public</code> is a callback address Adera refuses to call (only public https addresses on ports 443 or 8443 are allowed in production).</li></ol>
+<div class="table-wrap"><table><thead><tr><th>Symptom</th><th>Where to look</th><th>Typical cause</th><th>Action</th></tr></thead><tbody><tr><td>Partner gets 403 on every call</td><td>Partner's error code</td><td>Address, status, key environment</td><td>Environments and IPs, Status, Partner keys</td></tr><tr><td>Partner gets 429 quota_exceeded</td><td>Usage vs <code>notificationLimits</code>; the error's <code>limit</code> field</td><td>Daily or lifetime limit reached</td><td>Raise the limit (runbook) or wait for 00:00 UTC</td></tr><tr><td>Message missing from the log</td><td>The log, the partner's own error</td><td>Refused at the door</td><td>Fix the cause shown by the error</td></tr><tr><td>Status SUPPRESSED</td><td>Detail <code>reason</code></td><td>User muted the app</td><td>None</td></tr><tr><td>Status FAILED</td><td>Detail attempt <code>errorCode</code></td><td>Bad number or address; provider problem</td><td>Ask the user to fix their contact; check provider</td></tr><tr><td>Stuck in RETRYING</td><td>Detail <code>reason</code>, <code>nextAttemptAt</code></td><td>Provider or dependency outage</td><td>Check service health; it recovers by itself until expiry</td></tr><tr><td>SENT, user denies receipt</td><td>Detail attempts; channel</td><td>No device / carrier / spam folder</td><td>Check devices; provider console</td></tr></tbody></table></div>
+<h2 id="not-built">Not built yet</h2>
+<ul><li>Searching the log by <code>externalId</code> or user.</li><li>Delivery receipts from carriers (SENT means the provider accepted it).</li><li>Resending or cancelling a queued message from the dashboard or the API.</li><li>Per-user usage, and alerts when a limit is close.</li></ul>
+
+<div class="pager"><a class="prev" href="payment-settings.html"><small>Previous</small>Payment settings</a><a class="next" href="reviews-reports-audit.html"><small>Next</small>Reviews, reports, audit</a></div>
+<p class="footer">Admin guide: managing mini apps. Examples were captured from a running dev stack (ADERA_ENV=dev) with a throwaway app and a temporary staff account, both removed afterwards. Ids, timestamps and key ids differ on your system.</p>
+</main>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

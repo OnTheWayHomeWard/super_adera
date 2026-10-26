@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Reviews and ratings | Mini-app catalog guide</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<header class="topbar">
+<button id="menu-btn" type="button" aria-label="Toggle menu">Menu</button>
+<a class="brand" href="index.html">Mini-app catalog guide</a>
+<span class="spacer"></span>
+<button id="theme-btn" type="button" aria-label="Toggle light or dark theme">Theme</button>
+</header>
+<div class="layout">
+<nav class="sidebar" aria-label="Pages">
+<h4>Mini-app catalog</h4><ul><li><a href="index.html">Overview</a></li><li><a href="list-apps.html">List the mini apps</a></li><li><a href="app-details.html">App details</a></li><li><a href="capabilities-and-permissions.html">Capabilities and permissions</a></li><li><a href="reviews-and-ratings.html" class="current">Reviews and ratings</a></li><li><a href="reporting.html">Reporting an app</a></li><li><a href="mute-preferences.html">Mute preferences</a></li><li><a href="building-the-store-screen.html">Building the store screen</a></li><li><a href="errors.html">Error codes</a></li><li><a href="known-issues.html">Known issues</a></li></ul>
+</nav>
+<main>
+<h1>Reviews and ratings</h1>
+<p class="lead">Rating an app, writing, editing and deleting a review, listing other people's reviews, and what hidden or paused apps do to them.</p>
+
+<h2 id="overview">Overview</h2>
+<p>Users can rate a mini app from 1 to 5 stars and add a short comment. The average and count are part of every app object; the individual reviews are listed anonymously. These screens use four endpoints: list reviews, get my review, put my review (create/edit) and delete my review.</p>
+<h2 id="rules">Rules (verified)</h2>
+<div class="table-wrap"><table><thead><tr><th>Rule</th><th>Detail</th></tr></thead><tbody><tr><td>Who may review</td><td>Any signed-in user, any LIVE app. There is no "must have used the app" check, no purchase check and no market check.</td></tr><tr><td>One per user per app</td><td>Enforced by a database unique key on (app, user). A second PUT edits the existing review.</td></tr><tr><td>Rating</td><td>Required whole number 1 to 5.</td></tr><tr><td>Comment</td><td>Optional, up to 2000 characters, trimmed; empty is stored as none. Plain text. No title, no photos, no language tag, no reply from the publisher.</td></tr><tr><td>Edits</td><td>Allowed any number of times, no time limit. The review keeps its id and creation time; <code>updatedAt</code> changes. A PUT replaces the whole review (an omitted comment is removed).</td></tr><tr><td>Deletion</td><td>The author can delete their review any time while the app is LIVE; idempotent.</td></tr><tr><td>Anonymity</td><td>The public review has no author information at all. Staff can see more.</td></tr><tr><td>Order and paging</td><td>Newest first by creation date; <code>page</code> from 0, <code>size</code> 1 to 100 (default 20). No total, no sort option, no filter by stars.</td></tr><tr><td>Effect on the rating</td><td>Every create, edit, delete and staff hide/restore recomputes <code>ratingAvg</code> (mean of visible ratings, 2 decimals) and <code>ratingCount</code> at once.</td></tr></tbody></table></div>
+<h2 id="status-effects">What app status does to reviews</h2>
+<div class="table-wrap"><table><thead><tr><th>App status</th><th>List reviews</th><th>Get/put/delete my review</th><th>Existing reviews and the rating</th></tr></thead><tbody><tr><td>LIVE</td><td>Works</td><td>Works</td><td>Counted</td></tr><tr><td>PAUSED</td><td><code>404 not_found</code></td><td><code>404 not_found</code> on all three, including delete</td><td>Kept in the database and still counted in the stored average; invisible to users until the app is LIVE again.</td></tr><tr><td>KILLED</td><td><code>404</code></td><td><code>404</code></td><td>Kept; invisible to users.</td></tr><tr><td>DRAFT</td><td><code>404</code></td><td><code>404</code></td><td>Normally none exist.</td></tr></tbody></table></div>
+<p>Verified on a throwaway app: after PAUSED, <code>GET .../reviews</code>, <code>GET/PUT/DELETE .../my-review</code> all answered <code>404 not_found</code>; after resuming LIVE the review was reachable again. Practical consequence: a user cannot read, edit or delete their own review of a paused app, and the client must not offer review actions for an app it cannot load.</p>
+<h2 id="hidden">Hidden reviews</h2>
+<p>Staff can set a review to <code>HIDDEN</code> (spam, abuse) and back to <code>VISIBLE</code>. What the user side shows (verified by hiding a review of a throwaway app):</p>
+<ul>
+<li>The reviews list does not contain it, and it no longer counts in <code>ratingAvg</code>/<code>ratingCount</code>.</li>
+<li><strong>The author is not told.</strong> <code>GET my-review</code> still returns it as normal (no status field exists), so the author's screen shows their review as published.</li>
+<li>If the author edits it, it <strong>stays hidden</strong>: an edit does not bring it back.</li>
+<li>If the author deletes it and writes a new one, the new one is visible.</li>
+</ul>
+<p>So the client cannot show "your review was removed". If you show "Your review" in the app, say nothing about visibility; to make a hidden review obvious to its author you would need a new field from the backend.</p>
+<h2 id="ui">UI recommendations</h2>
+<ul>
+<li>Store page: stars and count from the app; "Rate this app" row (5 tappable stars) that opens a sheet with an optional comment field (2000 character counter). If <code>my-review</code> exists, pre-fill and title it "Edit your review" with a "Delete" action.</li>
+<li>Only the stars are needed to submit: allow Send with no comment.</li>
+<li>After Send, show the new average with the count from a fresh detail fetch.</li>
+<li>Reviews list: stars, text, date. No names or avatars exist, so do not draw placeholders for them.</li>
+<li>Empty list: "No reviews yet. Be the first." (the count is 0).</li>
+</ul>
+<h2 id="notbuilt">Not built yet</h2>
+<ul><li>Review language tag, title, photos, "helpful" votes, replies from the publisher.</li><li>Reporting a review (reports exist only for apps).</li><li>A list of "my reviews" across apps, the author's view of moderation status, notification when a review is hidden.</li><li>A star histogram, sorting (most helpful, highest, lowest), a total count of reviews other than the visible count.</li><li>A rule limiting reviews to users who actually opened the app (the app launcher does not exist).</li></ul>
+<h2 id="endpoints">Endpoints</h2>
+<details class="endpoint" id="ep-reviews-list"><summary><span class="method m-get">GET</span><span class="path">/api/v1/apps/{idOrSlug}/reviews</span><span class="sum">List the visible reviews of an app</span></summary><div class="body"><dl class="meta"><dt>Who may call</dt><dd>Signed-in end user. Any signed-in user may review any LIVE app: there is no check that they used it, and no market check.</dd><dt>Rate limit</dt><dd>300 requests per 60 s per client IP (route <code>apps-catalog</code>).</dd><dt>Headers</dt><dd><code>Authorization: Bearer $TOKEN</code>; <code>Content-Type: application/json</code> on PUT.</dd><dt>Implemented in</dt><dd><code>AppPublicController#reviews, ReviewService#visible</code></dd></dl>
+<h4>Purpose</h4><p>Show what other people said, on the store page ("Ratings and reviews"). Reviews are <strong>anonymous</strong>: there is no author id, name, avatar or language in the response. Only <code>VISIBLE</code> reviews are returned (staff can hide abusive ones). Order is newest first by creation time and cannot be changed.</p>
+<h4>Request parameters</h4>
+<div class="table-wrap"><table><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why it exists</th></tr></thead><tbody><tr><td><code>idOrSlug</code></td><td>path</td><td>string</td><td>yes</td><td>App id or slug; app must be LIVE</td><td>Which app</td></tr><tr><td><code>page</code></td><td>query</td><td>integer</td><td>no</td><td>Default <code>0</code> (first page). Negative values are treated as 0. A page past the end returns <code>[]</code>.</td><td>Paging</td></tr><tr><td><code>size</code></td><td>query</td><td>integer</td><td>no</td><td>Default <code>20</code>. Clamped silently to 1..100 (<code>0</code> becomes 1, <code>999</code> becomes 100). A non-number gives <code>400 invalid_request</code>.</td><td>Page size</td></tr></tbody></table></div>
+<h4>Example request</h4><pre><code>curl -s "$GATEWAY/api/v1/apps/demo-ride/reviews?page=0&amp;size=2" \
+  -H "Authorization: Bearer $TOKEN"</code></pre>
+<h4>Example response (200)</h4><pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+
+[
+  {
+    "id": "013f8df7-ef27-463e-a5d4-2ca4187638b3",
+    "rating": 1,
+    "comment": "Cancelled twice in a row.",
+    "createdAt": "2026-10-25T12:32:45.911326Z",
+    "updatedAt": "2026-10-25T12:32:45.911326Z"
+  },
+  {
+    "id": "46139366-a5a0-4b29-89ac-ed1497c157dd",
+    "rating": 3,
+    "comment": null,
+    "createdAt": "2026-10-25T12:32:42.135232Z",
+    "updatedAt": "2026-10-25T12:32:42.135232Z"
+  }
+]</code></pre>
+<p>Fields: <code>id</code> (review id), <code>rating</code> (1 to 5), <code>comment</code> (string or <code>null</code>, max 2000 chars), <code>createdAt</code>, <code>updatedAt</code> (they differ when the review was edited). A plain array: <strong>no total, no "has more" flag</strong>. Keep requesting <code>page+1</code> until you get fewer than <code>size</code> items (or an empty array).</p>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th>Error code</th><th>When it happens</th><th>What the caller should do</th></tr></thead><tbody><tr><td><strong>404</strong></td><td><code>not_found</code></td><td>The app does not exist or is not LIVE (DRAFT, PAUSED, KILLED).</td><td>Tell the user the app is not available; remove it from lists.</td></tr><tr><td><strong>400</strong></td><td><code>invalid_request</code></td><td><code>page</code> or <code>size</code> is not an integer.</td><td>Fix the client; do not retry.</td></tr><tr><td><strong>401</strong></td><td>(empty body)</td><td>Missing or invalid session.</td><td>Sign in again.</td></tr><tr><td><strong>429</strong></td><td>(HTML page)</td><td>Gateway rate limit (300 per 60 s per IP).</td><td>Back off.</td></tr></tbody></table></div>
+<h4>How to use it</h4><ul><li>Show 5 to 10 on the store page with "See all", and load more pages when scrolling.</li><li>Show the comment as plain text (users write it). A review with a rating and no comment is normal: show stars only.</li><li>The user's own review appears in this list too (unless hidden). Highlight it by matching <code>id</code> with the id from <code>my-review</code>.</li><li>Dates: show <code>updatedAt</code> with "edited" when it is later than <code>createdAt</code>.</li></ul>
+</div></details><details class="endpoint" id="ep-my-review-get"><summary><span class="method m-get">GET</span><span class="path">/api/v1/apps/{idOrSlug}/my-review</span><span class="sum">Get my own review of an app</span></summary><div class="body"><dl class="meta"><dt>Who may call</dt><dd>Signed-in end user. Any signed-in user may review any LIVE app: there is no check that they used it, and no market check.</dd><dt>Rate limit</dt><dd>300 requests per 60 s per client IP (route <code>apps-catalog</code>).</dd><dt>Headers</dt><dd><code>Authorization: Bearer $TOKEN</code>; <code>Content-Type: application/json</code> on PUT.</dd><dt>Implemented in</dt><dd><code>AppPublicController#myReview, ReviewService#mine</code></dd></dl>
+<h4>Purpose</h4><p>Returns the signed-in user's own review so the screen can pre-fill the stars and text ("Edit your review") or show "Rate this app" when there is none.</p>
+<h4>Example request</h4><pre><code>curl -s "$GATEWAY/api/v1/apps/doc-tmp-store/my-review" -H "Authorization: Bearer $TOKEN"</code></pre>
+<h4>Example response (200)</h4><pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+
+{
+  "id": "446fcaed-807a-4dce-9a7e-e9fc4c7cb534",
+  "rating": 4,
+  "comment": "Works well.",
+  "createdAt": "2026-10-26T10:51:32.249809Z",
+  "updatedAt": "2026-10-26T10:51:32.249809Z"
+}</code></pre>
+<h4>Example: no review yet (404)</h4><pre class="out"><code>HTTP/1.1 404 Not Found
+
+{"error":"not_found"}</code></pre>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th>Error code</th><th>When it happens</th><th>What the caller should do</th></tr></thead><tbody><tr><td><strong>404</strong></td><td><code>not_found</code></td><td>Two different causes with the same body: the app is not LIVE, <em>or</em> the user has not reviewed it.</td><td>Treat 404 on this call as "no review" when you know the app is LIVE (you just loaded it); otherwise reload the app.</td></tr><tr><td><strong>401</strong></td><td>(empty body)</td><td>Missing or invalid session.</td><td>Sign in again.</td></tr><tr><td><strong>429</strong></td><td>(HTML page)</td><td>Gateway rate limit (300 per 60 s per IP).</td><td>Back off.</td></tr></tbody></table></div>
+<h4>How to use it</h4><ul><li>Call it when the store page opens, in parallel with the reviews list. Expect 404 as the normal "not reviewed" answer, not as an error to show.</li><li>The response has <strong>no status field</strong>: if staff hid the review it is still returned here as if it were public. See <a href="#hidden">Hidden reviews</a>.</li></ul>
+</div></details><details class="endpoint" id="ep-my-review-put"><summary><span class="method m-put">PUT</span><span class="path">/api/v1/apps/{idOrSlug}/my-review</span><span class="sum">Create or edit my review</span></summary><div class="body"><dl class="meta"><dt>Who may call</dt><dd>Signed-in end user. Any signed-in user may review any LIVE app: there is no check that they used it, and no market check.</dd><dt>Rate limit</dt><dd>300 requests per 60 s per client IP (route <code>apps-catalog</code>).</dd><dt>Headers</dt><dd><code>Authorization: Bearer $TOKEN</code>; <code>Content-Type: application/json</code> on PUT.</dd><dt>Implemented in</dt><dd><code>AppPublicController#review, ReviewService#upsert</code></dd></dl>
+<h4>Purpose</h4><p>One call both creates the review and edits it. Each user has at most <strong>one review per app</strong> (a database rule): the first PUT creates it, every later PUT replaces it. The app's average rating and count are recomputed immediately.</p>
+<h4>Request body (JSON object)</h4>
+<div class="table-wrap"><table><thead><tr><th>Name</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why it exists</th></tr></thead><tbody><tr><td><code>rating</code></td><td>integer</td><td><strong>yes</strong></td><td>Whole number 1 to 5. Strings (<code>&quot;5&quot;</code>), decimals (<code>4.5</code>), 0 and 6 are rejected.</td><td>The star rating that feeds <code>ratingAvg</code>.</td></tr><tr><td><code>comment</code></td><td>string or null</td><td>no</td><td>Up to 2000 characters after trimming. Empty or blank, or <code>null</code>, stores no comment.</td><td>Optional free text.</td></tr></tbody></table></div>
+<p><strong>Any other key is rejected</strong> with <code>"unknown field"</code>: there is no <code>language</code>, <code>title</code> or <code>lang</code> field. Reviews are not tagged with a language.</p>
+<div class="callout warn"><span class="label">Replace, not merge</span><p>A PUT <em>replaces</em> the review. If you edit only the stars and leave <code>comment</code> out, the old comment is <strong>deleted</strong>. Always send the full state (re-send the existing comment when the user only changes the stars). Verified: PUT <code>{"rating":4,"comment":"Works well."}</code> then PUT <code>{"rating":5}</code> returns <code>"comment": null</code>.</p></div>
+<h4>Example request</h4><pre><code>curl -s -X PUT "$GATEWAY/api/v1/apps/doc-tmp-store/my-review" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"rating": 4, "comment": "Works well."}'</code></pre>
+<h4>Example response (200)</h4><pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+
+{
+  "id": "446fcaed-807a-4dce-9a7e-e9fc4c7cb534",
+  "rating": 4,
+  "comment": "Works well.",
+  "createdAt": "2026-10-26T10:51:32.249809178Z",
+  "updatedAt": "2026-10-26T10:51:32.249809178Z"
+}</code></pre>
+<p>Create and edit both answer <strong>200</strong> (not 201). The <code>id</code> stays the same across edits; <code>createdAt</code> stays, <code>updatedAt</code> moves. (Note the PUT response can show more fractional digits than a later GET of the same value; compare times, not strings.)</p>
+<h4>Example: validation errors</h4>
+<pre><code>curl -s -X PUT "$GATEWAY/api/v1/apps/doc-tmp-store/my-review" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d '{"rating": 6}'</code></pre>
+<pre class="out"><code>HTTP/1.1 400 Bad Request
+
+{
+  "error": "validation_failed",
+  "fields": {
+    "rating": "must be a whole number from 1 to 5"
+  }
+}</code></pre>
+<pre class="out"><code># {"rating": 3, "comment": "&lt;2001 characters&gt;", "lang": "en"}
+HTTP/1.1 400 Bad Request
+
+{
+  "error": "validation_failed",
+  "fields": {
+    "lang": "unknown field",
+    "comment": "max 2000 characters"
+  }
+}</code></pre>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th>Error code</th><th>When it happens</th><th>What the caller should do</th></tr></thead><tbody><tr><td><strong>400</strong></td><td><code>validation_failed</code></td><td>Bad <code>rating</code> (missing, not an integer, outside 1..5), <code>comment</code> longer than 2000, or an unknown key. <code>fields</code> names each problem.</td><td>Show the message next to the field; disable Send until valid.</td></tr><tr><td><strong>400</strong></td><td><code>invalid_request</code></td><td>Body is not valid JSON or not a JSON object (for example <code>[1]</code>).</td><td>Client bug.</td></tr><tr><td><strong>415</strong></td><td>(framework body)</td><td>No <code>Content-Type: application/json</code>.</td><td>Client bug.</td></tr><tr><td><strong>404</strong></td><td><code>not_found</code></td><td>The app does not exist or is not LIVE (DRAFT, PAUSED, KILLED).</td><td>Tell the user the app is not available; remove it from lists.</td></tr><tr><td><strong>409</strong></td><td><code>conflict</code></td><td>Very rare: two requests from the same user created the first review at the same instant and hit the one-review-per-user rule.</td><td>Repeat the PUT once (it will now edit).</td></tr><tr><td><strong>401</strong></td><td>(empty body)</td><td>Missing or invalid session.</td><td>Sign in again.</td></tr><tr><td><strong>429</strong></td><td>(HTML page)</td><td>Gateway rate limit (300 per 60 s per IP).</td><td>Back off.</td></tr></tbody></table></div>
+<h4>How to use it</h4><ul><li>Update the screen from the returned review, then refresh the app detail (or recompute locally) to get the new <code>ratingAvg</code>/<code>ratingCount</code>.</li><li>Make the Send button idempotent in the UI: PUT is safe to repeat.</li><li>Trim whitespace client-side the way the server does; a comment of only spaces is stored as none.</li></ul>
+</div></details><details class="endpoint" id="ep-my-review-delete"><summary><span class="method m-delete">DELETE</span><span class="path">/api/v1/apps/{idOrSlug}/my-review</span><span class="sum">Delete my review</span></summary><div class="body"><dl class="meta"><dt>Who may call</dt><dd>Signed-in end user. Any signed-in user may review any LIVE app: there is no check that they used it, and no market check.</dd><dt>Rate limit</dt><dd>300 requests per 60 s per client IP (route <code>apps-catalog</code>).</dd><dt>Headers</dt><dd><code>Authorization: Bearer $TOKEN</code>; <code>Content-Type: application/json</code> on PUT.</dd><dt>Implemented in</dt><dd><code>AppPublicController#deleteReview, ReviewService#delete</code></dd></dl>
+<h4>Purpose</h4><p>Removes the user's review and recomputes the app's rating. Use it for "Delete my review". It is <strong>idempotent</strong>: deleting when there is no review also answers 200.</p>
+<h4>Example request and response</h4><pre><code>curl -s -X DELETE "$GATEWAY/api/v1/apps/doc-tmp-store/my-review" -H "Authorization: Bearer $TOKEN"</code></pre>
+<pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+
+{"status":"deleted"}</code></pre>
+<p>The same body comes back on a second call (verified), so you cannot tell "deleted now" from "was not there".</p>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th>Error code</th><th>When it happens</th><th>What the caller should do</th></tr></thead><tbody><tr><td><strong>404</strong></td><td><code>not_found</code></td><td>The app does not exist or is not LIVE (DRAFT, PAUSED, KILLED).</td><td>Tell the user the app is not available; remove it from lists.</td></tr><tr><td><strong>401</strong></td><td>(empty body)</td><td>Missing or invalid session.</td><td>Sign in again.</td></tr><tr><td><strong>429</strong></td><td>(HTML page)</td><td>Gateway rate limit (300 per 60 s per IP).</td><td>Back off.</td></tr></tbody></table></div>
+<h4>How to use it</h4><ul><li>Ask for confirmation first; there is no undo.</li><li>After success clear the local copy of the review and refresh the rating.</li><li>If the app is PAUSED or KILLED, the user <strong>cannot delete</strong> their review (404). See below.</li></ul>
+</div></details>
+<div class="pager"><a class="prev" href="capabilities-and-permissions.html"><small>Previous</small>Capabilities and permissions</a><a class="next" href="reporting.html"><small>Next</small>Reporting an app</a></div>
+<p class="footer">Adera super-app guides &middot; mini-app catalog &middot; last verified against the running dev stack on 2026-10-26</p>
+</main>
+</div>
+<script src="assets/app.js"></script>
+</body>
+</html>

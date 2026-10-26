@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Status lifecycle | Admin: managing mini apps</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+<button id="menu-btn" type="button" aria-label="Toggle menu">Menu</button>
+<a class="brand" href="index.html">Admin: managing mini apps</a>
+<span class="spacer"></span>
+<button id="theme-btn" type="button" aria-label="Toggle light or dark theme">Theme</button>
+</header>
+<div class="layout">
+<nav class="sidebar" aria-label="Pages in this guide">
+<h4>This guide</h4>
+<ul><li><a href="index.html">Overview</a></li>
+<li><a href="roles-and-access.html">Roles and access</a></li>
+<li><a href="apps-create-and-edit.html">Create, edit, list apps</a></li>
+<li><a href="status-lifecycle.html" class="current">Status lifecycle</a><ul><li><a href="#overview">Overview</a></li><li><a href="#statuses">What each status means</a></li><li><a href="#rules">Transition rules</a></li><li><a href="#endpoint">Endpoint</a></li></ul></li>
+<li><a href="logo.html">Logo</a></li>
+<li><a href="capabilities.html">Capabilities</a></li>
+<li><a href="notification-limits.html">Notification limits</a></li>
+<li><a href="environments-and-ips.html">Environments and IPs</a></li>
+<li><a href="partner-keys.html">Partner keys</a></li>
+<li><a href="templates.html">Templates</a></li>
+<li><a href="payment-settings.html">Payment settings</a></li>
+<li><a href="notification-log-and-usage.html">Notification log and usage</a></li>
+<li><a href="reviews-reports-audit.html">Reviews, reports, audit</a></li>
+<li><a href="runbooks.html">Runbooks</a></li>
+<li><a href="errors.html">Errors</a></li>
+<li><a href="known-issues.html">Known issues</a></li>
+</ul></nav>
+<main>
+<h1>Status lifecycle</h1>
+<p class="lead">DRAFT, LIVE, PAUSED, KILLED: the rules for changing them and what each one does to users, partners and notifications.</p>
+<h2 id="overview">Overview</h2>
+<p>Every app has one status. The status is the master switch: it decides whether users can find the app, whether the partner's servers may call Adera, and therefore whether notifications can be sent. There are four statuses and one endpoint to change them.</p>
+<div class="callout why"><span class="label">Why this exists</span>You need a switch that works in minutes without deleting anything: to hold an unfinished app back (DRAFT), to publish it (LIVE), to stop it temporarily during an incident (PAUSED), and to shut it down for good when it is abusive or compromised (KILLED). Reviving a KILLED app is reserved for the owner level because it was killed for a serious reason.</div>
+<h2 id="statuses">What each status means</h2>
+<div class="table-wrap"><table><thead><tr><th>Status</th><th>Meaning</th><th>Users (catalog)</th><th>Partner calls, DEV deployment</th><th>Partner calls, PROD deployment</th></tr></thead><tbody><tr><td><code>DRAFT</code></td><td>New or not yet approved. The starting status.</td><td>Not listed. Detail by slug or id answers <code>404 not_found</code>.</td><td>Allowed, so the partner can build and test.</td><td>Refused: <code>403 app_draft</code>.</td></tr><tr><td><code>LIVE</code></td><td>Published. The only status users can see.</td><td>Listed in <code>GET /api/v1/apps</code> and openable; reviews and reports accepted.</td><td>Allowed.</td><td>Allowed.</td></tr><tr><td><code>PAUSED</code></td><td>Temporarily off: incident, investigation, the partner asked, a pending fix.</td><td>Disappears from the catalog (404 on detail, reviews and report).</td><td>Allowed (testing continues).</td><td>Refused: <code>403 app_paused</code>.</td></tr><tr><td><code>KILLED</code></td><td>Shut down: abuse, fraud, compromised keys, contract ended.</td><td>Disappears from the catalog.</td><td>Refused: <code>403 app_killed</code>.</td><td>Refused: <code>403 app_killed</code>.</td></tr></tbody></table></div>
+<p>The rule behind the partner columns: in the <strong>DEV</strong> deployment an app is usable unless it is KILLED, so partners can integrate before going live; in the <strong>PROD</strong> deployment it is usable only while it is LIVE. (A deployment is exactly one environment, see <a href="environments-and-ips.html">Environments and IPs</a>; this dev stack runs DEV, so the PROD column comes from the code and its tests, not from a live capture.)</p>
+<h4>Verified on the dev stack</h4>
+<p>A partner call (<code>POST /v1/notifications</code>, signed with a registered key) while the throwaway app was PAUSED and then DRAFT was accepted, and after it was KILLED it was refused:</p>
+<pre class="out nocopy"><code>app PAUSED (DEV deployment):
+HTTP 202  {"notificationId": "4c190326-499e-4ab8-b4e4-51408f761355", "externalId": "doc-x-4", "status": "QUEUED", "channel": "IN_APP", "environment": "DEV", "createdAt": "2026-10-26T11:15:52.279492Z", "expiresAt": "2026-10-27T11:15:52.279335Z"}
+
+app DRAFT (DEV deployment):
+HTTP 202  {"notificationId": "326c768f-b4ad-4170-89d6-a71b7c937f62", "externalId": "doc-x-5", "status": "QUEUED", "channel": "IN_APP", "environment": "DEV", "createdAt": "2026-10-26T11:16:08.330477Z", "expiresAt": "2026-10-27T11:16:08.330243Z"}
+
+app KILLED:
+HTTP 403  {"error": "app_killed"}</code></pre>
+<p>(The <code>202</code> answers above are the accepted ones; they show the partner's notification as <code>QUEUED</code>.)</p>
+<h4>What users see</h4>
+<p>The user-facing catalog only knows LIVE apps. The same call for an app that is not LIVE:</p>
+<pre class="out nocopy"><code>GET /api/v1/apps/doc-tmp-admin   (while the app was PAUSED)
+HTTP 404  {"error": "not_found"}</code></pre>
+<p>A LIVE app (here trimmed) carries what a user may see: names, logo link, publisher contact, rating, entry URL and the <em>granted</em> permissions with their reasons:</p>
+<pre class="out"><code>GET /api/v1/apps/doc-tmp-admin   (while the app was LIVE; trimmed)
+
+{
+  "slug": "doc-tmp-admin",
+  "name": {
+    "am": "ዶክ ጊዜያዊ",
+    "en": "Doc Temp Admin",
+    "om": "Doc Yeroo"
+  },
+  "entryUrl": "https://app.doc-temp.example/start",
+  "ratingAvg": 0.0,
+  "ratingCount": 0,
+  "permissions": [
+    {
+      "capability": "location.coarse",
+      "description": "City-level location",
+      "reason": {
+        "am": "በአቅራቢያዎ ያሉ ባለሙያዎችን ለማሳየት።",
+        "en": "To show technicians near you."
+      }
+    },
+    {
+      "capability": "notify.email",
+      "description": "Send email to users",
+      "reason": {}
+    },
+    {
+      "capability": "notify.inapp",
+      "description": "Send in-app notifications (inbox + push) to users",
+      "reason": {}
+    },
+    {
+      "capability": "notify.sms",
+      "description": "Send SMS to users (costs money; capped)",
+      "reason": {}
+    },
+    {
+      "capability": "user.basic",
+      "description": "Pseudonymous id and display name",
+      "reason": {}
+    }
+  ]
+}</code></pre>
+<ul><li>The client learns about a status change only the next time it fetches the catalog. Fetch it when the super app opens and whenever the user returns to the mini-app list; treat a <code>404</code> on an app the user had as "no longer available".</li><li>Status does not touch the partner's own website. A user who already has the page open can keep using it; PAUSED and KILLED remove the app from Adera's catalog and stop its calls to Adera, they do not take down the partner's server.</li><li>Existing reviews are kept while an app is not LIVE and come back with it; the average rating is unchanged.</li></ul>
+<h4>What notifications do</h4>
+<ul><li><strong>New sends</strong> are refused as in the table (the same <code>403 app_...</code> on every partner endpoint, including status lookups and the template list).</li><li><strong>Already accepted messages</strong> (QUEUED or RETRYING) are not cancelled by a status change: the delivery worker does not look at the app status again, so they are still delivered or finish retrying, and their callbacks are still sent. This is how the code works (there is no status check in the delivery path). They cannot be cancelled from the API: normally they are delivered within seconds, and messages in RETRYING keep trying until they expire (24 hours by default). If the problem is the wording, edit the template text: delivery uses the template's current words.</li><li>In-app inbox entries already created stay in the users' inboxes.</li><li>Keys, capabilities, limits, addresses and templates are untouched by a status change; they are simply not used while the app is not usable.</li></ul>
+<div class="callout warn"><span class="label">Delay</span><p>The notification service remembers an app's answer for about <strong>15 seconds</strong>. After you pause or kill an app, partner calls can still be accepted for up to 15 seconds. The same applies when you set an app back to LIVE: the partner may still see the old refusal for up to 15 seconds.</p></div>
+<h2 id="rules">Transition rules</h2>
+<p>There is no required order: any status can be set from any status, with exactly three rules.</p>
+<div class="table-wrap"><table><thead><tr><th>Rule</th><th>Details</th></tr></thead><tbody><tr><td>1. Leaving KILLED needs SUPER_ADMIN</td><td>Any change from KILLED to DRAFT, LIVE or PAUSED by an ADMIN is refused with <code>403 only_super_admin_can_revive_killed_app</code>. Setting KILLED on an app that is already KILLED is allowed for an ADMIN (it just records another event).</td></tr><tr><td>2. LIVE needs a logo and a support email</td><td>Every time the status is set to LIVE (from DRAFT, from PAUSED, even LIVE to LIVE) the server checks the app has a logo and a <code>supportEmail</code>; otherwise <code>409 not_ready_for_live</code> and <code>fields.missing</code> says which (<code>logo</code>, <code>supportEmail</code> or <code>logo,supportEmail</code>). The check runs only when the status is set: removing the logo later from an app that is already LIVE does not take it offline, but you cannot set it LIVE again until the logo is back.</td></tr><tr><td>3. Only the four names are valid</td><td>Any other value, or a missing <code>status</code>, is <code>400 validation_failed</code>.</td></tr></tbody></table></div>
+<div class="table-wrap"><table><thead><tr><th>From \ To</th><th>DRAFT</th><th>LIVE</th><th>PAUSED</th><th>KILLED</th></tr></thead><tbody><tr><td><strong>DRAFT</strong></td><td>ok</td><td>ok if ready</td><td>ok</td><td>ok</td></tr><tr><td><strong>LIVE</strong></td><td>ok</td><td>ok if ready</td><td>ok</td><td>ok</td></tr><tr><td><strong>PAUSED</strong></td><td>ok</td><td>ok if ready</td><td>ok</td><td>ok</td></tr><tr><td><strong>KILLED</strong></td><td>SUPER_ADMIN</td><td>SUPER_ADMIN, and ready</td><td>SUPER_ADMIN</td><td>ok (ADMIN too)</td></tr></tbody></table></div>
+<p>"ok" means ADMIN or SUPER_ADMIN. The readiness rule applies to every cell that ends in LIVE.</p>
+<h4>Pause or kill? Which one to use</h4>
+<div class="table-wrap"><table><thead><tr><th>Situation</th><th>Use</th><th>Why</th></tr></thead><tbody><tr><td>Incident under investigation, partner outage, a bug that sends wrong messages</td><td>PAUSED</td><td>Reversible by any ADMIN as soon as it is fixed; nothing else about the app changes.</td></tr><tr><td>The partner asks to be taken offline for maintenance</td><td>PAUSED</td><td>Same.</td></tr><tr><td>Abuse, fraud, a leaked private key that you cannot rotate in time, a terminated contract</td><td>KILLED</td><td>Only a SUPER_ADMIN can bring it back, so a second pair of eyes decides.</td></tr><tr><td>An app that was approved by mistake and must be hidden again</td><td>DRAFT</td><td>Hidden from users, still testable in DEV, and an ADMIN can publish it again later.</td></tr></tbody></table></div>
+<h2 id="endpoint">Endpoint</h2>
+<details class="endpoint" id="ep-status" open><summary><span class="method m-post">POST</span><span class="path">/admin/api/v1/apps/{appId}/status</span><span class="sum">Set the status of an app</span></summary><div class="body"><dl class="meta"><dt>Who may call</dt><dd>ADMIN or SUPER_ADMIN; leaving KILLED: SUPER_ADMIN only</dd><dt>Auth</dt><dd>Staff session Bearer token at assurance level aal2 (<code>Authorization: Bearer $TOKEN</code>)</dd><dt>Rate limit</dt><dd>300 requests per minute per client IP at the gateway (HTTP 429 beyond that)</dd><dt>Backoffice</dt><dd>App page header: <em>Change to: DRAFT / LIVE / PAUSED / KILLED</em> (with confirmation)</dd><dt>Audit name</dt><dd><code>app.status</code> (meta: from, to)</dd><dt>Reversible</dt><dd>Yes, except that leaving KILLED needs a SUPER_ADMIN</dd></dl>
+<p><strong>Purpose.</strong> Sets the app's status. <strong>When to use it.</strong> To publish an app (LIVE), stop it temporarily (PAUSED), shut it down (KILLED), return it to draft (DRAFT), or revive a killed one (SUPER_ADMIN).</p>
+<h4>Request body</h4>
+<div class="table-wrap"><table><thead><tr><th>Field</th><th>Type</th><th>Required</th><th>Meaning</th></tr></thead><tbody><tr><td><code>status</code></td><td>string</td><td>yes</td><td><code>DRAFT</code>, <code>LIVE</code>, <code>PAUSED</code> or <code>KILLED</code>. Any letter case is accepted (<code>live</code> works).</td></tr></tbody></table></div>
+<pre><code>curl -sS -X POST "$GATEWAY/admin/api/v1/apps/$APP_ID/status" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+  "status": "LIVE"
+}'</code></pre>
+<h4>Response (HTTP 200)</h4>
+<p>The full app (see <a href="apps-create-and-edit.html#ep-get">the app fields</a>); the field that changed is <code>status</code>:</p>
+<pre class="out"><code>HTTP 200 OK
+
+{
+  "id": "ff6510a9-de00-4fb2-97a4-ce4ad6e377dd",
+  "slug": "doc-tmp-admin",
+  "status": "KILLED",
+  "updatedAt": "2026-10-26T11:07:33.450936189Z"
+}</code></pre>
+<h4>Real error responses</h4>
+<pre class="out nocopy"><code>Not ready (no logo and no support email yet):
+HTTP 409  {"error": "not_ready_for_live", "fields": {"missing": "logo,supportEmail"}}
+
+Logo added, support email still missing:
+HTTP 409  {"error": "not_ready_for_live", "fields": {"missing": "supportEmail"}}
+
+Logo removed from a LIVE app, then LIVE again:
+HTTP 409  {"error": "not_ready_for_live", "fields": {"missing": "logo"}}
+
+PAUSED to LIVE without a logo:
+HTTP 409  {"error": "not_ready_for_live", "fields": {"missing": "logo"}}
+
+Unknown status:
+HTTP 400  {"error": "validation_failed", "fields": {"status": "must be DRAFT, LIVE, PAUSED or KILLED"}}
+
+Missing status:
+HTTP 400  {"error": "validation_failed", "fields": {"status": "must be DRAFT, LIVE, PAUSED or KILLED"}}
+
+VIEWER:
+HTTP 403  {"error": "insufficient_role"}
+
+ADMIN tries to move a KILLED app to PAUSED:
+HTTP 403  {"error": "only_super_admin_can_revive_killed_app"}</code></pre>
+<div class="table-wrap"><table><thead><tr><th>Status</th><th><code>error</code></th><th>When it happens</th><th>What to do</th></tr></thead><tbody><tr><td>400</td><td><code>validation_failed</code></td><td><code>status</code> missing or not one of the four.</td><td>Send DRAFT, LIVE, PAUSED or KILLED.</td></tr><tr><td>403</td><td><code>insufficient_role</code></td><td>VIEWER.</td><td>Use an ADMIN.</td></tr><tr><td>403</td><td><code>only_super_admin_can_revive_killed_app</code></td><td>ADMIN tried to leave KILLED.</td><td>A SUPER_ADMIN makes the call (see below).</td></tr><tr><td>404</td><td><code>not_found</code></td><td>No such app.</td><td>Check the id.</td></tr><tr><td>409</td><td><code>not_ready_for_live</code></td><td>LIVE requested but a logo or a support email is missing; <code>fields.missing</code> names them.</td><td>Upload the logo (<a href="logo.html">Logo</a>) and/or set <code>supportEmail</code> (PATCH), then retry.</td></tr></tbody></table></div>
+<h4>Reviving a KILLED app (SUPER_ADMIN)</h4>
+<p>Exactly the same call, made with a SUPER_ADMIN token. Real sequence from the test: killed by an ADMIN (200), ADMIN revive refused (403), a second KILLED by the ADMIN accepted (200, no-op), SUPER_ADMIN revive to PAUSED accepted:</p>
+<pre class="out nocopy"><code>ADMIN  -&gt; KILLED again:
+HTTP 200 (status KILLED)
+
+SUPER_ADMIN -&gt; PAUSED:
+HTTP 200 (status PAUSED)</code></pre>
+<p>Good practice: revive to <code>PAUSED</code> first, check keys, capabilities and addresses (the reason it was killed may still be there), then set LIVE with a second call.</p>
+<h4>Effects, audit, side effects</h4>
+<ul><li>Audit: <code>app.status</code> with meta <code>{"from": "PAUSED", "to": "LIVE"}</code> (also written when the status does not actually change). Real event below.</li><li>Takes effect at once in the user catalog; partner calls follow within about 15 seconds (see the delay note above).</li><li>Not reversible only in the sense that leaving KILLED needs a SUPER_ADMIN; every other change is undone by setting the previous status.</li><li>No notification is sent to the partner or to users by Adera; tell the partner yourself (their support email is on the app).</li></ul>
+<pre class="out"><code>{
+  "actorId": "0e5171f6-687c-4312-9212-971e28305d8d",
+  "actorEmail": "tempstaff-12f22c5c@adera.local",
+  "actorRole": "ADMIN",
+  "action": "app.status",
+  "targetType": "mini_app",
+  "targetId": "ff6510a9-de00-4fb2-97a4-ce4ad6e377dd",
+  "meta": {
+    "to": "LIVE",
+    "from": "PAUSED"
+  },
+  "ip": "172.18.0.1",
+  "at": "2026-10-26T11:07:49.560389Z"
+}</code></pre>
+<h4>Scenario</h4>
+<p>A partner reports that their backend is sending the wrong template to thousands of users. You set the app to PAUSED (one call), tell the partner, wait for their fix, check the notification log, and set it LIVE again. If instead you discover their private key leaked, you set KILLED, and a super admin revives it only after a new key is registered and the old one revoked. Step by step: see the runbooks.</p>
+<p><strong>Backoffice:</strong> the app page shows <em>Status:</em> with a one-line help text and, for an ADMIN, <em>Change to:</em> buttons for the other three statuses. Each button opens a confirmation ("Set ... to PAUSED?") that repeats what the status does; PAUSED and KILLED are shown as dangerous actions. Banners say what is missing for LIVE ("To go LIVE this app still needs logo and supportEmail") or that the app is ready. For a KILLED app the buttons are disabled for an ADMIN with the tag "Only a super admin can revive a KILLED app".</p>
+</div></details>
+
+<div class="pager"><a class="prev" href="apps-create-and-edit.html"><small>Previous</small>Create, edit, list apps</a><a class="next" href="logo.html"><small>Next</small>Logo</a></div>
+<p class="footer">Admin guide: managing mini apps. Examples were captured from a running dev stack (ADERA_ENV=dev) with a throwaway app and a temporary staff account, both removed afterwards. Ids, timestamps and key ids differ on your system.</p>
+</main>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

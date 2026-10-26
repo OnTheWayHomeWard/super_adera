@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Templates | Adera partner API</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+<button id="menu-btn" type="button" aria-label="Toggle menu">Menu</button>
+<a class="brand" href="index.html">Adera partner API</a>
+<span class="spacer"></span>
+<button id="theme-btn" type="button" aria-label="Toggle light or dark theme">Theme</button>
+</header>
+<div class="layout">
+<nav class="sidebar" aria-label="Pages">
+<h4>Mini-app backend API</h4>
+<ul><li><a href="index.html">Overview and contents</a></li><li><a href="quickstart.html">Quick start</a></li><li><a href="signing.html">Signing requests (ADERA-SIG-1)</a></li><li><a href="environments-and-ips.html">Environments, IPs and keys</a></li><li><a href="user-ids.html">Pseudonymous user ids</a></li><li><a href="templates.html" class="current">Templates</a><ul><li><a href="#overview">Overview</a></li><li><a href="#endpoints">Endpoints</a></li><li><a href="#fields">Template fields</a></li><li><a href="#languages">Languages</a></li><li><a href="#validity">Validity, versions and timing</a></li><li><a href="#staff">What staff do Adera staff</a></li></ul></li><li><a href="sending-notifications.html">Sending notifications</a></li><li><a href="statuses-and-callbacks.html">Statuses, retries and callbacks</a></li><li><a href="limits-and-quotas.html">Limits and quotas</a></li><li><a href="sandbox-and-testing.html">Sandbox and testing checklist</a></li><li><a href="errors.html">Error codes</a></li><li><a href="data-available-to-mini-apps.html">What data a mini app gets</a></li><li><a href="known-issues.html">Known issues and not built yet</a></li></ul>
+</nav>
+<main>
+<h1>Templates</h1>
+<p class="lead">The approved messages your app may send. You read them here, fill in their declared values, and reference them by id when you send. You cannot create or change them.</p>
+
+<h2 id="overview">Overview</h2>
+<p>A <strong>template</strong> is a message written in advance, in up to three languages, with named placeholders such as <code>{name}</code>. To notify a user you send the template's <code>id</code> and the values for its placeholders (<code>params</code>); Adera picks the user's language, fills the text in, and delivers it over the right channel.</p>
+<div class="callout why"><span class="label">Why partners cannot write free text</span><p>Messages arrive on users' phones as coming from Adera. Fixed, reviewed wording keeps Adera's SMS sender reputation and cost under control, stops a mini app from sending phishing links or spam through the official channel, and makes the three languages consistent. Values you fill in are plain text, limited in length, scanned for control characters and, unless the template allows it, for links. If you need a new message or a wording change, ask Adera staff to create or edit the template (staff action <code>POST /admin/api/v1/notification/templates</code> or <code>PATCH .../{id}</code>, role ADMIN).</p></div>
+
+<h2 id="endpoints">Endpoints</h2>
+
+<details class="endpoint" id="ep-list-templates" open><summary><span class="method m-get">GET</span><span class="path">/v1/templates</span><span class="sum">List my templates</span></summary><div class="body">
+<dl class="meta"><dt>Auth</dt><dd>Partner signature (<code>X-Adera-Key-Id</code>, <code>X-Adera-Timestamp</code>, <code>X-Adera-Signature</code>), allowed server address. See <a href="signing.html">Signing</a>.</dd>
+<dt>Rate limit</dt><dd>600 per 60 s per client IP (gateway)</dd>
+<dt>Parameters</dt><dd>none (a query string, if you add one, is ignored but must be signed)</dd></dl>
+<h4>Purpose</h4>
+<p>Discover which templates exist for your app, their ids, the values each needs, and exactly what each message says in each language. Call it at deployment time or on start-up, or cache it for a few minutes; template ids are stable. It returns <em>all</em> your templates, including inactive, not-yet-valid and expired ones, each with <code>usableNow</code> so you can tell.</p>
+<h4>Example request</h4>
+<pre><code>./adera_call.sh GET /v1/templates</code></pre>
+<h4>Example response (shortened to two of the six templates)</h4>
+<pre class="out"><code>HTTP 200
+[
+  {
+    "id": "ef3c8771-df6c-477c-b5a8-7ba94c2fded3",
+    "appId": "e50fd74c-8d27-4e2b-bc34-02678e06d243",
+    "code": "job-accepted",
+    "kind": "DIRECT",
+    "category": "TRANSACTIONAL",
+    "params": [
+      { "name": "name",      "required": true,  "maxLength": 30, "allowLinks": false },
+      { "name": "reference", "required": false, "maxLength": 20, "allowLinks": false }
+    ],
+    "content": {
+      "am": { "sms": "ሰላም {name}፣ ሥራዎ ተቀባይነት አግኝቷል።", "body": "ሰላም {name}፣ ሥራዎ ተቀባይነት አግኝቷል" },
+      "en": {
+        "sms": "Hi {name}, your Adera job was accepted. Thank you!",
+        "body": "Hi {name}, your job was accepted",
+        "emailHtml": "&lt;p&gt;Hi {name}, your job was accepted.&lt;/p&gt;",
+        "emailSubject": "Job accepted"
+      }
+    },
+    "active": true,
+    "validFrom": null,
+    "expiresAt": null,
+    "version": 1,
+    "usableNow": true,
+    "unusableReason": null,
+    "createdAt": "2026-10-26T10:52:14.962446Z",
+    "updatedAt": "2026-10-26T10:52:14.962446Z"
+  },
+  {
+    "id": "7b3d32e2-1743-4d11-93c0-e6e9c60a1070",
+    "appId": "e50fd74c-8d27-4e2b-bc34-02678e06d243",
+    "code": "old-offer",
+    "kind": "DIRECT",
+    "category": "REMINDER",
+    "params": [],
+    "content": { "en": { "sms": "Old", "body": "Old" } },
+    "active": true,
+    "validFrom": null,
+    "expiresAt": "2026-10-01T00:00:00Z",
+    "version": 1,
+    "usableNow": false,
+    "unusableReason": "template_expired",
+    "createdAt": "2026-10-26T10:52:15.060431Z",
+    "updatedAt": "2026-10-26T10:52:15.076994Z"
+  }
+]</code></pre>
+<p>The list is sorted by <code>code</code> (alphabetically). An app with no templates gets <code>[]</code>.</p>
+<h4>Errors</h4>
+<p>Only the common authentication and address errors (<a href="errors.html#auth-errors">401 and 403 codes</a>), <code>429</code> and <code>503</code>.</p>
+</div></details>
+
+<details class="endpoint" id="ep-get-template"><summary><span class="method m-get">GET</span><span class="path">/v1/templates/{id}</span><span class="sum">One template</span></summary><div class="body">
+<dl class="meta"><dt>Auth</dt><dd>Partner signature, as above</dd>
+<dt>Path parameter</dt><dd><code>id</code>: the template's UUID</dd></dl>
+<h4>Purpose</h4>
+<p>Read a single template, for example to render a preview in your own admin screen, or to re-check <code>usableNow</code> before a bulk send.</p>
+<h4>Example request</h4>
+<pre><code>./adera_call.sh GET /v1/templates/ef3c8771-df6c-477c-b5a8-7ba94c2fded3</code></pre>
+<p>The response is one object, identical in shape to an element of the list.</p>
+<h4>Errors</h4>
+<div class="table-wrap"><table><thead><tr><th>Status</th><th><code>error</code></th><th>When</th><th>What to do</th></tr></thead><tbody>
+<tr><td>404</td><td><code>template_not_found</code></td><td>No such template, <strong>or it belongs to another app</strong> (the two cases look the same on purpose).</td><td>Use an id from <code>GET /v1/templates</code>.</td></tr>
+<tr><td>400</td><td><code>invalid_request</code></td><td>The id in the path is not a UUID.</td><td>Fix the id.</td></tr>
+</tbody></table></div>
+<pre class="out nocopy"><code>GET /v1/templates/00000000-0000-0000-0000-000000000000   -> 404 {"error": "template_not_found"}
+GET /v1/templates/not-a-uuid                             -> 400 {"error": "invalid_request"}</code></pre>
+</div></details>
+
+<h2 id="fields">Template fields</h2>
+<div class="table-wrap"><table><thead><tr><th>Field</th><th>Type</th><th>Meaning</th></tr></thead><tbody>
+<tr><td><code>id</code></td><td>UUID</td><td>What you send as <code>templateId</code>.</td></tr>
+<tr><td><code>appId</code></td><td>UUID</td><td>Your mini app. Always your own.</td></tr>
+<tr><td><code>code</code></td><td>string</td><td>A readable name chosen by staff, unique within your app (2 to 60 characters: lowercase letters, digits, <code>_ . -</code>), for example <code>job-accepted</code>. Use it for humans and logs; send the <code>id</code>, not the code.</td></tr>
+<tr><td><code>kind</code></td><td><code>DIRECT</code> | <code>IN_APP</code></td><td>Decides the channel family, see below. Fixed at creation.</td></tr>
+<tr><td><code>category</code></td><td><code>TRANSACTIONAL</code> | <code>REMINDER</code> | <code>PROMOTIONAL</code></td><td>What kind of message it is. It is a label set by staff. Today it has <strong>no effect on delivery or limits</strong>; the intention is that <code>PROMOTIONAL</code> may be restricted more strictly later (quiet hours, opt-in). Keep promotional wording out of <code>TRANSACTIONAL</code> templates.</td></tr>
+<tr><td><code>params</code></td><td>array (0 to 10)</td><td>The values you must (or may) provide, see below.</td></tr>
+<tr><td><code>content</code></td><td>object</td><td>Language code (<code>en</code>, <code>am</code>, <code>om</code>) to texts. English is always present with a <code>body</code>.</td></tr>
+<tr><td><code>active</code></td><td>boolean</td><td>Staff can switch a template off. An inactive template cannot be sent (<code>422 template_inactive</code>).</td></tr>
+<tr><td><code>validFrom</code>, <code>expiresAt</code></td><td>ISO-8601 instant or <code>null</code></td><td>The validity window. Before <code>validFrom</code>: <code>422 template_not_yet_valid</code>. At or after <code>expiresAt</code>: <code>422 template_expired</code>. Use it for campaigns and seasonal messages.</td></tr>
+<tr><td><code>version</code></td><td>integer</td><td>Starts at 1; increases whenever staff change the text or the declared params.</td></tr>
+<tr><td><code>usableNow</code></td><td>boolean</td><td><code>true</code> when the template is active and now is inside its window. This is the same check the send endpoint applies.</td></tr>
+<tr><td><code>unusableReason</code></td><td>string or <code>null</code></td><td>When <code>usableNow</code> is false: <code>template_inactive</code>, <code>template_not_yet_valid</code> or <code>template_expired</code> (the error you would get).</td></tr>
+<tr><td><code>createdAt</code>, <code>updatedAt</code></td><td>ISO-8601</td><td>Audit timestamps.</td></tr>
+</tbody></table></div>
+
+<h3 id="kinds">Kinds and which text is used</h3>
+<div class="table-wrap"><table><thead><tr><th>Text key</th><th>Used by</th><th>Limit</th><th>Notes</th></tr></thead><tbody>
+<tr><td><code>title</code></td><td>IN_APP inbox and push title; email subject fallback</td><td>100 characters</td><td>Required in English for <code>IN_APP</code> templates.</td></tr>
+<tr><td><code>body</code></td><td>IN_APP inbox and push body; plain-text email body; SMS fallback</td><td>1000</td><td>Required in English for every template.</td></tr>
+<tr><td><code>sms</code></td><td>SMS text</td><td>320</td><td>If missing, <code>body</code> is sent as the SMS. Keep within 160 characters (70 if it contains non-Latin text such as Amharic) to stay within one SMS segment; longer texts are billed as several segments. Typographic punctuation (smart quotes, dashes, ellipsis, arrows, the euro sign) is replaced by plain equivalents when sent by SMS.</td></tr>
+<tr><td><code>emailSubject</code></td><td>Email subject</td><td>150</td><td>Falls back to <code>title</code>, then to the first 60 characters of <code>body</code>.</td></tr>
+<tr><td><code>emailHtml</code></td><td>Email HTML part</td><td>20000</td><td>Optional. Placeholder values are HTML-escaped when inserted here.</td></tr>
+</tbody></table></div>
+<ul>
+<li><strong><code>DIRECT</code></strong> (for example "your job was accepted", one-time information): delivered by <strong>SMS</strong> if the user has a phone number and your app has <code>notify.sms</code>, otherwise by <strong>email</strong> if the user has an email address and your app has <code>notify.email</code>. See <a href="sending-notifications.html#channels">channel selection</a>.</li>
+<li><strong><code>IN_APP</code></strong> (for example "your ride is here"): written to the user's inbox inside the Adera app, plus a push notification to their devices. It needs <code>notify.inapp</code>. The inbox entry is the reliable part; push is best effort.</li>
+</ul>
+
+<h3 id="params">Params and placeholders</h3>
+<p>Each element of <code>params</code> declares one value:</p>
+<div class="table-wrap"><table><thead><tr><th>Field</th><th>Meaning</th></tr></thead><tbody>
+<tr><td><code>name</code></td><td>The placeholder name: starts with a letter, then letters, digits or <code>_</code>, up to 30 characters. In a text it is written <code>{name}</code>.</td></tr>
+<tr><td><code>maxLength</code></td><td>Maximum characters of the value (1 to 500, default 100). Longer values are refused, they are not cut.</td></tr>
+<tr><td><code>required</code></td><td><code>true</code> (default): the value must be present and non-empty. <code>false</code>: it may be left out; an unused optional placeholder is replaced by an empty string.</td></tr>
+<tr><td><code>allowLinks</code></td><td><code>false</code> (default): the value may not look like a link. <code>true</code>: staff allowed links in this value (for example a tracking link in a promo).</td></tr>
+</tbody></table></div>
+<p>What you send in <code>params</code> is checked like this (a failure is <code>422 param_invalid</code> with <code>fields</code> naming every wrong value at once):</p>
+<ul>
+<li>Every key you send must be a declared param (<code>"not a parameter of this template"</code>).</li>
+<li>Every required param must be present (<code>"required"</code>).</li>
+<li>Values must be text, numbers or booleans (<code>"must be text or a number"</code>); they are converted to text and trimmed.</li>
+<li>No longer than <code>maxLength</code> (<code>"longer than 30 characters"</code>) and no control characters such as line breaks (<code>"contains control characters"</code>).</li>
+<li>No links unless <code>allowLinks</code> is true (<code>"links are not allowed in this value"</code>). Something "looks like a link" if it contains <code>http:</code>, <code>https:</code>, <code>www.</code>, <code>://</code>, or a word followed by a common domain ending (<code>.com .net .org .et .app .io .co .me .ly .xyz .info .biz .link .click</code>) at a word boundary. This deliberately errs on the side of refusing; it can refuse an innocent value such as <code>Hana.co</code>. Ask staff to enable <code>allowLinks</code> for a param that really carries URLs.</li>
+</ul>
+<p>Real examples, all against the <code>job-accepted</code> template (name: required, 30 characters):</p>
+<pre class="out nocopy"><code>params {}                                  -> 422 {"error":"param_invalid","fields":{"name":"required"}}
+params {"name":"A","color":"red"}          -> 422 {"error":"param_invalid","fields":{"color":"not a parameter of this template"}}
+params {"name":"visit www.evil.example"}   -> 422 {"error":"param_invalid","fields":{"name":"links are not allowed in this value"}}
+params {"name":"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"} (31 x) -> 422 {"error":"param_invalid","fields":{"name":"longer than 30 characters"}}
+params {"name":"a\nb"}                      -> 422 {"error":"param_invalid","fields":{"name":"contains control characters"}}
+params {"name":{"a":1}}                     -> 422 {"error":"param_invalid","fields":{"name":"must be text or a number"}}
+params {"name":"A","reference":"x"*21,"zzz":1} -> 422 {"error":"param_invalid","fields":{"zzz":"not a parameter of this template","reference":"longer than 20 characters"}}</code></pre>
+<p>A template with <code>allowLinks: true</code> accepts <code>{"url": "https://example.com/spring"}</code>; the real SMS text produced was <code>Spring offer: https://example.com/spring</code>.</p>
+
+<h2 id="languages">Languages</h2>
+<p>Templates carry texts per language: <code>en</code>, <code>am</code> (Amharic), <code>om</code> (Afaan Oromo). The language is the <strong>user's</strong> language setting in the Adera app, read at delivery time; you do not send one. If the template has no text for the user's language, or lacks that particular key in it, the <strong>English</strong> text is used key by key. Verified with the three demo users: an English user got <em>"Hi Abebe, your Adera job was accepted. Thank you!"</em>, an Amharic user got <em>"ሰላም ሰላም፣ ሥራዎ ተቀባይነት አግኝቷል።"</em>, and an Afaan Oromo user got the English text because the template had no <code>om</code> content. Ask staff to add the languages your users need.</p>
+
+<h2 id="validity">Validity, versions and timing</h2>
+<ul>
+<li>The validity window and <code>active</code> flag are checked <strong>when you send</strong> (acceptance). A notification already accepted is still delivered if the template is switched off or expires afterwards.</li>
+<li>The template <strong>text is read at delivery time</strong>, so an edit by staff between acceptance and delivery applies to messages still in the queue. The version that was current at acceptance is stored for staff, but the delivered text is the current one.</li>
+<li>Replaying a request (same <code>externalId</code>) returns the stored result even if the template has meanwhile become unusable.</li>
+</ul>
+
+<h2 id="staff">What staff do <span class="badge ours">Adera staff</span></h2>
+<ul>
+<li><code>POST /admin/api/v1/notification/templates</code> creates a template for an app (<code>appId</code>, <code>code</code>, <code>kind</code>, <code>category</code>, <code>params</code>, <code>content</code>, optional <code>active</code>, <code>validFrom</code>, <code>expiresAt</code>); <code>409 template_code_taken</code> when the code exists in that app. <code>PATCH /admin/api/v1/notification/templates/{id}</code> edits category, params, content, validity or the active flag (code and kind cannot change; changing params or content bumps <code>version</code>). Every placeholder used in a text must be a declared param. Role <code>ADMIN</code>. Template changes are <strong>not</strong> in the audit log (see <a href="known-issues.html">known issues</a>).</li>
+<li>A change reaches the partner API immediately for template reads (templates are not cached on the partner side of the service).</li>
+</ul>
+
+<div class="pager"><a class="prev" href="user-ids.html"><small>Previous</small>Pseudonymous user ids</a><a class="next" href="sending-notifications.html"><small>Next</small>Sending notifications</a></div>
+<p class="footer">Adera mini-app backend API guide &middot; verified against the dev deployment on 2026-10-26</p>
+</main>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

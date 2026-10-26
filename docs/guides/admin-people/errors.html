@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Error codes | Admin: users, staff, moderation and audit</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+<button id="menu-btn" type="button" aria-label="Toggle menu">Menu</button>
+<span class="brand">Admin: users, staff, moderation and audit</span>
+<span class="spacer"></span>
+<button id="theme-btn" type="button" aria-label="Toggle light or dark theme">Theme</button>
+</header>
+<div class="layout">
+<nav class="sidebar" aria-label="Pages in this guide"><h4>Admin: users, staff, moderation and audit</h4><ul><li><a href="index.html">Overview and conventions</a></li>
+<li><a href="roles-and-access.html">Staff sign-in, roles and permissions</a></li>
+<li><a href="dashboard.html">Dashboard, system and health</a></li>
+<li><a href="users.html">Registered users</a></li>
+<li><a href="moderation-reviews.html">Moderation: reviews</a></li>
+<li><a href="moderation-reports.html">Moderation: reports</a></li>
+<li><a href="staff.html">Staff management</a></li>
+<li><a href="audit-log.html">Audit log</a></li>
+<li><a href="notifications-overview.html">Notification visibility</a></li>
+<li><a href="runbooks.html">Runbooks</a></li>
+<li><a href="errors.html" class="current">Error codes</a><ul><li><a href="#shape">Error shape</a></li><li><a href="#codes">Codes</a></li><li><a href="#user-side">Codes users and partners see</a></li><li><a href="#other-shapes">Answers that are not in the standard shape</a></li></ul></li>
+<li><a href="known-issues.html">Known issues and not built yet</a></li>
+</ul></nav>
+<main>
+<h1>Error codes</h1>
+<p class="lead">Every error an admin API client can meet, what causes it and what to do, plus the codes that users and partners see as a result of staff actions.</p>
+<section><h2 id="shape">Error shape</h2>
+<p>Every admin API error is JSON <code>{"error": "&lt;code&gt;"}</code>, with <code>"fields": {"&lt;field&gt;": "&lt;message&gt;"}</code> added for <code>validation_failed</code> (all problems at once). The code is stable and meant for programs; the message in <code>fields</code> is meant for people. HTTP status classes: 400 the request is wrong, 401 sign in again, 403 not allowed, 404 not found, 409 conflicts with the current state, 429 slow down, 503 a dependency is down.</p>
+<pre class="out"><code>HTTP/1.1 400 Bad Request
+
+{
+  "error": "validation_failed",
+  "fields": {
+    "reason": "required when suspending or deleting (3-500 characters); it is kept in the audit log"
+  }
+}</code></pre></section>
+<section><h2 id="codes">Codes for staff calls</h2>
+<div class="table-wrap"><table><thead><tr><th>Code</th><th>HTTP</th><th>Returned by</th><th>When</th><th>What to do</th></tr></thead><tbody><tr><td><code>unauthorized</code></td><td>401</td><td>Gateway / services</td><td>No token, invalid or revoked session, expired session.</td><td>Sign in again.</td></tr><tr><td><code>mfa_required</code></td><td>403</td><td>Gateway (via registry-service)</td><td>Valid session but the authenticator step is not done (aal1), or the account has no authenticator yet.</td><td>Do or enrol the authenticator step.</td></tr><tr><td><code>not_staff</code></td><td>403</td><td>Gateway</td><td>Valid aal2 session of an account that is not an ACTIVE staff member with a role (customers, deactivated colleagues).</td><td>Ask a super admin to add or reactivate you.</td></tr><tr><td><code>insufficient_role</code></td><td>403</td><td>Any service</td><td>The role is too low for this endpoint (see the permission matrix).</td><td>Use a higher role.</td></tr><tr><td><code>only_super_admin_can_revive_killed_app</code></td><td>403</td><td>registry-service</td><td>An ADMIN tried to move a KILLED app to another status.</td><td>A super admin must do it (mini-app administration guide).</td></tr><tr><td><code>validation_failed</code></td><td>400</td><td>Any service</td><td>A field is missing, malformed, out of range or unknown; <code>fields</code> names each.</td><td>Fix the fields listed.</td></tr><tr><td><code>invalid_request</code></td><td>400</td><td>registry-service, notification-service</td><td>Body is not JSON or a value has the wrong type (for example an id that is not a UUID).</td><td>Correct the request.</td></tr><tr><td><code>not_found</code></td><td>404</td><td>Any service</td><td>No review, report, staff member, user or notification with that id.</td><td>Check the id.</td></tr><tr><td><code>user_deleted</code></td><td>409</td><td>user-service</td><td>A deleted user cannot change status.</td><td>Nothing; deletion is final.</td></tr><tr><td><code>cannot_demote_self</code></td><td>409</td><td>registry-service</td><td>A super admin tried to lower or disable their own account.</td><td>Ask another super admin.</td></tr><tr><td><code>last_super_admin</code></td><td>409</td><td>registry-service</td><td>The change would leave no active super admin.</td><td>Add another super admin first.</td></tr><tr><td><code>conflict</code></td><td>409</td><td>registry-service</td><td>A database uniqueness conflict not covered by a specific code.</td><td>Re-read the current state and retry.</td></tr><tr><td><code>identity_service_unavailable</code></td><td>503</td><td>registry-service</td><td>Kratos cannot be reached (staff changes, staff checks).</td><td>Check Kratos health; retry.</td></tr><tr><td><code>audit_unavailable</code></td><td>503</td><td>user-service</td><td>The audit log could not be written, so the user status change was rolled back.</td><td>Check registry-service health; retry.</td></tr><tr><td><code>service_unavailable</code></td><td>503</td><td>notification-service</td><td>Another service could not be reached.</td><td>Retry.</td></tr><tr><td>rate limited</td><td>429</td><td>Gateway</td><td>300 admin calls per minute per IP; 10 sign-in submits per minute per IP; 120 health probes per minute per IP.</td><td>Wait a minute.</td></tr></tbody></table></div><p>The 429 body is the gateway's plain HTML page, not JSON.</p>
+</section>
+<section><h2 id="user-side">Codes that users and partners see after your actions</h2>
+<div class="table-wrap"><table><thead><tr><th>Code</th><th>HTTP</th><th>Seen by</th><th>Cause on your side</th></tr></thead><tbody><tr><td><code>account_suspended</code></td><td>403</td><td>The user (every user API call)</td><td>You suspended the user.</td></tr><tr><td><code>account_deleted</code></td><td>403</td><td>The user</td><td>You marked the user deleted.</td></tr><tr><td><code>user_unreachable</code></td><td>422</td><td>A partner sending a notification</td><td>The user is deleted or suspended (or unknown, or has no usable channel); the partner cannot tell which.</td></tr><tr><td><code>recipient_opted_out</code> (a reason, not an error)</td><td>-</td><td>In the delivery log</td><td>The user muted the app's channel.</td></tr></tbody></table></div></section>
+<section><h2 id="other-shapes">Answers that are not in the standard shape</h2>
+<ul><li><code>GET /admin/api/v1/users/{id}</code> with an id that is not a UUID answers <code>400</code> with Spring's default body <code>{"timestamp": ..., "status": 400, "error": "Bad Request", "path": ...}</code> (verified). Handle <code>400</code> without relying on <code>error</code> being a code.</li><li><code>429</code> from the gateway and <code>404</code> from the health-probe proxy are HTML pages.</li><li>A revoked session token answers <code>401</code> with <code>{"error":"unauthorized"}</code> from the admin API, but the user API's gateway check answers <code>401</code> with an empty body.</li></ul>
+</section>
+
+<div class="pager"><a class="prev" href="runbooks.html"><small>Previous</small>Runbooks</a><a class="next" href="known-issues.html"><small>Next</small>Known issues and not built yet</a></div>
+<p class="footer">Adera admin guide &middot; verified against the running dev stack on 2026-10-26</p>
+</main>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

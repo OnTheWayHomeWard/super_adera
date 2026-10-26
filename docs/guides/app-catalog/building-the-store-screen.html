@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Building the store screen | Mini-app catalog guide</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<header class="topbar">
+<button id="menu-btn" type="button" aria-label="Toggle menu">Menu</button>
+<a class="brand" href="index.html">Mini-app catalog guide</a>
+<span class="spacer"></span>
+<button id="theme-btn" type="button" aria-label="Toggle light or dark theme">Theme</button>
+</header>
+<div class="layout">
+<nav class="sidebar" aria-label="Pages">
+<h4>Mini-app catalog</h4><ul><li><a href="index.html">Overview</a></li><li><a href="list-apps.html">List the mini apps</a></li><li><a href="app-details.html">App details</a></li><li><a href="capabilities-and-permissions.html">Capabilities and permissions</a></li><li><a href="reviews-and-ratings.html">Reviews and ratings</a></li><li><a href="reporting.html">Reporting an app</a></li><li><a href="mute-preferences.html">Mute preferences</a></li><li><a href="building-the-store-screen.html" class="current">Building the store screen</a></li><li><a href="errors.html">Error codes</a></li><li><a href="known-issues.html">Known issues</a></li></ul>
+</nav>
+<main>
+<h1>Building the store screen</h1>
+<p class="lead">A worked end-to-end flow for the app-store and store-page screens, with the UI states to design, client code and caching rules.</p>
+
+<h2 id="overview">Overview</h2>
+<p>This page puts the endpoints together into a working "app store" experience: a catalog grid with categories, search and sorting, and a store page with permissions, ratings, reviews, reporting and notification mute. It lists the calls in order, the screen states you must design, and ready-to-adapt client code (TypeScript-style pseudo code; the logic is the same in Dart or Kotlin).</p>
+<h2 id="flow">Worked flow</h2>
+<div class="table-wrap"><table><thead><tr><th>Step</th><th>What to do</th></tr></thead><tbody><tr><td>1. Know the user</td><td>Read <code>language</code> and <code>market</code> from the profile (<code>GET /api/v1/me</code>) once per session and keep them in app state. They drive text selection and the <code>market</code> filter.</td></tr><tr><td>2. Show the catalog fast</td><td>On start, render the cached list immediately (if any) and call <code>GET /api/v1/apps?market=ET</code> in the background. Replace the list when the answer arrives; keep scroll position. Build the category chips from the data. The order of the array is the default order.</td></tr><tr><td>3. Filter, search, sort on the device</td><td>Apply category chip, search box and sort on the cached array (code below). No network call.</td></tr><tr><td>4. Open a store page</td><td>Render at once from the list item (it contains everything), and in parallel call detail, <code>my-review</code> and the first page of <code>reviews</code>; then <code>preferences</code> with the app's <code>id</code>. A 404 from detail means the app is gone.</td></tr><tr><td>5. Show permissions</td><td>Render <code>permissions</code> as a read-only list grouped by sensitivity, with the localised <code>reason</code> under each row (<a href="capabilities-and-permissions.html#render">how</a>).</td></tr><tr><td>6. Let the user act</td><td>Rate or edit (<code>PUT my-review</code>, always sending the comment too), delete the review, report the app, mute channels. After each, update the screen from the response and refresh the detail for the new rating.</td></tr><tr><td>7. Refresh</td><td>Pull-to-refresh and a refresh when the app returns to the foreground after more than a few minutes; always refresh a store page when it opens.</td></tr></tbody></table></div>
+<h2 id="calls">Request sequence for one visit</h2>
+<pre><code>1  GET /api/v1/me                                   -&gt; language, market (once per session)
+2  GET /api/v1/apps?market=ET                         -&gt; catalog (cache it)
+   --- user taps a tile ---
+3  GET /api/v1/apps/demo-ride                         -&gt; fresh detail (rating, permissions, new logo link)
+4  GET /api/v1/apps/demo-ride/my-review               -&gt; 200 own review | 404 none
+5  GET /api/v1/apps/demo-ride/reviews?page=0&amp;size=10  -&gt; first reviews
+6  GET /api/v1/me/apps/{{id}}/preferences               -&gt; mute switches (id from step 3)
+   --- user acts ---
+7  PUT    /api/v1/apps/demo-ride/my-review            {{"rating":4,"comment":"..."}}
+8  DELETE /api/v1/apps/demo-ride/my-review
+9  POST   /api/v1/apps/demo-ride/report               {{"reason":"BROKEN","details":"..."}}
+10 PUT    /api/v1/me/apps/{{id}}/preferences            {{"muteSms":true}}</code></pre>
+<p>Steps 3 to 5 are independent and can run in parallel. Mind the rate limit (300 per minute per IP): a visit like this uses about six calls, so a normal session is far below it.</p>
+<h2 id="client-code">Client code: language, categories, search, sort, images, reviews</h2>
+<pre><code>// ---- types (mirror the JSON) ----
+type Lang = "en" | "am" | "om";
+type I18n = Partial&lt;Record&lt;Lang, string&gt;&gt;;
+interface Permission { capability: string; description: string; reason: I18n }
+interface MiniApp {
+  id: string; slug: string; name: I18n; description: I18n;
+  logoUrl: string | null; brandColor: string | null;
+  categories: string[]; markets: string[];
+  publisher: { name: string|null; legalName: string|null; supportEmail: string|null; supportPhone: string|null; website: string|null };
+  entryUrl: string | null; ratingAvg: number; ratingCount: number; permissions: Permission[];
+}
+
+// ---- language: user language, then English, then anything ----
+const ORDER: Lang[] = ["en", "am", "om"];
+function pick(m: I18n | undefined, lang: Lang): string | null {
+  if (!m) return null;
+  return m[lang] ?? m.en ?? ORDER.map(l =&gt; m[l]).find(Boolean) ?? null;
+}
+
+// ---- categories chips from the data ----
+function categoryCounts(apps: MiniApp[]): [string, number][] {
+  const n = new Map&lt;string, number&gt;();
+  for (const a of apps) for (const c of a.categories) n.set(c, (n.get(c) ?? 0) + 1);
+  return [...n.entries()].sort((a, b) =&gt; b[1] - a[1] || a[0].localeCompare(b[0]));
+}
+
+// ---- search all languages, rank name &gt; publisher &gt; description ----
+function search(apps: MiniApp[], q: string): MiniApp[] {
+  const s = q.trim().toLocaleLowerCase();
+  if (!s) return apps;
+  const has = (t?: string | null) =&gt; !!t &amp;&amp; t.toLocaleLowerCase().includes(s);
+  const score = (a: MiniApp) =&gt;
+    Object.values(a.name).some(has) ? 3 :
+    has(a.publisher.name) || a.categories.some(has) ? 2 :
+    Object.values(a.description).some(has) ? 1 : 0;
+  return apps.map(a =&gt; [a, score(a)] as const).filter(([, sc]) =&gt; sc &gt; 0)
+             .sort((x, y) =&gt; y[1] - x[1]).map(([a]) =&gt; a);   // sort is stable: server order kept inside a score
+}
+
+// ---- sort ----
+function topRated(apps: MiniApp[]): MiniApp[] {
+  const MIN = 3; // ignore averages built from fewer ratings
+  const rank = (a: MiniApp) =&gt; a.ratingCount === 0 ? -2 : a.ratingCount &lt; MIN ? -1 : a.ratingAvg;
+  return [...apps].sort((a, b) =&gt; rank(b) - rank(a) || b.ratingCount - a.ratingCount);
+}
+
+// ---- images: cache key without the signature ----
+const imageKey = (url: string) =&gt; url.split("?")[0];
+
+// ---- reviews: PUT replaces, so always send the full state ----
+async function saveReview(app: string, rating: number, comment: string | null) {
+  return api("PUT", `/api/v1/apps/${app}/my-review`, { rating, comment: comment?.trim() || null });
+}</code></pre>
+<h2 id="store-page-code">Client code: opening a store page</h2>
+<pre><code>async function openStorePage(slug: string, user: { language: Lang }) {
+  show(skeleton());
+  const [detail, mine, reviews, prefs] = await Promise.allSettled([
+    api("GET", `/api/v1/apps/${slug}`),
+    api("GET", `/api/v1/apps/${slug}/my-review`),
+    api("GET", `/api/v1/apps/${slug}/reviews?page=0&amp;size=10`),
+    // preferences need the app id, so run this after detail resolves (shown here as a follow-up)
+  ]);
+  if (detail.status === "rejected") {
+    if (detail.reason.status === 404) return showGone();      // paused/killed/removed: drop it from the cached list
+    return showError(detail.reason);                           // offline, 5xx, 429: offer Retry, keep cached item visible
+  }
+  render(detail.value, {
+    myReview: mine.status === "fulfilled" ? mine.value : null,   // 404 here means "no review yet"
+    reviews: reviews.status === "fulfilled" ? reviews.value : [],
+  });
+  const prefsNow = await api("GET", `/api/v1/me/apps/${detail.value.id}/preferences`);
+  renderNotificationToggles(detail.value.permissions, prefsNow);
+}</code></pre>
+<h2 id="states">Recommended UI states</h2>
+<div class="table-wrap"><table><thead><tr><th>Screen</th><th>State</th><th>What triggers it</th><th>What to show</th></tr></thead><tbody><tr><td>Catalog</td><td>Loading, no cache</td><td>First launch, request in flight</td><td>Skeleton tiles (not a spinner alone).</td></tr><tr><td>Catalog</td><td>Loaded from cache, refreshing</td><td>Cache exists</td><td>Show the cached list; a thin progress indicator; no blocking spinner.</td></tr><tr><td>Catalog</td><td>Empty</td><td><code>200 []</code> (no LIVE app, or nothing in the user's market)</td><td>"No services available in your region yet." If a market filter was applied offer "Show all".</td></tr><tr><td>Catalog</td><td>Offline or server error, with cache</td><td>Network failure, 5xx, <code>503</code></td><td>Show the cached list and a banner "Showing saved results. Retry".</td></tr><tr><td>Catalog</td><td>Offline or server error, no cache</td><td>Same</td><td>Full-screen error with Retry.</td></tr><tr><td>Catalog</td><td>Rate limited</td><td><code>429</code> (HTML body)</td><td>Do not parse the body. Wait for <code>X-RateLimit-Reset</code> seconds, then retry once; keep showing the cache.</td></tr><tr><td>Catalog</td><td>Session invalid</td><td><code>401</code> empty body</td><td>Go to sign-in; keep the cached list out of sight until signed in again.</td></tr><tr><td>Catalog</td><td>Filtered to nothing</td><td>Search or chip leaves no app</td><td>"No results for ..." with a clear-filter button.</td></tr><tr><td>Store page</td><td>Loading</td><td>Detail in flight</td><td>Header from the list item (name, logo, colour, stars), skeleton for the rest.</td></tr><tr><td>Store page</td><td>Gone</td><td><code>404 not_found</code> on detail</td><td>"This service is not available right now"; remove the tile from the list and cache; go back.</td></tr><tr><td>Store page</td><td>No ratings</td><td><code>ratingCount == 0</code></td><td>"No ratings yet" and an enabled "Rate this app".</td></tr><tr><td>Store page</td><td>No permissions</td><td><code>permissions == []</code></td><td>"This app does not ask for any permissions."</td></tr><tr><td>Store page</td><td>No description</td><td><code>description</code> is <code>{}</code></td><td>Hide the description block.</td></tr><tr><td>Store page</td><td>Logo failed</td><td>Image request fails or link expired</td><td>Placeholder tile with the app's initial on <code>brandColor</code>; re-fetch the detail once for a fresh link.</td></tr><tr><td>Reviews</td><td>Loading more</td><td>Scrolling to the end of a page</td><td>Footer spinner; stop when a page returns fewer than <code>size</code> items.</td></tr><tr><td>Reviews</td><td>Empty</td><td><code>[]</code> on page 0</td><td>"No reviews yet. Be the first."</td></tr><tr><td>My review</td><td>None</td><td><code>404 not_found</code> from <code>my-review</code> while the detail loaded fine</td><td>"Rate this app" (stars, empty).</td></tr><tr><td>My review</td><td>Saving</td><td>PUT in flight</td><td>Disable Send; keep the sheet open.</td></tr><tr><td>My review</td><td>Validation error</td><td><code>400 validation_failed</code></td><td>Show <code>fields.rating</code> / <code>fields.comment</code> under the field.</td></tr><tr><td>Report</td><td>Sent</td><td><code>200 {{"status":"received"}}</code></td><td>"Thanks, we received your report." Remember it locally for this app.</td></tr><tr><td>Mute</td><td>Toggle pending</td><td>PUT in flight</td><td>Toggle in a busy state; revert on failure.</td></tr></tbody></table></div>
+<h2 id="caching">Caching summary</h2>
+<ul><li>Catalog: in-memory plus disk, show-then-refresh, refresh every 5 to 15 minutes while browsing and on pull-to-refresh.</li><li>Detail: fetch on every store-page open.</li><li>Images: cache by URL without query string; never persist <code>logoUrl</code> beyond about 50 minutes.</li><li>Reviews: do not persist; fetch on open.</li><li>Language and market: from the profile; re-read after the user changes them and re-filter.</li></ul>
+<h2 id="design">Design notes</h2>
+<ul>
+<li>Treat <strong>every</strong> text from the API as untrusted plain text (names, descriptions, reasons, comments, publisher fields): no HTML or Markdown rendering, and handle very long strings and right-to-left or Ethiopic script.</li>
+<li>Do not assume a tile has everything: <code>brandColor</code>, <code>logoUrl</code>, <code>entryUrl</code>, <code>website</code> and <code>supportPhone</code> may be null; description may be empty.</li>
+<li>Use <code>slug</code> for deep links and routes, <code>id</code> where an API needs the UUID.</li>
+<li>Do not offer "Open" as a launch inside the super app yet (see below). If you offer "Open website", use the system browser and <code>entryUrl</code>, and pass no user data.</li>
+</ul>
+<h2 id="notbuilt">Not built yet (affects this screen)</h2>
+<ul>
+<li>Server-side category filter, search, sort and paging parameters (do it on the device as shown).</li>
+<li><strong>Launching a mini app inside the super app</strong>: no web-view bridge and no session handover. The only data about where the app lives is <code>entryUrl</code>.</li>
+<li><strong>User consent and sharing user data</strong> with mini apps: no consent endpoint, no per-capability grant by the user; the permission list is informative only.</li>
+<li>Payments (<code>pay.request</code> is a stored label; no payment service exists).</li>
+<li>Featured/new flags, screenshots, versions, install or favourite lists, "recently used", per-app usage history.</li>
+<li>Review language, titles, histogram, "my reviews" list; author-visible moderation status.</li>
+</ul>
+
+<div class="pager"><a class="prev" href="mute-preferences.html"><small>Previous</small>Mute preferences</a><a class="next" href="errors.html"><small>Next</small>Error codes</a></div>
+<p class="footer">Adera super-app guides &middot; mini-app catalog &middot; last verified against the running dev stack on 2026-10-26</p>
+</main>
+</div>
+<script src="assets/app.js"></script>
+</body>
+</html>

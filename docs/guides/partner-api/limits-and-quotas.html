@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Limits and quotas | Adera partner API</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+<button id="menu-btn" type="button" aria-label="Toggle menu">Menu</button>
+<a class="brand" href="index.html">Adera partner API</a>
+<span class="spacer"></span>
+<button id="theme-btn" type="button" aria-label="Toggle light or dark theme">Theme</button>
+</header>
+<div class="layout">
+<nav class="sidebar" aria-label="Pages">
+<h4>Mini-app backend API</h4>
+<ul><li><a href="index.html">Overview and contents</a></li><li><a href="quickstart.html">Quick start</a></li><li><a href="signing.html">Signing requests (ADERA-SIG-1)</a></li><li><a href="environments-and-ips.html">Environments, IPs and keys</a></li><li><a href="user-ids.html">Pseudonymous user ids</a></li><li><a href="templates.html">Templates</a></li><li><a href="sending-notifications.html">Sending notifications</a></li><li><a href="statuses-and-callbacks.html">Statuses, retries and callbacks</a></li><li><a href="limits-and-quotas.html" class="current">Limits and quotas</a><ul><li><a href="#overview">Overview</a></li><li><a href="#four-limits">The four limits</a></li><li><a href="#quota-exceeded">429 quota_exceeded</a></li><li><a href="#muted">Muted users: 200 SUPPRESSED</a></li><li><a href="#unreachable">Unreachable users: 422 user_unreachable</a></li><li><a href="#not-built">Not built yet</a></li></ul></li><li><a href="sandbox-and-testing.html">Sandbox and testing checklist</a></li><li><a href="errors.html">Error codes</a></li><li><a href="data-available-to-mini-apps.html">What data a mini app gets</a></li><li><a href="known-issues.html">Known issues and not built yet</a></li></ul>
+</nav>
+<main>
+<h1>Limits and quotas</h1>
+<p class="lead">How many messages your app may send, how the four limits work, what <code>null</code> and <code>0</code> mean, the exact <code>quota_exceeded</code> answer, and the two "soft refusals" a partner must understand: muted users and unreachable users.</p>
+
+<h2 id="overview">Overview</h2>
+<p>Staff set limits <strong>per app and per channel</strong> (<code>SMS</code>, <code>EMAIL</code>, <code>IN_APP</code>). They exist to protect users from spam and Adera from cost (SMS costs money), and to cap the damage if a partner's key is stolen or a bug loops. Limits are checked when you send; a request over a limit is refused with <code>429 quota_exceeded</code> and uses nothing.</p>
+
+<h2 id="four-limits">The four limits</h2>
+<div class="table-wrap"><table><thead><tr><th>Limit (as in <code>limit</code>)</th><th>What it counts</th><th>Resets</th></tr></thead><tbody>
+<tr><td><code>max_per_user_per_day</code></td><td>Messages on this channel to <em>one</em> user</td><td>every UTC day (00:00 UTC)</td></tr>
+<tr><td><code>max_per_day</code></td><td>Messages on this channel to everybody</td><td>every UTC day</td></tr>
+<tr><td><code>max_distinct_users_per_day</code></td><td>How many <em>different</em> users received a message on this channel today. A user already messaged today does not count again, so this limit only refuses messages to a user who has not been messaged yet today.</td><td>every UTC day</td></tr>
+<tr><td><code>max_total</code></td><td>All messages on this channel, ever (per environment)</td><td>never (staff must raise it)</td></tr>
+</tbody></table></div>
+<ul>
+<li><strong><code>null</code> means unlimited, <code>0</code> means none.</strong> A limit set to <code>0</code> refuses every message (verified: <code>maxPerDay: 0</code> gave <code>quota_exceeded</code> with <code>limit: max_per_day</code> on the first request). A limit that is not set (<code>null</code>) is not checked. A channel without any limits row at all is unlimited. Staff turn a limit off by setting it to <code>null</code> or omitting it.</li>
+<li><strong>Evaluation order</strong> when several limits are used up: <code>max_total</code>, then <code>max_per_user_per_day</code>, then <code>max_per_day</code>, then <code>max_distinct_users_per_day</code>. The answer names the <em>first</em> one that would be exceeded.</li>
+<li>Counted <strong>per channel</strong>: the SMS limits do not affect email. Which channel a message uses is decided by Adera (<a href="sending-notifications.html#channels">channel selection</a>), so an SMS limit can be reached by <code>DIRECT</code> templates only while SMS is the chosen channel.</li>
+<li>Counted <strong>per environment</strong>: DEV and PROD have independent counters (the limit values are the same for the app).</li>
+<li><strong>What counts:</strong> every accepted request (<code>202</code>) counts <em>when it is accepted</em>, whatever happens later. A message that ends <code>FAILED</code> or <code>EXPIRED</code> still counted. <strong>What does not count:</strong> replays, requests refused with any error, and muted-user requests (<code>200 SUPPRESSED</code>). In DEV, synthetic <code>u_p_test_*</code> users do count (observed).</li>
+<li>Counting is atomic: concurrent requests cannot overshoot a limit.</li>
+<li>Limits are about your <strong>app</strong>; the separate gateway rate limit (600 requests per minute per IP) is about requests of any kind.</li>
+</ul>
+
+<h3 id="defaults">Default limits <span class="badge ours">Adera staff</span></h3>
+<p>Granting a notification capability to an app creates default limits for the matching channel if the app has none yet. Staff then change them per partner (the table gives the starting point, not a promise):</p>
+<div class="table-wrap"><table><thead><tr><th>Channel</th><th>Per user per day</th><th>Per day</th><th>Distinct users per day</th><th>Total</th></tr></thead><tbody>
+<tr><td>SMS</td><td>3</td><td>100</td><td>100</td><td>1000</td></tr>
+<tr><td>EMAIL</td><td>5</td><td>500</td><td>500</td><td>10000</td></tr>
+<tr><td>IN_APP</td><td>20</td><td>10000</td><td>10000</td><td>null (unlimited)</td></tr>
+</tbody></table></div>
+<p>Observed: a freshly granted <code>notify.sms</code> let the demo user receive three SMS in a day, and the fourth was refused with <code>max_per_user_per_day</code>.</p>
+
+<h2 id="quota-exceeded"><code>429 quota_exceeded</code></h2>
+<pre class="out"><code>HTTP 429
+{"error": "quota_exceeded", "limit": "max_per_user_per_day", "channel": "SMS"}</code></pre>
+<div class="table-wrap"><table><thead><tr><th>Field</th><th>Meaning</th></tr></thead><tbody>
+<tr><td><code>error</code></td><td><code>quota_exceeded</code></td></tr>
+<tr><td><code>limit</code></td><td>Which limit: <code>max_per_user_per_day</code>, <code>max_per_day</code>, <code>max_distinct_users_per_day</code> or <code>max_total</code></td></tr>
+<tr><td><code>channel</code></td><td>The channel the message would have used: <code>SMS</code>, <code>EMAIL</code> or <code>IN_APP</code></td></tr>
+</tbody></table></div>
+<p>Real answers, one per limit, captured by changing the SMS limits of the throwaway app one at a time (the demo user already had 9 SMS today; 14 messages and 5 distinct users in total):</p>
+<div class="table-wrap"><table><thead><tr><th>Limit set</th><th>Request</th><th>Answer</th></tr></thead><tbody>
+<tr><td><code>maxPerUserPerDay: 9</code></td><td>to the user who got 9 today</td><td><code>429 {"error":"quota_exceeded","limit":"max_per_user_per_day","channel":"SMS"}</code></td></tr>
+<tr><td>same limit</td><td>to another user</td><td><code>202</code> (the limit is per user)</td></tr>
+<tr><td><code>maxPerDay: 16</code> (15 used)</td><td>first request</td><td><code>202</code></td></tr>
+<tr><td>same limit</td><td>second request</td><td><code>429 {"error":"quota_exceeded","limit":"max_per_day","channel":"SMS"}</code></td></tr>
+<tr><td><code>maxDistinctUsersPerDay: 5</code> (5 reached)</td><td>to a user not yet messaged today</td><td><code>429 {"error":"quota_exceeded","limit":"max_distinct_users_per_day","channel":"SMS"}</code></td></tr>
+<tr><td>same limit</td><td>to a user already messaged today</td><td><code>202</code></td></tr>
+<tr><td><code>maxTotal: 17</code> (17 sent)</td><td>any user</td><td><code>429 {"error":"quota_exceeded","limit":"max_total","channel":"SMS"}</code></td></tr>
+<tr><td><code>maxPerDay: 0</code></td><td>any user</td><td><code>429 {"error":"quota_exceeded","limit":"max_per_day","channel":"SMS"}</code></td></tr>
+</tbody></table></div>
+<p>A refused request is rolled back completely: nothing is stored (<code>GET /v1/notifications/{externalId}</code> gives <code>404 not_found</code>) and the quota is not used, so you may send the same <code>externalId</code> again later.</p>
+<h3 id="quota-action">What your server should do</h3>
+<ul>
+<li><code>max_per_user_per_day</code>, <code>max_per_day</code>, <code>max_distinct_users_per_day</code>: do not retry in a loop. Queue the message and try again after <strong>00:00 UTC</strong>, or drop it if it is no longer useful. Consider combining several events into one message per user per day: that is the point of the per-user limit.</li>
+<li><code>max_total</code>: never resolves by waiting. Ask Adera staff to raise the limit.</li>
+<li>If you see <code>429</code> without the <code>{"error":"quota_exceeded"}</code> body, it is the gateway's per-IP rate limit (600 per minute): slow down.</li>
+<li>Partners cannot read their limits or their remaining quota through the API; staff can see usage per channel (<code>GET /admin/api/v1/notification/usage?appId=...</code>, fields <code>lifetime</code>, <code>today</code>, <code>distinct_users_today</code>) and set limits (<code>PUT /admin/api/v1/apps/{id}/notification-limits/{channel}</code>, role ADMIN, audit action <code>limit.set</code>, effective within about 15 seconds). Ask staff for your numbers.</li>
+</ul>
+
+<h2 id="muted">Muted users: <code>200 SUPPRESSED</code></h2>
+<p>A user can switch off a channel for your app (in-app, SMS or email) in the Adera app. Respecting that is a product rule, not an error, so Adera does not answer with an error status:</p>
+<pre class="out"><code>HTTP 200
+{
+  "notificationId": "f7dad0c0-d9db-4ed6-90a5-ccef62448016",
+  "externalId": "doc-x6",
+  "status": "SUPPRESSED",
+  "channel": "SMS",
+  "reason": "recipient_opted_out",
+  "environment": "DEV",
+  "createdAt": "2026-10-26T10:58:25.167863Z",
+  "expiresAt": "2026-10-27T10:58:25.158642Z",
+  "completedAt": "2026-10-26T10:58:25.167863Z"
+}</code></pre>
+<ul>
+<li>It is <strong>final</strong> and already complete: nothing is sent, ever. A callback (if you gave a <code>callbackUrl</code>) follows with <code>"status": "SUPPRESSED"</code>.</li>
+<li>It uses <strong>no quota</strong>.</li>
+<li>The <strong>channel</strong> is the one Adera would have used. A user with a phone and an email who muted <em>SMS</em> for your app is <code>SUPPRESSED</code> for <code>DIRECT</code> templates even though email is not muted: there is no fallback to another channel (verified). Muting in-app does not affect SMS (verified).</li>
+<li>The mute is also checked at delivery time, so a user who mutes your app after you sent gets a final <code>SUPPRESSED</code> via callback or poll.</li>
+<li>You cannot read the user's settings, only observe the result. Do not nag around it (for example by resending as another template kind): the user chose this.</li>
+<li>The same request again is a normal replay (<code>200</code>, <code>"replayed": true</code>, status <code>SUPPRESSED</code>).</li>
+</ul>
+<p>Where the user sets it: <code>PUT /api/v1/me/apps/{appId}/preferences</code> with for example <code>{"muteSms": true}</code>, an endpoint of the Adera app's user API (not part of the partner API).</p>
+
+<h2 id="unreachable">Unreachable users: <code>422 user_unreachable</code></h2>
+<pre class="out"><code>HTTP 422
+{"error": "user_unreachable"}</code></pre>
+<p>Returned when Adera cannot reach the person for any of these reasons, which are <strong>deliberately indistinguishable</strong>:</p>
+<ul>
+<li>the id was never issued to your app (never minted, mistyped, or an id from another app),</li>
+<li>the user deleted their Adera account,</li>
+<li>the user is suspended by Adera staff,</li>
+<li>a <code>DIRECT</code> notification for a user with neither a phone number nor an email address,</li>
+<li>in DEV, the synthetic user <code>u_p_test_unreachable</code>.</li>
+</ul>
+<div class="callout why"><span class="label">Why generic</span><p>If the API said "no such user" for one and "deleted" for another, a partner could probe ids to learn who is on Adera, who left, or who was suspended. One answer for all of them leaks nothing. Real demo cases, all <code>422 {"error":"user_unreachable"}</code>: a suspended user, an id that was never issued, an id issued for another app.</p></div>
+<p><strong>What to do:</strong> stop sending to that id, mark the user as "not reachable by Adera" in your records, and do not retry. Never show the user an error that implies a reason.</p>
+<p>The same situation appearing <em>after</em> acceptance is the final status <code>UNREACHABLE</code> (<a href="statuses-and-callbacks.html#statuses">statuses</a>), with a <code>reason</code> that is visible to you: <code>user_unreachable</code>, <code>no_phone</code> or <code>no_email</code>.</p>
+
+<h2 id="not-built">Not built yet</h2>
+<ul>
+<li>No partner endpoint for reading your own limits or remaining quota; no <code>Retry-After</code> or reset time in the <code>429 quota_exceeded</code> answer (the reset is always 00:00 UTC for the daily limits).</li>
+<li>No per-template or per-category limits (the <code>PROMOTIONAL</code> category has no special limit yet).</li>
+<li>No quota for callbacks.</li>
+</ul>
+
+<div class="pager"><a class="prev" href="statuses-and-callbacks.html"><small>Previous</small>Statuses, retries and callbacks</a><a class="next" href="sandbox-and-testing.html"><small>Next</small>Sandbox and testing checklist</a></div>
+<p class="footer">Adera mini-app backend API guide &middot; verified against the dev deployment on 2026-10-26</p>
+</main>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,230 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Notification visibility | Admin: users, staff, moderation and audit</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+<button id="menu-btn" type="button" aria-label="Toggle menu">Menu</button>
+<span class="brand">Admin: users, staff, moderation and audit</span>
+<span class="spacer"></span>
+<button id="theme-btn" type="button" aria-label="Toggle light or dark theme">Theme</button>
+</header>
+<div class="layout">
+<nav class="sidebar" aria-label="Pages in this guide"><h4>Admin: users, staff, moderation and audit</h4><ul><li><a href="index.html">Overview and conventions</a></li>
+<li><a href="roles-and-access.html">Staff sign-in, roles and permissions</a></li>
+<li><a href="dashboard.html">Dashboard, system and health</a></li>
+<li><a href="users.html">Registered users</a></li>
+<li><a href="moderation-reviews.html">Moderation: reviews</a></li>
+<li><a href="moderation-reports.html">Moderation: reports</a></li>
+<li><a href="staff.html">Staff management</a></li>
+<li><a href="audit-log.html">Audit log</a></li>
+<li><a href="notifications-overview.html" class="current">Notification visibility</a><ul><li><a href="#overview">Overview</a></li><li><a href="#ep-notif-list">GET /notification/notifications</a></li><li><a href="#ep-notif-detail">GET /notification/notifications/{id}</a></li><li><a href="#stats">Statistics and usage</a></li><li><a href="#ep-notif-usage">GET /notification/usage</a></li><li><a href="#glossary">Statuses glossary</a></li><li><a href="#reasons">Reasons and attempt outcomes</a></li><li><a href="#not-shown">What is never shown</a></li><li><a href="#errors">Errors</a></li><li><a href="#notbuilt">Not built yet</a></li></ul></li>
+<li><a href="runbooks.html">Runbooks</a></li>
+<li><a href="errors.html">Error codes</a></li>
+<li><a href="known-issues.html">Known issues and not built yet</a></li>
+</ul></nav>
+<main>
+<h1>Notification visibility</h1>
+<p class="lead">Read-only, cross-app visibility of notification delivery for support: list, detail with attempts, statistics, usage, and a glossary of statuses and reasons.</p>
+<section><h2 id="overview">Overview</h2>
+<p>Mini apps (partners) send notifications to Adera users through the partner API: an SMS, an email, or an in-app message with a push. Staff can see <strong>what was sent, to which app's account, with which outcome</strong>, across all apps, without seeing the message text or who received it. This is how support answers "why did the user not get my message?" and how the owner spots a partner that is misbehaving. The endpoints belong to notification-service (gateway route <code>admin-notification</code>), are read-only and open to every staff role. Backoffice: <strong>Notifications</strong> (list with stats header, detail page with an explanation box) and the tab <em>Notification log</em> of an app. Templates and per-app limits are configured in the mini-app administration guide.</p>
+<div class="callout why"><span class="label">Why message values are hidden</span><p>Message values and recipients can contain personal data (names, codes, amounts). Staff diagnose delivery from status, channel, reason and attempts only.</p></div></section>
+<section><h2 id="list">List the delivery log</h2>
+<details class="endpoint" id="ep-notif-list"><summary><span class="method m-get">GET</span><span class="path">/admin/api/v1/notification/notifications</span><span class="sum">Notifications across all apps (or one), newest first</span></summary><div class="body"><dl class="meta"><dt>Why</dt><dd>Find a notification by app, outcome, channel or time.</dd><dt>Auth</dt><dd>Staff aal2 Bearer, any role</dd><dt>Rate limit</dt><dd>300/min/IP</dd><dt>Backoffice</dt><dd>Notifications (filters status, channel, environment, kind)</dd></dl><h4>Query parameters</h4><div class="table-wrap"><table><thead><tr><th>Name</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why it exists</th></tr></thead><tbody><tr><td><code>appId</code></td><td>uuid</td><td>no</td><td>Not a UUID: <code>400 invalid_request</code></td><td>One partner.</td></tr><tr><td><code>status</code></td><td>string</td><td>no</td><td>Upper-cased and compared as is; an unknown value matches nothing (<code>[]</code>, no error)</td><td>See the glossary.</td></tr><tr><td><code>channel</code></td><td>string</td><td>no</td><td><code>SMS</code>, <code>EMAIL</code>, <code>IN_APP</code> (any case)</td><td>One channel.</td></tr><tr><td><code>environment</code></td><td>string</td><td>no</td><td><code>DEV</code> or <code>PROD</code> (any case)</td><td>Separate test from real traffic.</td></tr><tr><td><code>kind</code></td><td>string</td><td>no</td><td><code>DIRECT</code> (SMS/email by a template) or <code>IN_APP</code></td><td>Kind of template used.</td></tr><tr><td><code>from</code>, <code>to</code></td><td>ISO-8601 instant</td><td>no</td><td><code>from</code> inclusive, <code>to</code> exclusive, by creation time; bad value: <code>400 validation_failed</code></td><td>A period.</td></tr><tr><td><code>limit</code></td><td>integer</td><td>no (50)</td><td>1 to 200</td><td>Page size.</td></tr><tr><td><code>offset</code></td><td>integer</td><td>no (0)</td><td>0 or more</td><td>Paging.</td></tr></tbody></table></div><h4>Request</h4><pre><code>curl -sS -i "$GATEWAY/admin/api/v1/notification/notifications?appId=$APP_ID&amp;status=SUPPRESSED&amp;limit=2" \
+  -H "Authorization: Bearer $TOKEN"</code></pre><h4>Response 200</h4><pre class="out"><code>HTTP/1.1 200 OK
+X-Total-Count: 6
+
+[
+  {
+    "id": "dbca27cf-8a5b-4056-abe1-3d0610ab8fa9",
+    "appId": "24daadb5-f356-416d-8b91-43f5e6be386b",
+    "externalId": "seed-food-synth-muted",
+    "environment": "DEV",
+    "status": "SUPPRESSED",
+    "channel": "SMS",
+    "reason": "recipient_opted_out",
+    "attempts": 0,
+    "kind": "DIRECT",
+    "createdAt": "2026-10-25T12:39:30.722Z",
+    "completedAt": "2026-10-25T12:39:30.722Z"
+  },
+  {
+    "id": "15adf256-53ed-44ea-b1c5-6f8140651189",
+    "appId": "24daadb5-f356-416d-8b91-43f5e6be386b",
+    "externalId": "seed-food-inapp-u15-sms",
+    "environment": "DEV",
+    "status": "SUPPRESSED",
+    "channel": "SMS",
+    "reason": "recipient_opted_out",
+    "attempts": 0,
+    "kind": "DIRECT",
+    "createdAt": "2026-10-25T12:39:29.145Z",
+    "completedAt": "2026-10-25T12:39:29.145Z"
+  }
+]</code></pre><p>Total matches in <code>X-Total-Count</code> (6 here). Note the partner's own id is the <code>externalId</code>: ask a partner for it to find one message. <code>attempts</code> is the number of delivery attempts so far.</p>
+<h4>Errors</h4><pre class="out"><code>HTTP/1.1 400 Bad Request
+
+{
+  "error": "validation_failed",
+  "fields": {
+    "from": "must be an ISO-8601 instant like 2026-10-01T00:00:00Z",
+    "to": "must be an ISO-8601 instant like 2026-10-01T00:00:00Z"
+  }
+}</code></pre><pre class="out"><code>HTTP/1.1 400 Bad Request
+
+{
+  "error": "invalid_request"
+}</code></pre><h4>Use in a client</h4><p>There is no filter by recipient: the user is deliberately not exposed. To investigate one person, work from the app, the time window and the partner's <code>externalId</code>.</p>
+</div></details>
+</section>
+<section><h2 id="detail">One notification, with its attempts</h2>
+<details class="endpoint" id="ep-notif-detail"><summary><span class="method m-get">GET</span><span class="path">/admin/api/v1/notification/notifications/{id}</span><span class="sum">Everything that happened to one notification</span></summary><div class="body"><dl class="meta"><dt>Why</dt><dd>The answer to "why did it not arrive?": status, reason, every delivery attempt with provider and error code, and the callbacks to the partner.</dd><dt>Auth</dt><dd>Staff aal2 Bearer, any role</dd><dt>Backoffice</dt><dd>Notifications > details (a box says in words why it did not arrive)</dd></dl><h4>Path</h4><p><code>id</code>: the notification id from the list.</p>
+<h4>Request</h4><pre><code>curl -sS "$GATEWAY/admin/api/v1/notification/notifications/$ID" -H "Authorization: Bearer $TOKEN"</code></pre><h4>Response 200: a retried email that finally succeeded</h4><pre class="out"><code>HTTP/1.1 200 OK
+
+{
+  "id": "b962d839-0345-48b1-90bf-0ab16914e643",
+  "appId": "24daadb5-f356-416d-8b91-43f5e6be386b",
+  "externalId": "seed-food-email-retried",
+  "environment": "DEV",
+  "status": "SENT",
+  "channel": "EMAIL",
+  "reason": null,
+  "attempts": 3,
+  "kind": "DIRECT",
+  "templateId": "21ecca32-8164-4254-a58b-035c6def7e70",
+  "templateVersion": 1,
+  "createdAt": "2026-10-25T12:40:28.478Z",
+  "nextAttemptAt": "2026-10-25T12:42:02.297Z",
+  "expiresAt": "2026-10-26T12:40:28.461Z",
+  "completedAt": "2026-10-25T12:42:03.247Z",
+  "attemptLog": [
+    {
+      "channel": "EMAIL",
+      "provider": "mailpit",
+      "outcome": "TRANSIENT",
+      "errorCode": "mailpit_unreachable",
+      "at": "2026-10-25T12:40:28.872Z"
+    },
+    {
+      "channel": "EMAIL",
+      "provider": "mailpit",
+      "outcome": "TRANSIENT",
+      "errorCode": "mailpit_unreachable",
+      "at": "2026-10-25T12:40:57.995Z"
+    },
+    {
+      "channel": "EMAIL",
+      "provider": "mailpit",
+      "outcome": "OK",
+      "errorCode": null,
+      "at": "2026-10-25T12:42:03.243Z"
+    }
+  ],
+  "callbacks": []
+}</code></pre><h4>Response 200: undeliverable (the user was deleted)</h4><pre class="out"><code>HTTP/1.1 200 OK
+
+{
+  "id": "dbd236ec-e8fa-4b04-94b2-a8ea74ab8346",
+  "appId": "24daadb5-f356-416d-8b91-43f5e6be386b",
+  "externalId": "seed-food-race-u12",
+  "environment": "DEV",
+  "status": "UNREACHABLE",
+  "channel": "SMS",
+  "reason": "user_unreachable",
+  "attempts": 1,
+  "kind": "DIRECT",
+  "templateId": "21ecca32-8164-4254-a58b-035c6def7e70",
+  "templateVersion": 1,
+  "createdAt": "2026-10-25T12:40:11.281Z",
+  "nextAttemptAt": "2026-10-25T12:40:11.281Z",
+  "expiresAt": "2026-10-26T12:40:11.256Z",
+  "completedAt": "2026-10-25T12:40:11.752Z",
+  "attemptLog": [],
+  "callbacks": []
+}</code></pre><h4>Fields</h4><div class="table-wrap"><table><thead><tr><th>Field</th><th>Meaning</th></tr></thead><tbody><tr><td><code>status</code>, <code>reason</code></td><td>Outcome and its cause (glossaries below). <code>reason</code> is null while things are fine.</td></tr><tr><td><code>attempts</code></td><td>Delivery attempts made.</td></tr><tr><td><code>templateId</code>, <code>templateVersion</code></td><td>Which template and version rendered the message.</td></tr><tr><td><code>createdAt</code>, <code>nextAttemptAt</code>, <code>expiresAt</code>, <code>completedAt</code></td><td>Created; when the next retry is due; the deadline after which it is given up (<code>ttlSeconds</code> from the partner, default one day); when it reached a final state.</td></tr><tr><td><code>attemptLog[]</code></td><td>Each try: <code>channel</code>, <code>provider</code> (for example <code>mailpit</code> in DEV, or <code>sandbox</code>), <code>outcome</code>, <code>errorCode</code>, <code>at</code>. Empty when the decision was made before any provider was called (muted, unreachable user).</td></tr><tr><td><code>callbacks[]</code></td><td>The status callbacks to the partner's <code>callbackUrl</code>: <code>status</code> (<code>PENDING</code>, <code>PROCESSING</code>, <code>DELIVERED</code> or <code>FAILED</code>), <code>attempts</code>, <code>lastHttpStatus</code>, <code>lastError</code>, <code>nextAttemptAt</code>.</td></tr></tbody></table></div><h4>Errors</h4><pre class="out"><code>HTTP/1.1 404 Not Found
+
+{
+  "error": "not_found"
+}</code></pre><pre class="out"><code>HTTP/1.1 400 Bad Request
+
+{
+  "error": "invalid_request"
+}</code></pre></div></details>
+</section>
+<section><h2 id="stats">Statistics and usage</h2>
+<p><code>GET /admin/api/v1/notification/stats</code> (optional <code>appId</code>) gives counts by status and channel and for the last 24 hours; it is documented with its response on the Dashboard page. Verified for one app:</p>
+<pre class="out"><code>HTTP/1.1 200 OK
+
+{
+  "total": 29,
+  "last24h": {
+    "total": 29,
+    "byStatus": {
+      "EXPIRED": 1,
+      "SENT": 20,
+      "SUPPRESSED": 6,
+      "UNREACHABLE": 2
+    }
+  },
+  "byStatus": {
+    "EXPIRED": 1,
+    "SENT": 20,
+    "SUPPRESSED": 6,
+    "UNREACHABLE": 2
+  },
+  "byChannel": {
+    "EMAIL": 4,
+    "IN_APP": 12,
+    "SMS": 13
+  }
+}</code></pre><details class="endpoint" id="ep-notif-usage"><summary><span class="method m-get">GET</span><span class="path">/admin/api/v1/notification/usage</span><span class="sum">How much of its limits an app has used</span></summary><div class="body"><dl class="meta"><dt>Why</dt><dd>Check whether a partner is near its caps (the limits themselves are set per app and channel in the app administration).</dd><dt>Auth</dt><dd>Staff aal2 Bearer, any role</dd><dt>Backoffice</dt><dd>App detail, tab Usage</dd></dl><h4>Query parameters</h4><div class="table-wrap"><table><thead><tr><th>Name</th><th>Type</th><th>Required</th><th>Constraints</th></tr></thead><tbody><tr><td><code>appId</code></td><td>uuid</td><td><strong>yes</strong></td><td>Missing or malformed: <code>400 invalid_request</code></td></tr><tr><td><code>environment</code></td><td>string</td><td>no (the deployment's environment)</td><td><code>DEV</code> or <code>PROD</code></td></tr></tbody></table></div><h4>Request</h4><pre><code>curl -sS "$GATEWAY/admin/api/v1/notification/usage?appId=$APP_ID" -H "Authorization: Bearer $TOKEN"</code></pre><h4>Response 200</h4><pre class="out"><code>HTTP/1.1 200 OK
+
+[
+  {
+    "channel": "EMAIL",
+    "lifetime": 3,
+    "today": 0,
+    "distinct_users_today": 0
+  },
+  {
+    "channel": "IN_APP",
+    "lifetime": 10,
+    "today": 0,
+    "distinct_users_today": 0
+  },
+  {
+    "channel": "SMS",
+    "lifetime": 10,
+    "today": 0,
+    "distinct_users_today": 0
+  }
+]</code></pre><p>Per channel: <code>lifetime</code> (all time), <code>today</code> (messages counted today, UTC day) and <code>distinct_users_today</code>. Note the snake_case key, unlike the rest of the API.</p>
+</div></details>
+</section>
+<section><h2 id="glossary">Statuses glossary</h2>
+<div class="table-wrap"><table><thead><tr><th>Status</th><th>Meaning</th><th>What staff do</th></tr></thead><tbody><tr><td><code>QUEUED</code></td><td>Accepted and waiting for the delivery worker.</td><td>Nothing; wait seconds.</td></tr><tr><td><code>PROCESSING</code></td><td>A worker is sending it now.</td><td>Nothing.</td></tr><tr><td><code>RETRYING</code></td><td>An attempt failed for a temporary reason; it will be tried again until it expires.</td><td>Check <code>attemptLog</code> errorCode and the provider.</td></tr><tr><td><code>SENT</code></td><td>Handed to the provider (SMS gateway, email server, push) successfully. For in-app messages: stored in the user's inbox and pushed to their devices. The handset's delivery receipt is not tracked.</td><td>If the user still says nothing arrived, check the user's number and mutes.</td></tr><tr><td><code>FAILED</code></td><td>Permanent failure (bad number or address) or too many attempts. Not retried.</td><td>Read <code>reason</code> (<code>max_attempts:&lt;code&gt;</code> or the provider's code).</td></tr><tr><td><code>UNREACHABLE</code></td><td>No way to reach the user: deleted or suspended account, or no phone (SMS) or email on file.</td><td>Look the user up (Users).</td></tr><tr><td><code>SUPPRESSED</code></td><td>Deliberately not sent: the user muted this app's channel, or the recipient is not on the live allowlist.</td><td>Normal; nothing to fix.</td></tr><tr><td><code>EXPIRED</code></td><td>It kept failing until its deadline passed.</td><td>Check the provider health on the System page.</td></tr></tbody></table></div><p>Final states: SENT, FAILED, UNREACHABLE, SUPPRESSED, EXPIRED. Non-final: QUEUED, PROCESSING, RETRYING.</p>
+</section>
+<section><h2 id="reasons">Reasons and attempt outcomes</h2>
+<div class="table-wrap"><table><thead><tr><th>reason</th><th>Usually with status</th><th>Meaning</th></tr></thead><tbody><tr><td><code>recipient_opted_out</code></td><td>SUPPRESSED</td><td>The user muted this channel for this app (three-dot menu of the app window).</td></tr><tr><td><code>user_unreachable</code></td><td>UNREACHABLE</td><td>The user is deleted or suspended (or no usable channel). At acceptance the partner gets <code>422 user_unreachable</code>; if it happens after acceptance (a race) the notification ends with this reason.</td></tr><tr><td><code>no_phone</code> / <code>no_email</code></td><td>UNREACHABLE</td><td>The user has no phone (SMS) or no email on file.</td></tr><tr><td><code>not_allowlisted</code></td><td>SUPPRESSED</td><td>Live providers are restricted to an allowlist in this deployment and the recipient is not on it, so nothing real was sent.</td></tr><tr><td><code>max_attempts:&lt;code&gt;</code></td><td>FAILED</td><td>Every attempt failed; the part after the colon is the last error.</td></tr><tr><td><code>&lt;provider error code&gt;</code></td><td>FAILED / EXPIRED</td><td>For example <code>mailpit_unreachable</code> (DEV email inbox down): the last transient error when the deadline passed.</td></tr><tr><td><code>expired</code></td><td>EXPIRED</td><td>The deadline passed with no more specific reason.</td></tr><tr><td><code>user_directory_unavailable</code></td><td>RETRYING / EXPIRED</td><td>user-service could not be reached to resolve the recipient.</td></tr></tbody></table></div><p><code>attemptLog[].outcome</code> is one of <code>OK</code>, <code>SKIPPED</code> (with <code>not_allowlisted</code> or <code>no_devices</code>), <code>TRANSIENT</code> (will retry) or <code>PERMANENT</code> (will not; for example <code>token_unregistered</code> for a dead push token).</p>
+</section>
+<section><h2 id="not-shown">What is never shown</h2>
+<ul><li>Message values, rendered text, the partner's <code>data</code> payload.</li><li>The user's id, alias, phone or email.</li><li>Partner keys, signatures or callback payloads. Only the callback's status, attempts and last HTTP status are visible.</li></ul>
+</section>
+<section><h2 id="errors">Errors</h2>
+<p><code>400 invalid_request</code> for a malformed uuid (<code>appId</code>, path <code>id</code>), <code>400 validation_failed</code> for bad <code>from</code>/<code>to</code>, <code>404 not_found</code> for an unknown notification id. There is no role error: all four endpoints are open to every staff role. See also the error codes page, which includes the partner-facing codes you will meet in support questions.</p>
+</section>
+<section><h2 id="notbuilt">Not built yet</h2>
+<ul><li>No search by recipient or user, no re-send or cancel button for a notification.</li><li>No export, no delivery receipts from handsets.</li><li>No staff-visible log of the one-time-code SMS and emails used for sign-in (they live in the notification database table <code>send_log</code>, see the runbook).</li></ul>
+</section>
+
+<div class="pager"><a class="prev" href="audit-log.html"><small>Previous</small>Audit log</a><a class="next" href="runbooks.html"><small>Next</small>Runbooks</a></div>
+<p class="footer">Adera admin guide &middot; verified against the running dev stack on 2026-10-26</p>
+</main>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

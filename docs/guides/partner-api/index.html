@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mini-app backend API (partner API) | Adera partner API</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+<button id="menu-btn" type="button" aria-label="Toggle menu">Menu</button>
+<a class="brand" href="index.html">Adera partner API</a>
+<span class="spacer"></span>
+<button id="theme-btn" type="button" aria-label="Toggle light or dark theme">Theme</button>
+</header>
+<div class="layout">
+<nav class="sidebar" aria-label="Pages">
+<h4>Mini-app backend API</h4>
+<ul><li><a href="index.html" class="current">Overview and contents</a><ul><li><a href="#audience">Who this is for</a></li><li><a href="#at-a-glance">The API at a glance</a></li><li><a href="#pages">Pages in this section</a></li><li><a href="#base-urls">Base URLs</a></li><li><a href="#auth">Authentication in one paragraph</a></li><li><a href="#conventions">Conventions</a></li><li><a href="#glossary">Glossary</a></li><li><a href="#verified">How this section was verified</a></li></ul></li><li><a href="quickstart.html">Quick start</a></li><li><a href="signing.html">Signing requests (ADERA-SIG-1)</a></li><li><a href="environments-and-ips.html">Environments, IPs and keys</a></li><li><a href="user-ids.html">Pseudonymous user ids</a></li><li><a href="templates.html">Templates</a></li><li><a href="sending-notifications.html">Sending notifications</a></li><li><a href="statuses-and-callbacks.html">Statuses, retries and callbacks</a></li><li><a href="limits-and-quotas.html">Limits and quotas</a></li><li><a href="sandbox-and-testing.html">Sandbox and testing checklist</a></li><li><a href="errors.html">Error codes</a></li><li><a href="data-available-to-mini-apps.html">What data a mini app gets</a></li><li><a href="known-issues.html">Known issues and not built yet</a></li></ul>
+</nav>
+<main>
+<h1>Mini-app backend API (partner API)</h1>
+<p class="lead">Everything a mini app's <strong>server</strong> can call on Adera, and everything Adera sends back to it: signed requests, templates, notifications to users, delivery status, signed callbacks, limits and every error code.</p>
+
+<h2 id="audience">Who this is for</h2>
+<ul>
+<li><strong>A mini-app developer (partner engineer):</strong> start with the <a href="quickstart.html">Quick start</a>, then read <a href="signing.html">Signing</a> and <a href="sending-notifications.html">Sending notifications</a>. This section is written so that you can be handed the whole folder.</li>
+<li><strong>Adera developers and the owner:</strong> the same pages tell you exactly what a partner sees and what happens behind each answer. Boxes marked <span class="badge ours">Adera staff</span> describe what staff must configure for a partner (keys, addresses, capabilities, limits, templates) and what that changes.</li>
+</ul>
+<div class="callout why"><span class="label">What this API is for</span><p>A mini app is a partner service listed inside the Adera app. Its backend can reach an Adera user by SMS, email, or the in-app inbox plus a push notification, using only <em>pseudonymous ids</em> and <em>message templates that Adera staff approved</em>. The partner never sees a phone number or an email address, never writes free text to users, and never picks the channel. That is the whole API today: it is a notification pipe with delivery reports. See <a href="data-available-to-mini-apps.html">what data a mini app gets from Adera today</a>.</p></div>
+
+<h2 id="at-a-glance">The API at a glance</h2>
+<div class="table-wrap"><table><thead><tr><th>Direction</th><th>Method and path</th><th>What it does</th><th>Page</th></tr></thead><tbody>
+<tr><td>You to Adera</td><td><span class="method m-get">GET</span> <code>/v1/templates</code></td><td>List the message templates approved for your app</td><td><a href="templates.html">Templates</a></td></tr>
+<tr><td>You to Adera</td><td><span class="method m-get">GET</span> <code>/v1/templates/{id}</code></td><td>One template</td><td><a href="templates.html">Templates</a></td></tr>
+<tr><td>You to Adera</td><td><span class="method m-post">POST</span> <code>/v1/notifications</code></td><td>Ask Adera to reach one user with one template</td><td><a href="sending-notifications.html">Sending</a></td></tr>
+<tr><td>You to Adera</td><td><span class="method m-get">GET</span> <code>/v1/notifications/{externalId}</code></td><td>Where is my message? (poll the status)</td><td><a href="statuses-and-callbacks.html">Statuses</a></td></tr>
+<tr><td>Anyone</td><td><span class="method m-get">GET</span> <code>/.well-known/jwks.json</code></td><td>Adera's public key, to verify responses and callbacks</td><td><a href="signing.html#jwks">Signing</a></td></tr>
+<tr><td>Adera to you</td><td><span class="method m-post">POST</span> <em>your <code>callbackUrl</code></em></td><td>Final delivery status of a notification, signed with Adera's key</td><td><a href="statuses-and-callbacks.html#callbacks">Callbacks</a></td></tr>
+</tbody></table></div>
+<p>There are no other partner endpoints. In particular there is no endpoint to create templates, look up users, read user data, or take payments (see <a href="known-issues.html#not-built">not built yet</a>).</p>
+
+<h2 id="pages">Pages in this section</h2>
+<div class="cards">
+<div class="card"><h3>Quick start</h3><p>From a key pair to your first delivered notification, with copy-paste code.</p><a class="stretch" href="quickstart.html" aria-label="Quick start"></a></div>
+<div class="card"><h3>Signing (ADERA-SIG-1)</h3><p>The canonical string, runnable Python, Node.js and curl+openssl, response and callback verification, JWKS.</p><a class="stretch" href="signing.html" aria-label="Signing"></a></div>
+<div class="card"><h3>Environments, IPs and keys</h3><p>DEV vs PROD, <code>wrong_environment</code>, allowed server addresses, key lifecycle.</p><a class="stretch" href="environments-and-ips.html" aria-label="Environments"></a></div>
+<div class="card"><h3>Pseudonymous user ids</h3><p>What <code>u_p_...</code> is, why it differs per app, how you get one today.</p><a class="stretch" href="user-ids.html" aria-label="User ids"></a></div>
+<div class="card"><h3>Templates</h3><p>Fields, params, placeholders, languages, validity window, categories.</p><a class="stretch" href="templates.html" aria-label="Templates"></a></div>
+<div class="card"><h3>Sending notifications</h3><p>Every field of <code>POST /v1/notifications</code>, channel rules, idempotency, callback URL rules.</p><a class="stretch" href="sending-notifications.html" aria-label="Sending"></a></div>
+<div class="card"><h3>Statuses, retries, callbacks</h3><p>What each status means, backoff, expiry, the callback payload and how to verify it.</p><a class="stretch" href="statuses-and-callbacks.html" aria-label="Statuses"></a></div>
+<div class="card"><h3>Limits and quotas</h3><p>Per user per day, per day, distinct users, total; null versus 0.</p><a class="stretch" href="limits-and-quotas.html" aria-label="Limits"></a></div>
+<div class="card"><h3>Sandbox and testing checklist</h3><p>Synthetic <code>u_p_test_*</code> users and a go-live checklist.</p><a class="stretch" href="sandbox-and-testing.html" aria-label="Testing"></a></div>
+<div class="card"><h3>Error codes</h3><p>The complete table: status, code, cause, fix.</p><a class="stretch" href="errors.html" aria-label="Errors"></a></div>
+<div class="card"><h3>What data a mini app gets</h3><p>Only what it created and the delivery status. Nothing about the user.</p><a class="stretch" href="data-available-to-mini-apps.html" aria-label="Data"></a></div>
+<div class="card"><h3>Known issues, not built yet</h3><p>Verified gaps and sharp edges.</p><a class="stretch" href="known-issues.html" aria-label="Known issues"></a></div>
+</div>
+
+<h2 id="base-urls">Base URLs</h2>
+<div class="table-wrap"><table><thead><tr><th>Deployment</th><th>Base URL</th><th>Keys that work there</th></tr></thead><tbody>
+<tr><td>Adera's local dev stack</td><td><code>http://127.0.0.1:9080</code> (the gateway)</td><td>DEV keys (<code>ak_dev_...</code>)</td></tr>
+<tr><td>Production</td><td>the public API host Adera tells you when your app goes live</td><td>PROD keys (<code>ak_prod_...</code>)</td></tr>
+</tbody></table></div>
+<p>Every example in this section uses <code>$ADERA_BASE</code> for the base URL (on Adera's dev stack it equals <code>http://127.0.0.1:9080</code>, written <code>$GATEWAY</code> in Adera's internal notes). Each deployment is exactly one environment: one deployment never serves DEV and PROD at the same time. Details: <a href="environments-and-ips.html">Environments</a>.</p>
+<div class="callout warn"><span class="label">HTTPS</span><p>Production traffic must use HTTPS. The dev stack speaks plain HTTP only because it runs on a developer machine. The signature protects integrity and authenticity, not secrecy: the body travels in clear text without TLS.</p></div>
+
+<h2 id="auth">Authentication in one paragraph</h2>
+<p>There is no login, no API token and no OAuth. Every request carries three headers (<code>X-Adera-Key-Id</code>, <code>X-Adera-Timestamp</code>, <code>X-Adera-Signature</code>) where the signature is an RS256 signature, made with <em>your private key</em>, over a canonical string that covers the method, path, query, timestamp and a hash of the body. Adera stores only your <em>public</em> key. In addition, the request must come from a server address staff registered for your app in that environment. Adera signs every answer and every callback with <em>its</em> key, published at <code>/.well-known/jwks.json</code>. Full details: <a href="signing.html">Signing</a>.</p>
+
+<h2 id="conventions">Conventions</h2>
+<ul>
+<li><strong>Content type:</strong> JSON in and out (<code>Content-Type: application/json</code>), UTF-8. Body limit: 64 KiB.</li>
+<li><strong>Error shape:</strong> <code>{"error": "&lt;code&gt;"}</code>, plus details for some codes: <code>fields</code> (<code>validation_failed</code>, <code>param_invalid</code>: an object <code>{"fieldName": "what is wrong"}</code>), <code>limit</code> and <code>channel</code> (<code>quota_exceeded</code>), <code>capability</code> (<code>capability_not_granted</code>). Always branch on the HTTP status and the <code>error</code> code, never on the text of a <code>fields</code> message. The full list is in <a href="errors.html">Error codes</a>.</li>
+<li><strong>Timestamps in answers:</strong> ISO-8601 in UTC with fractional seconds, for example <code>2026-10-26T10:52:46.960692Z</code>. The <code>X-Adera-Timestamp</code> header is different: whole unix seconds.</li>
+<li><strong>Ids:</strong> <code>notificationId</code> and template <code>id</code> are UUIDs generated by Adera. <code>externalId</code> is yours (1 to 100 characters from <code>A-Z a-z 0-9 . _ : -</code>). User ids are <code>u_p_...</code> strings.</li>
+<li><strong>Languages:</strong> <code>en</code>, <code>am</code> (Amharic), <code>om</code> (Afaan Oromo). The user's language is chosen by the user in the Adera app; you never send a language.</li>
+<li><strong>Pagination:</strong> none. <code>GET /v1/templates</code> returns the whole array (an app has a handful of templates). There is no list-notifications endpoint: you look a notification up by your own <code>externalId</code>.</li>
+<li><strong>Gateway rate limit:</strong> 600 requests per 60 seconds per client IP on <code>/v1/*</code> (and 120 per 60 seconds on the JWKS route). Answers carry <code>X-RateLimit-Limit</code>, <code>X-RateLimit-Remaining</code> and <code>X-RateLimit-Reset</code>. Over the limit the gateway answers <code>429</code> with its own body, not signed and not in the <code>{"error": ...}</code> shape. This is separate from the per-app <a href="limits-and-quotas.html">quotas</a>, whose <code>429</code> is <code>quota_exceeded</code>.</li>
+<li><strong>Every answer of the API is signed</strong>, its <code>{"error": code}</code> errors included. Not signed: gateway answers (rate limit, outage) and the framework's own <code>404</code> (unknown path), <code>405</code> (wrong method) and <code>415</code> (wrong content type).</li>
+<li><strong>Caching on Adera's side:</strong> Adera caches your key and your app configuration (status, capabilities, limits, allowed addresses) for about 15 seconds. After staff change something, or after a key is revoked, allow up to 15 seconds before the API reflects it.</li>
+</ul>
+
+<h2 id="glossary">Glossary</h2>
+<div class="table-wrap"><table><thead><tr><th>Term</th><th>Meaning</th></tr></thead><tbody>
+<tr><td>Super app</td><td>The Adera mobile/web app that end users install.</td></tr>
+<tr><td>Mini app</td><td>A partner service listed inside the super app. Its server is "you" in this section.</td></tr>
+<tr><td>Partner</td><td>The company or team behind a mini app.</td></tr>
+<tr><td>Staff</td><td>Adera employees using the admin dashboard. Only staff create mini apps, register keys and addresses, grant capabilities, set limits and write templates.</td></tr>
+<tr><td>Environment (DEV / PROD)</td><td>Which world a deployment and a key belong to. A DEV key works only on a DEV deployment, a PROD key only on a PROD deployment.</td></tr>
+<tr><td>Key id</td><td>The public identifier staff give you for a registered public key, for example <code>ak_dev_b05f96cc4740e2a118a55282</code>. Sent as <code>X-Adera-Key-Id</code>.</td></tr>
+<tr><td>ADERA-SIG-1</td><td>The name and version of the request signing scheme (RS256 over a canonical string).</td></tr>
+<tr><td>JWKS</td><td>JSON Web Key Set: Adera's public signing key in a standard format, at <code>/.well-known/jwks.json</code>.</td></tr>
+<tr><td>Pseudonymous user id</td><td>The <code>u_p_...</code> id that stands for one Adera user <em>inside one mini app</em>. See <a href="user-ids.html">User ids</a>.</td></tr>
+<tr><td>Template</td><td>An approved message with named placeholders, owned by one app. You send a template id and the placeholder values, never free text.</td></tr>
+<tr><td>Param</td><td>A declared placeholder value of a template (name, maximum length, required, whether links are allowed).</td></tr>
+<tr><td>Capability</td><td>A permission staff grant to an app, for example <code>notify.sms</code>, <code>notify.email</code>, <code>notify.inapp</code>. Without it the matching channel is refused.</td></tr>
+<tr><td>Channel</td><td>How a message reaches the user: <code>SMS</code>, <code>EMAIL</code>, <code>IN_APP</code> (inbox plus push). Chosen by Adera, not by you.</td></tr>
+<tr><td>Kind</td><td>A template's delivery family: <code>DIRECT</code> (SMS, else email) or <code>IN_APP</code>.</td></tr>
+<tr><td><code>externalId</code></td><td>Your own unique id for one notification request. Makes sending idempotent and is the key for polling.</td></tr>
+<tr><td>Callback</td><td>A signed HTTP POST from Adera to your <code>callbackUrl</code> when a notification reaches a final status.</td></tr>
+<tr><td>Quota</td><td>A per-app, per-channel cap staff set (per user per day, per day, distinct users per day, lifetime total).</td></tr>
+<tr><td>Muted / suppressed</td><td>The user switched off a channel for your app in the Adera app. The request is answered <code>200</code> with status <code>SUPPRESSED</code>.</td></tr>
+<tr><td>Synthetic user</td><td>A fake user id starting with <code>u_p_test_</code> that exists only in DEV, for testing without real people.</td></tr>
+</tbody></table></div>
+
+<h2 id="verified">How this section was verified</h2>
+<p>Every request and response shown was captured on 2026-10-26 from Adera's running dev stack, through the gateway, using a throwaway mini app (created and deleted for this guide), real seeded demo users, and the three signing implementations printed in <a href="signing.html">Signing</a> (Python, Node.js 22, curl with openssl). Personal data is masked. Behaviour that could not be reproduced on the dev stack is marked <em>from the code, not reproduced</em>.</p>
+
+<div class="pager"><span class="placeholder"></span><a class="next" href="quickstart.html"><small>Next</small>Quick start</a></div>
+<p class="footer">Adera mini-app backend API guide &middot; verified against the dev deployment on 2026-10-26</p>
+</main>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

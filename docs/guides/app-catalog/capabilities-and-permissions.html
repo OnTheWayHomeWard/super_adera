@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Capabilities and permissions | Mini-app catalog guide</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<header class="topbar">
+<button id="menu-btn" type="button" aria-label="Toggle menu">Menu</button>
+<a class="brand" href="index.html">Mini-app catalog guide</a>
+<span class="spacer"></span>
+<button id="theme-btn" type="button" aria-label="Toggle light or dark theme">Theme</button>
+</header>
+<div class="layout">
+<nav class="sidebar" aria-label="Pages">
+<h4>Mini-app catalog</h4><ul><li><a href="index.html">Overview</a></li><li><a href="list-apps.html">List the mini apps</a></li><li><a href="app-details.html">App details</a></li><li><a href="capabilities-and-permissions.html" class="current">Capabilities and permissions</a></li><li><a href="reviews-and-ratings.html">Reviews and ratings</a></li><li><a href="reporting.html">Reporting an app</a></li><li><a href="mute-preferences.html">Mute preferences</a></li><li><a href="building-the-store-screen.html">Building the store screen</a></li><li><a href="errors.html">Error codes</a></li><li><a href="known-issues.html">Known issues</a></li></ul>
+</nav>
+<main>
+<h1>Capabilities and permissions</h1>
+<p class="lead">What each permission a mini app can hold means, who enforces it today, and how to show the permission list to users.</p>
+
+<h2 id="overview">Overview</h2>
+<p>A <strong>capability</strong> is a named permission a mini app needs for a feature (<code>location.coarse</code>, <code>notify.sms</code>...). Staff decide per app which capabilities it has. The catalog shows users the granted ones as <code>permissions</code> so they can see, before opening an app, what it is allowed to do and why. This is the transparency half of the privacy model: <strong>the admin gate</strong> (staff grant) exists and the list is visible to users today; <strong>the per-user consent gate</strong> (the user taps "Allow" before data flows) is not built, because the frontend bridge that would carry the data does not exist yet.</p>
+<div class="callout warn"><span class="label">Read this first</span><p>Of the nine capabilities, only the three <code>notify.*</code> ones are enforced by any service today, and only against the partner's notification requests. The other six are stored and displayed but nothing checks them, and no user data is sent to any mini app. Show them truthfully as what the app is <em>allowed</em> to request, not as proof that data is being shared.</p></div>
+<h2 id="states">Granted, denied, suspended: what the client sees</h2>
+<div class="table-wrap"><table><thead><tr><th>State (staff side)</th><th>Meaning</th><th>In the user API</th><th>Partner side effect</th></tr></thead><tbody><tr><td><code>GRANTED</code></td><td>Allowed. For capabilities that need a reason, a plain-language English reason (10+ characters) was required.</td><td>Appears in <code>permissions</code> with its <code>reason</code> map.</td><td>Allowed (for <code>notify.*</code>).</td></tr><tr><td><code>DENIED</code></td><td>Staff refused it, or revoked it.</td><td><strong>Not returned.</strong> Absent from <code>permissions</code>.</td><td><code>notify.*</code>: <code>403 capability_not_granted</code>.</td></tr><tr><td><code>SUSPENDED</code></td><td>Temporarily switched off, for example while a complaint is checked; can be re-granted.</td><td><strong>Not returned.</strong> Looks exactly like DENIED.</td><td>Same as DENIED.</td></tr><tr><td>(never set)</td><td>Staff never configured it.</td><td>Not returned.</td><td>Treated as not granted.</td></tr></tbody></table></div>
+<p>So the client only ever receives granted capabilities. There is no way to show a "denied" or "suspended" row, and you should not try: <strong>absence means "this app cannot do that"</strong>. Because a suspension takes effect at the next fetch, refresh the detail when the user opens the store page so a stale cached list does not claim an ability that was removed.</p>
+<h2 id="shape">The shape of a permission</h2>
+<pre><code>{
+  "capability": "location.fine",
+  "description": "Precise location, foreground only",
+  "reason": {
+    "am": "ለእርስዎ ቅርብ የሆነውን አሽከርካሪ ለማግኘት",
+    "en": "To find the closest driver to you"
+  }
+}</code></pre>
+<div class="table-wrap"><table><thead><tr><th>Field</th><th>Notes</th></tr></thead><tbody><tr><td><code>capability</code></td><td>The key from the table below. The stable identifier: switch on it.</td></tr><tr><td><code>description</code></td><td>A short <strong>English-only</strong> sentence from the server. It is not translated. Use it only as a fallback for a capability key your app does not know yet; for known keys, use your own localised strings.</td></tr><tr><td><code>reason</code></td><td>What the partner said it needs this for, per language, shown to the user <strong>verbatim</strong>. Written by staff for the app, so treat it as untrusted text: render as plain text, never as HTML or Markdown, and tolerate long strings. <code>{{}}</code> for capabilities where no reason is required (<code>user.basic</code>, <code>notify.*</code>); optional there, so it can be present.</td></tr></tbody></table></div>
+<p>Order: alphabetical by key (<code>location.*</code>, <code>notify.*</code>, <code>pay.request</code>, <code>user.*</code>). Re-order on the client by sensitivity (below).</p>
+<h2 id="table">Capability by capability</h2>
+<p>Verified in <code>registry-service</code> (<code>Capability</code>, <code>AppConfigService</code>) and <code>notification-service</code> (<code>NotificationAcceptor</code>).</p>
+<div class="table-wrap"><table><thead><tr><th>Key</th><th>Meaning for the user</th><th>Meaning for the mini app</th><th>Reason text required from staff?</th><th>Enforced today?</th><th>Data a mini app can actually receive today</th><th>Default limits (set when first granted)</th></tr></thead><tbody><tr><td><code>user.basic</code></td><td>The app can recognise you by a private id that is different in every app, and knows the name you display. It cannot tell who you are from that id.</td><td>Use a pseudonymous id (alias) as the user key and address messages to it.</td><td>No</td><td><strong>Stored only.</strong> No service checks this grant. Addressing a user by alias in the partner notification API works whether or not it is granted.</td><td>Nothing is sent to the app by Adera. The alias is derived per app (a keyed hash), but no public flow hands it to the app yet.</td><td>None</td></tr><tr><td><code>user.full_name</code></td><td>The app can see your first and last name.</td><td>Greet by name, put a name on orders.</td><td>Yes: English, at least 10 characters</td><td><strong>Stored only.</strong></td><td>Nothing. Needs the (unbuilt) bridge plus user consent.</td><td>None</td></tr><tr><td><code>user.contact</code></td><td>The app can see your phone number and email address.</td><td>Contact the user outside Adera (call about a delivery).</td><td>Yes</td><td><strong>Stored only.</strong></td><td>Nothing. (Adera itself uses the phone or email to deliver messages the app asks it to send, but never reveals them to the app.)</td><td>None</td></tr><tr><td><code>user.address</code></td><td>The app can use one saved address that you pick.</td><td>Deliver to an address.</td><td>Yes</td><td><strong>Stored only.</strong> There is not even a place where addresses are stored: a profile has no postal address.</td><td>Nothing</td><td>None</td></tr><tr><td><code>location.coarse</code></td><td>The app can see roughly where you are (city level).</td><td>Show what is available in the user's city.</td><td>Yes</td><td><strong>Stored only.</strong></td><td>Nothing. (The user's profile can hold a city and coordinates, but they are never passed to apps.)</td><td>None</td></tr><tr><td><code>location.fine</code></td><td>The app can see your precise location, only while you are using it (foreground).</td><td>Dispatch the nearest driver, show distance.</td><td>Yes</td><td><strong>Stored only.</strong></td><td>Nothing</td><td>None</td></tr><tr><td><code>pay.request</code></td><td>The app can ask you to pay (you confirm each payment).</td><td>Start a payment for an order, in the currencies and within the amounts staff configured for the app.</td><td>Yes</td><td><strong>Stored only.</strong> There is no payment service.</td><td>Nothing</td><td>Payment settings (currencies ETB/USD, hold, min/max amount) exist as staff configuration, not shown to users</td></tr><tr><td><code>notify.inapp</code></td><td>The app can put messages in your Adera inbox and send push notifications.</td><td>Send in-app notifications from its backend.</td><td>No</td><td><strong>Enforced</strong> by the notification service at send time. Without the grant the partner request is refused with <code>403 capability_not_granted</code>.</td><td>None. The app learns only whether its message was delivered, suppressed (you muted it) or failed.</td><td>20 per user per day, 10,000 per day, 10,000 different users per day, no lifetime total</td></tr><tr><td><code>notify.sms</code></td><td>The app can send you text messages. These cost money, so they are capped.</td><td>Send an SMS (to the phone number Adera holds; the app never sees it).</td><td>No</td><td><strong>Enforced</strong> as above.</td><td>None</td><td>3 per user per day, 100 per day, 100 different users per day, 1,000 in total</td></tr><tr><td><code>notify.email</code></td><td>The app can send you emails.</td><td>Send an email (to the address Adera holds).</td><td>No</td><td><strong>Enforced</strong> as above.</td><td>None</td><td>5 per user per day, 500 per day, 500 different users per day, 10,000 in total</td></tr></tbody></table></div>
+<p>Notes on the table:</p>
+<ul>
+<li><strong>"Enforced today"</strong> is checked in one place: when a partner backend asks Adera to send a notification. The notification service reads the app's granted capabilities and refuses with <code>403 capability_not_granted</code> if the right one is missing. For a direct message it prefers SMS when the user has a phone and <code>notify.sms</code> is granted, otherwise email when the user has an address and <code>notify.email</code> is granted. For an in-app message it requires <code>notify.inapp</code>.</li>
+<li><strong>Default limits</strong> are written when staff first grant the capability (existing limits are never overwritten), and staff can change them per app. If a limit is hit, the partner gets <code>429 quota_exceeded</code>; the user sees nothing. Users never see limits in the API.</li>
+<li><strong>"Data a mini app can receive"</strong> is "nothing" for every capability today because the only channel between Adera and a mini app is the partner notification API, which carries no user data in either direction except the pseudonymous alias the partner already holds.</li>
+<li>Whether the user's own mute (next section) applies: yes to all three <code>notify.*</code> channels (<a href="mute-preferences.html">Mute preferences</a>). Muting does not remove the permission from the list.</li>
+</ul>
+<h2 id="render">How to show permissions to users</h2>
+<p>On the store page, a section "This app can..." (or "Permissions"), built from <code>permissions</code>, grouped and ordered from most to least sensitive:</p>
+<div class="table-wrap"><table><thead><tr><th>Group</th><th>Capabilities</th><th>Suggested row text (localise it yourself)</th><th>Notes</th></tr></thead><tbody><tr><td>Payments</td><td><code>pay.request</code></td><td>"Ask you to pay for things"</td><td>Show first and visually distinct. Add the reason below.</td></tr><tr><td>Your identity</td><td><code>user.contact</code>, <code>user.address</code>, <code>user.full_name</code>, <code>user.basic</code></td><td>contact: "See your phone number and email"; address: "Use one address you choose"; full name: "See your name"; basic: "Recognise you with a private ID (not your real identity)"</td><td>Sensitive first, <code>user.basic</code> last: it is the mildest.</td></tr><tr><td>Your location</td><td><code>location.fine</code>, <code>location.coarse</code></td><td>fine: "See your exact location while you use it"; coarse: "See your city"</td><td>If both are present show only fine (it covers coarse).</td></tr><tr><td>Messages</td><td><code>notify.sms</code>, <code>notify.email</code>, <code>notify.inapp</code></td><td>sms: "Send you text messages"; email: "Send you emails"; inapp: "Send you notifications"</td><td>Add a "Manage" link to the mute switches for this app.</td></tr></tbody></table></div>
+<ul>
+<li>Title from <em>your</em> localised string for the key (fallback: <code>description</code>); second line is <code>reason</code> chosen with the language fallback in <a href="list-apps.html#languages">List the mini apps</a> (user language, then <code>en</code>, then any). If there is no reason, show only the title.</li>
+<li>Unknown future key: do not hide it. Show the English <code>description</code> in a neutral row. A new capability that the user cannot see is a trust problem.</li>
+<li>If <code>permissions</code> is empty: say "This app does not ask for any permissions."</li>
+<li>Do not render these as toggles. The user cannot grant or revoke a capability today (the consent step is not built). Use a read-only list. When consent exists, this is where the toggles will go.</li>
+<li>On the tile in the list, at most show a small summary ("Uses location, payments") derived from the same array. Do not show all rows there.</li>
+</ul>
+<h2 id="limits-for-users">What is not shown, and why</h2>
+<p>Notification limits, payment settings and the denied/suspended states are internal. A user-facing "this app can send you at most 3 texts a day" would be a promise the client cannot back with data, because the limits are not in the user API.</p>
+<h2 id="not-built">Not built yet</h2>
+<ul>
+<li>The frontend bridge that lets a mini app request a capability at runtime, and the consent prompt with per-user, per-capability grant and revoke (no endpoint stores a user's consent).</li>
+<li>Any service that enforces <code>user.*</code>, <code>location.*</code> or <code>pay.request</code>: no user data goes to apps; no payment service; no stored postal address for <code>user.address</code>.</li>
+<li>A public flow that creates the per-app pseudonymous id (it can only be created by an internal call today).</li>
+<li>Showing denied or suspended capabilities, or per-capability limits, to users.</li>
+</ul>
+
+<div class="pager"><a class="prev" href="app-details.html"><small>Previous</small>App details</a><a class="next" href="reviews-and-ratings.html"><small>Next</small>Reviews and ratings</a></div>
+<p class="footer">Adera super-app guides &middot; mini-app catalog &middot; last verified against the running dev stack on 2026-10-26</p>
+</main>
+</div>
+<script src="assets/app.js"></script>
+</body>
+</html>
