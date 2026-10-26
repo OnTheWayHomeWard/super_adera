@@ -1,6 +1,7 @@
 """End-to-end journey through the GATEWAY: sign up two users, Kratos webhook -> profile, profile/extra/location,
 avatar upload to RustFS, FCM device tokens, spoofing attempts, logout. Needs the stack running in DEV mode
-(SMS_PROVIDER=console, NOTIFY_DEV_ENDPOINTS=true) so the OTP can be read from the notification service.
+(SMS_PROVIDER=console, NOTIFY_DEV_ENDPOINTS=true) so the verification / recovery codes can be read from the notification service.
+App users sign in with a PASSWORD; sections 0 and 8 cover register -> verify -> login -> wrong password -> recovery -> change password.
 Run from the repo root:  python3 -I tests/e2e/journey.py      (cleans up after itself)"""
 import http.client, json, os, re, struct, subprocess, sys, time, urllib.parse, urllib.request, urllib.error, uuid, zlib
 G="http://127.0.0.1:9080"; K=G+"/kratos"; ME=G+"/api/v1/me"; N="http://127.0.0.1:8085"; ADMIN="http://127.0.0.1:4434"
@@ -18,17 +19,11 @@ def req(method, url, body=None, headers=None, raw=None, ctype=None):
     try: return c,json.loads(b or b"{}"),hd
     except Exception: return c,b,hd
 
-def signup(phone):
-    req("DELETE",N+"/dev/messages")
-    _,f,_=req("GET",K+"/self-service/registration/api"); fid=f["id"]
-    req("POST",f"{K}/self-service/registration?flow={fid}",{"method":"code","traits.phone_number":phone})
-    code=None
-    for _ in range(15):
-        _,m,_=req("GET",f"{N}/dev/messages?to={urllib.parse.quote(phone)}")
-        if isinstance(m,list) and m: code=re.search(r"\b(\d{6})\b",m[0]["body"]).group(1); break
-        time.sleep(1)
-    _,r,_=req("POST",f"{K}/self-service/registration?flow={fid}",{"method":"code","traits.phone_number":phone,"code":code})
-    return r["session_token"], r["identity"]["id"]
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import userauth
+PW="tadesse"   # DEV-only password of the throw-away test users
+def signup(phone, email=None):
+    return userauth.signup_verified(PW, phone=phone, email=email)
 
 def png(w,h,noise=False):
     rows=b"".join(b"\x00"+(os.urandom(w*3) if noise else bytes([200,30,30])*w) for _ in range(h))
@@ -52,6 +47,45 @@ def ok(label, cond, extra=""): print(("  PASS " if cond else "  FAIL ")+label+(f
 
 results=[]
 phoneA="+251977"+str(uuid.uuid4().int)[:6]; phoneB="+251978"+str(uuid.uuid4().int)[:6]
+
+def flow_msgs(r):
+    return [m.get("id") for m in (r.get("ui",{}).get("messages") or [])] + [m.get("id") for n in r.get("ui",{}).get("nodes",[]) for m in n.get("messages",[])]
+
+print("== 0. password sign-up: rules, verification gate, login errors")
+emailC="journey-"+uuid.uuid4().hex[:8]+"@example.com"
+phoneC="+251979"+str(uuid.uuid4().int)[:6]
+st,r=userauth.register("abc",phone=phoneC)
+results.append(ok("password shorter than 6 rejected with a message", st==400 and 4000032 in flow_msgs(r), str(st)))
+st,r=userauth.register("123456",phone=phoneC)   # simple passwords are allowed on purpose (no breach / similarity check)
+results.append(ok("a simple 6-character password is accepted (no breach check)", st==200, str(st)))
+results.append(ok("no session after sign-up (account must be verified first)", "session_token" not in r and r.get("continue_with",[{}])[0].get("action")=="show_verification_ui"))
+flowC=r["continue_with"][0]["flow"]["id"]; idC=r["identity"]["id"]
+st,l=userauth.login(phoneC,"123456")
+results.append(ok("login before verification is refused (session_verified_address_required)", l.get("error",{}).get("id")=="session_verified_address_required" and "session_token" not in l, str(st)))
+code,_=userauth.wait_code(phoneC)
+st,v=userauth.verify(flowC,"000000" if code!="000000" else "000001")
+results.append(ok("wrong verification code does not verify", v.get("state")!="passed_challenge"))
+mark=userauth.last_at(phoneC)
+st,l=userauth.login(phoneC,"123456")   # a fresh flow + fresh code is sent by the refused login
+flow2=l["error"]["details"]["continue_with"][0]["flow"]["id"]
+code,_=userauth.wait_code(phoneC, mark)
+st,v=userauth.verify(flow2,code)
+results.append(ok("right code verifies the phone", v.get("state")=="passed_challenge", v.get("state","")))
+st,l=userauth.login(phoneC,"123456")
+tokC=l.get("session_token")
+results.append(ok("login with phone + password gives a session token", st==200 and bool(tokC)))
+sess=l.get("session",{})
+from datetime import datetime
+fmt=lambda t: datetime.fromisoformat(t.replace("Z","+00:00")[:26]+"+00:00")
+days=(fmt(sess["expires_at"])-fmt(sess["authenticated_at"])).days if sess else 0
+results.append(ok("session lasts 30 days", days in (29,30), str(days)))
+st,l=userauth.login(phoneC,"wrong-password")
+results.append(ok("wrong password -> 4000006 (invalid credentials), no token", st==400 and 4000006 in flow_msgs(l) and "session_token" not in l))
+st,l2=userauth.login("+251979000000","wrong-password")
+results.append(ok("unknown phone gives the SAME answer as a wrong password", st==400 and flow_msgs(l2)==flow_msgs(l)))
+st,l=userauth.submit("login",userauth.init("login"),{"method":"code","identifier":phoneC})
+results.append(ok("one-time-code login is NOT available to app users", st==400 and "session_token" not in l and 4000035 in flow_msgs(l)))
+
 print("== 1. sign up two users through the gateway")
 tokA,idA=signup(phoneA); tokB,idB=signup(phoneB)
 A={"Authorization":"Bearer "+tokA}; B={"Authorization":"Bearer "+tokB}
@@ -123,12 +157,42 @@ c,_,_=req("GET",ME,headers=A); results.append(ok("old session token now rejected
 c,_,_=req("GET",K+"/sessions/whoami",headers=A); results.append(ok("Kratos whoami also 401", c==401))
 c,p,_=req("GET",ME,headers=B); results.append(ok("user B (still signed in) unaffected", c==200))
 
+
+print("== 8. forgot password (email) and change password")
+mailU=emailC
+tokE,idE=userauth.signup_verified("secret1",email=mailU)
+results.append(ok("email-only account: sign-up, verify by emailed code, login", bool(tokE)))
+mark=userauth.last_at(mailU)
+rid=userauth.init("recovery")
+st,r=userauth.submit("recovery",rid,{"method":"code","email":mailU})
+results.append(ok("recovery start answers 200 'sent'", st==200 and r.get("state")=="sent_email"))
+st,r2=userauth.submit("recovery",userauth.init("recovery"),{"method":"code","email":"nobody-"+uuid.uuid4().hex[:6]+"@example.com"})
+results.append(ok("recovery for an unknown address answers exactly the same (no enumeration)", st==200 and r2.get("state")=="sent_email" and flow_msgs(r2)==flow_msgs(r)))
+code,_=userauth.wait_code(mailU, mark)
+st,r=userauth.submit("recovery",rid,{"method":"code","code":code})
+cw={c["action"]:c for c in r.get("continue_with",[])}
+results.append(ok("right code -> short privileged session token + settings flow", st==200 and "set_ory_session_token" in cw and "show_settings_ui" in cw, str(st)))
+rt=cw["set_ory_session_token"]["ory_session_token"]; sid=cw["show_settings_ui"]["flow"]["id"]; RH={"X-Session-Token":rt}
+st,s_=userauth.submit("settings",sid,{"method":"password","password":"abc"},RH)
+results.append(ok("settings: password shorter than 6 rejected", st==400 and 4000032 in flow_msgs(s_)))
+st,s_=userauth.submit("settings",sid,{"method":"password","password":"brandnew1"},RH)
+results.append(ok("settings: new password saved", st==200 and s_.get("state")=="success", str(st)))
+c,_,_=req("GET",ME,headers={"Authorization":"Bearer "+tokE}); results.append(ok("the old session was signed out by the password change", c==401, str(c)))
+st,l=userauth.login(mailU,"secret1"); results.append(ok("old password no longer works", st==400 and "session_token" not in l))
+st,l=userauth.login(mailU,"brandnew1"); tokE2=l.get("session_token"); results.append(ok("new password works", bool(tokE2)))
+c,_,_=req("GET",ME,headers={"Authorization":"Bearer "+tokE2}); results.append(ok("new session works on /me", c==200, str(c)))
+# change password later (settings flow with the current session)
+sf=userauth.init("settings",{"X-Session-Token":tokE2}); H2={"X-Session-Token":tokE2}
+st,s_=userauth.submit("settings",sf,{"method":"password","password":"third-pass"},H2)
+results.append(ok("change password while signed in (recent login)", st==200 and s_.get("state")=="success", str(st)))
+st,l=userauth.login(mailU,"third-pass"); results.append(ok("login with the changed password", bool(l.get("session_token"))))
+
 print("== cleanup")
 req("DELETE",ME+"/avatar",headers=B)
 _,ids,_=req("GET",ADMIN+"/admin/identities")
 for i in ids:
-    if i["traits"].get("phone_number") in (phoneA,phoneB): req("DELETE",f"{ADMIN}/admin/identities/{i['id']}")
-psql(f"delete from app_user where id in ('{idA}','{idB}')")
+    if i["traits"].get("phone_number") in (phoneA,phoneB,phoneC) or i["traits"].get("email")==emailC: req("DELETE",f"{ADMIN}/admin/identities/{i['id']}")
+psql(f"delete from app_user where id in ('{idA}','{idB}','{idC}','{idE}')")
 print("  removed test identities and rows; remaining app_user rows:", psql("select count(*) from app_user"))
 print(f"\nRESULT: {sum(map(bool,results))}/{len(results)} checks passed")
 sys.exit(0 if all(results) else 1)

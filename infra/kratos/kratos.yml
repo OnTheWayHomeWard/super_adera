@@ -6,8 +6,15 @@ serve:
     base_url: http://kratos:4434/
 
 identity:
-  default_schema_id: default
+  # Two schemas, because the two kinds of people sign in differently:
+  #   user    = app users (super app): phone and/or email + PASSWORD, address verified by a code. This is what a native
+  #             registration gets unless it asks for another schema.
+  #   default = dashboard staff: email + emailed one-time code (+ authenticator app). Staff are created through the admin API
+  #             with schema_id "default" (registry-service StaffService), so the id stays; do not rename it.
+  default_schema_id: user
   schemas:
+    - id: user
+      url: file:///etc/config/kratos/identity.user.schema.json
     - id: default
       url: file:///etc/config/kratos/identity.schema.json
 
@@ -16,13 +23,25 @@ selfservice:
   allowed_return_urls:
     - http://localhost:3000/
   methods:
+    # Password sign-in for app users (schema "user"). Staff have no password credential, so for them this method does nothing.
+    # The rules are deliberately light (product decision): at least 6 characters and nothing else. No online breach check
+    # (haveibeenpwned would reject "123456"-style passwords and sends a hash prefix to a third party), no "too similar to
+    # your phone/email" check, no digit/symbol rules.
     password:
-      enabled: false
+      enabled: true
+      config:
+        min_password_length: 6
+        haveibeenpwned_enabled: false
+        identifier_similarity_check_enabled: false
+        max_breaches: 0
+    # The code method serves two things: staff sign-in (passwordless, schema "default") and the verification / recovery
+    # flows below (codes sent to the phone or email of app users). App users have NO code credential, so they cannot sign in
+    # with a code even though passwordless_enabled is on for the staff.
     code:
       enabled: true
       passwordless_enabled: true
       config:
-        lifespan: 5m
+        lifespan: 10m
     # The built-in "profile" settings method would let a signed-in user change their own phone number or email with no
     # verification of the new value (and user-service would keep the old one). Contact details are changed only through
     # our own APIs, so it is off. The settings flow stays available for the staff authenticator (totp) below.
@@ -39,7 +58,7 @@ selfservice:
       ui_url: http://localhost:3000/registration
       lifespan: 10m
       after:
-        code:
+        password:
           hooks:
             # Create our profile row for the new identity. Non-blocking (ignore: true): a slow or down user-service
             # must never block a sign-up; the profile is also created on first use if this call is ever lost.
@@ -50,18 +69,48 @@ selfservice:
                 body: base64://ZnVuY3Rpb24oY3R4KSB7IGlkZW50aXR5SWQ6IGN0eC5pZGVudGl0eS5pZCwgZW1haWw6IHN0ZC5nZXQoY3R4LmlkZW50aXR5LnRyYWl0cywgJ2VtYWlsJywgbnVsbCksIHBob25lOiBzdGQuZ2V0KGN0eC5pZGVudGl0eS50cmFpdHMsICdwaG9uZV9udW1iZXInLCBudWxsKSB9
                 response:
                   ignore: true
-            - hook: session   # issue a session right after sign-up (native apps get a session_token)
+            # No "session" hook: a new account gets NO session until its phone/email is verified. The verification flow
+            # starts right away and the code is sent (the response carries it in continue_with).
+            - hook: show_verification_ui
     login:
       ui_url: http://localhost:3000/login
       lifespan: 10m
+      after:
+        password:
+          hooks:
+            # An account whose address is not verified yet cannot sign in with its password (error 4000010 + a fresh code).
+            # Only the password method: staff sign in with the code method and are not affected.
+            - hook: require_verified_address
+    verification:
+      enabled: true
+      use: code
+      ui_url: http://localhost:3000/verification
+      lifespan: 10m
+      # Do not send anything to an address that has no account (no SMS cost, no way to probe which numbers are registered).
+      notify_unknown_recipients: false
+    recovery:
+      enabled: true
+      use: code
+      ui_url: http://localhost:3000/recovery
+      lifespan: 10m
+      notify_unknown_recipients: false
     settings:
       ui_url: http://localhost:3000/settings
       privileged_session_max_age: 15m
+      after:
+        password:
+          hooks:
+            # After a password change every other session of the account is signed out (a stolen session must not survive it).
+            - hook: revoke_active_sessions
     logout:
       after:
         default_browser_return_url: http://localhost:3000/login
     error:
       ui_url: http://localhost:3000/error
+
+feature_flags:
+  # Native (API) flows return continue_with steps (session token, next flow) instead of a browser redirect.
+  use_continue_with_transitions: true
 
 session:
   lifespan: 720h
