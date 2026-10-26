@@ -9,6 +9,7 @@ import app.adera.registry.config.RegistryProperties;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
+import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 import tools.jackson.databind.JsonNode;
@@ -141,6 +142,9 @@ public class KratosClient {
 	public void revokeSessions(UUID identityId) {
 		try {
 			adminApi.method(HttpMethod.DELETE).uri("/admin/identities/{id}/sessions", identityId).retrieve().toBodilessEntity();
+		}
+		catch (HttpClientErrorException.NotFound e) {
+			// Kratos answers 404 when the identity has no sessions (a staff member added but never signed in): nothing to revoke
 		}
 		catch (RestClientException e) {
 			throw new KratosUnavailableException("cannot revoke sessions in Kratos", e);
