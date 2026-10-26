@@ -1,0 +1,36 @@
+{
+  "$id": "https://adera.app/schemas/user.json",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Adera user",
+  "type": "object",
+  "properties": {
+    "traits": {
+      "type": "object",
+      "properties": {
+        "email": {
+          "type": "string",
+          "format": "email",
+          "title": "Email",
+          "minLength": 3,
+          "ory.sh/kratos": {
+            "credentials": { "code": { "identifier": true, "via": "email" } }
+          }
+        },
+        "phone_number": {
+          "type": "string",
+          "format": "tel",
+          "title": "Phone number",
+          "minLength": 3,
+          "ory.sh/kratos": {
+            "credentials": { "code": { "identifier": true, "via": "sms" } }
+          }
+        }
+      },
+      "anyOf": [
+        { "required": ["email"] },
+        { "required": ["phone_number"] }
+      ],
+      "additionalProperties": false
+    }
+  }
+}

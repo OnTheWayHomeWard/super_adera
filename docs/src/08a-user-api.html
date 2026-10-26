@@ -1,0 +1,1197 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>8a. End-user API | Adera docs</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+<button id="menu-btn" type="button" aria-label="Toggle menu">Menu</button>
+<a class="brand" href="../index.html">Adera docs</a>
+<span class="spacer"></span>
+<a href="../index.html">Contents</a>
+<button id="theme-btn" type="button" aria-label="Toggle light or dark theme">Theme</button>
+</header>
+<div class="layout">
+<nav class="sidebar" aria-label="Sections">
+<ul><li><a href="../index.html" class="">Home / contents</a></li></ul>
+<h4>Sections</h4><ul>
+<li><a href="01-overview.html">1. Overview</a>
+</li>
+<li><a href="02-setup.html">2. Setup and running</a>
+</li>
+<li><a href="03-tools.html">3. Tools</a>
+</li>
+<li><a href="04-services.html">4. Services</a>
+</li>
+<li><a href="05-communication.html">5. How it communicates</a>
+</li>
+<li><a href="06-security.html">6. Security model</a>
+</li>
+<li><a href="07-data.html">7. Data</a>
+</li>
+<li><a href="08-endpoints.html">8. Endpoint reference</a>
+</li>
+<li><a href="09-guides.html">9. Guides</a>
+</li>
+<li><a href="10-reference.html">10. Reference</a>
+</li>
+<li><a href="11-backoffice.html">11. Backoffice (staff dashboard)</a>
+</li>
+<li><a href="12-backoffice-guide.html">12. Backoffice guide (staff manual)</a>
+</li>
+<li><a href="13-sample-data.html">13. Sample data (test scenarios)</a>
+</li>
+</ul>
+<h4>Endpoints</h4><ul>
+<li><a href="08a-user-api.html" class=current>8a. End-user API</a>
+<ul><li><a href="#how-auth-works">How a request is authenticated</a></li><li><a href="#route-table">Gateway routes behind this page</a></li><li><a href="#endpoints">Endpoints</a></li></ul>
+</li>
+<li><a href="08b-staff-api.html">8b. Staff / dashboard API</a>
+</li>
+<li><a href="08c-partner-api.html">8c. Partner API</a>
+</li>
+<li><a href="08d-internal-api.html">8d. Internal API</a>
+</li>
+<li><a href="08e-kratos-flows.html">8e. Kratos flows</a>
+</li>
+<li><a href="08f-operational.html">8f. Operational endpoints</a>
+</li>
+</ul>
+</nav>
+<main>
+<h1>8a. End-user API</h1>
+<p class="lead">What the Flutter app calls with a session token: profile, location, avatar, devices, logout, per-app mute, the notification inbox and the mini-app catalog. 23 endpoints.</p>
+<div class="callout"><span class="label">Conventions on this page</span>
+<p>All paths are relative to the gateway, <code>$GATEWAY</code> = <code>http://127.0.0.1:9080</code> in dev. <code>$TOKEN</code> is the Kratos <code>session_token</code> returned by sign-up or login (<a href="08e-kratos-flows.html">8e</a>); <code>$APP_ID</code> and <code>$ITEM_ID</code> are UUIDs taken from earlier answers. Examples were captured on <strong>2026-10-25</strong> against the dev stack (console SMS, Mailpit) with a throwaway user and a throwaway LIVE mini app, both deleted afterwards; phone numbers and signed-URL secrets are masked.</p>
+<p>Error bodies from our services are <code>{"error":"&lt;code&gt;","fields":{...}}</code> (<code>fields</code> only for validation). Three things do not follow that shape: errors produced by the gateway (empty <code>401</code>, HTML <code>429</code>, <code>404 {"error_msg":"404 Route Not Found"}</code>), a few framework default bodies (<code>415</code>, a bad UUID in a path of user-service, noted per endpoint), and Kratos' own errors.</p></div>
+<h2 id="how-auth-works">How a request is authenticated</h2>
+<ol>
+<li>The app sends <code>Authorization: Bearer $TOKEN</code> to the gateway (a <code>Cookie</code> header is forwarded too, for browsers).</li>
+<li>APISIX's <code>forward-auth</code> plugin calls user-service <code>GET /internal/auth/verify</code> with those headers plus <code>X-Gateway-Secret</code>. user-service asks Kratos <code>whoami</code> and answers <code>200</code> with <code>X-User-Id</code>, or <code>401</code>.</li>
+<li>APISIX copies <code>X-User-Id</code> onto the forwarded request, <strong>overwriting any value the client sent</strong>, and sets <code>X-Gateway-Secret</code> so the service knows the request came through the gateway.</li>
+<li>The service trusts <code>X-User-Id</code> only if the secret matches. Calling a service port directly without the secret gives <code>401 {"error":"unauthorized"}</code> (<a href="08d-internal-api.html">8d</a>).</li>
+</ol>
+<p>Why: Kratos' <code>whoami</code> returns the identity in its body, not in headers, and services should not each implement session checking. One small translator endpoint keeps every service simple. Spoofing check: a request with a forged <code>X-User-Id</code> still returned the caller's own profile (the gateway overwrote the header; verified by <code>tests/e2e/journey.py</code>).</p>
+<h2 id="route-table">Gateway routes behind this page</h2>
+<div class="table-wrap"><table><thead><tr><th>Gateway route id</th><th>Paths</th><th>Upstream</th><th>Auth</th><th>Limit</th></tr></thead><tbody><tr><td><code>me-avatar</code> (priority 30)</td><td><code>/api/v1/me/avatar</code></td><td>user-service</td><td>forward-auth (user)</td><td>20 / 60 s</td></tr><tr><td><code>me-notifications</code> (priority 30)</td><td><code>/api/v1/me/notifications</code>, <code>/api/v1/me/notifications/*</code></td><td>notification-service</td><td>forward-auth (user)</td><td>300 / 60 s</td></tr><tr><td><code>me</code> (priority 20)</td><td><code>/api/v1/me</code>, <code>/api/v1/me/*</code></td><td>user-service</td><td>forward-auth (user)</td><td>300 / 60 s</td></tr><tr><td><code>apps-catalog</code> (priority 20)</td><td><code>/api/v1/apps</code>, <code>/api/v1/apps/*</code></td><td>registry-service</td><td>forward-auth (user)</td><td>300 / 60 s</td></tr></tbody></table></div>
+<p>The limit key is the client IP (<code>remote_addr</code>), counted in Redis; every route has its own counter. Locally all clients share one Docker IP; behind a production proxy the real client IP must be configured (see the known limitations in docs/SETUP.md section 12).</p>
+<h2 id="endpoints">Endpoints</h2>
+<details class="endpoint" id="ep-user-get-me">
+<summary><span class="method m-get">GET</span><span class="path">/api/v1/me</span><span class="sum">Read my profile</span></summary>
+<div class="body"><dl class="meta">
+<dt>Audience</dt><dd>signed-in end user (the Flutter app)</dd>
+<dt>Client path</dt><dd><code>/api/v1/me</code> (through the gateway, base <code>$GATEWAY</code>)</dd>
+<dt>Internal path</dt><dd>same path on the service (the gateway does not rewrite it)</dd>
+<dt>Auth</dt><dd><code>Authorization: Bearer $TOKEN</code>, where <code>$TOKEN</code> is the Kratos <code>session_token</code> (see <a href="08e-kratos-flows.html">8e</a>). The gateway validates it through forward-auth before the request reaches the service.</dd>
+<dt>Rate limit</dt><dd>300 per 60 s per client IP (gateway route <code>me</code>); over the limit the gateway answers <code>429</code></dd>
+<dt>Implemented in</dt><dd><code>services/user-service/src/main/java/app/adera/user/profile/ProfileController.java#get</code></dd>
+</dl>
+<h4>Purpose</h4><p>Returns the signed-in user's own record. This is the first call the app makes after login: it shows the profile, the signed avatar link and the free-form <code>extra</code> object. The profile row is normally created by the Kratos registration webhook; if that call was ever lost, this endpoint creates it on the spot from Kratos' own copy of the identity, so a valid session always has a profile. It also refreshes <code>last_seen_at</code> (at most once every 5 minutes).</p>
+<h4>Request parameters</h4><p>None.</p>
+<h4>Example request</h4>
+<pre><code>curl -s "$GATEWAY/api/v1/me" \
+  -H "Authorization: Bearer $TOKEN"</code></pre>
+<pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+X-RateLimit-Limit: 300
+X-RateLimit-Remaining: 299
+X-Request-Id: b503d840-8e18-45de-8c0a-eb84e5f9335a
+
+{
+  "id": "ff11b469-af24-4970-9ecd-8fed609a1bc7",
+  "email": null,
+  "phone": "+2519******49",
+  "firstName": null,
+  "lastName": null,
+  "gender": null,
+  "dateOfBirth": null,
+  "language": "en",
+  "market": "ET",
+  "timezone": "Africa/Addis_Ababa",
+  "avatarImageId": null,
+  "avatarUrl": null,
+  "location": null,
+  "verificationTier": "CONTACT",
+  "status": "ACTIVE",
+  "termsAcceptedVersion": null,
+  "termsAcceptedAt": null,
+  "extra": {},
+  "createdAt": "2026-10-25T05:45:16.457673Z",
+  "updatedAt": "2026-10-25T05:45:16.457673Z"
+}</code></pre><p class="masked">Values masked: the phone number. The id is the Kratos identity id of a throwaway user that was deleted afterwards.</p>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th>Error code</th><th>When it happens</th></tr></thead><tbody><tr><td><strong>401</strong></td><td><code>(empty body)</code></td><td>Missing, expired, revoked or malformed session token. Produced by the gateway's forward-auth step (user-service <code>/internal/auth/verify</code> answers 401, the body is empty). A session of an account that has an authenticator app but only completed the first step (<code>aal1</code>) is also a 401 here.</td></tr><tr><td><strong>429</strong></td><td><code>(HTML page)</code></td><td>Gateway rate limit exceeded. The body is APISIX's HTML page, not JSON; the response carries <code>X-RateLimit-*</code> headers (see <a href="08f-operational.html#gateway-behaviour">8f</a>).</td></tr><tr><td><strong>503</strong></td><td><code>identity_service_unavailable</code></td><td>Kratos could not be reached while the gateway asked who the token belongs to (forward-auth is sent to user-service, which answers 503 instead of a misleading 401).</td></tr></tbody></table></div>
+<h4>How to use it</h4><ul><li><code>avatarUrl</code> is a pre-signed link valid for 60 minutes. Do not cache it longer; call this endpoint again for a fresh one. It is <code>null</code> when the user has no avatar.</li><li><code>market</code> is guessed at sign-up (<code>US</code> for +1 numbers, otherwise <code>ET</code>) and can be changed with <code>PATCH</code>.</li><li><code>verificationTier</code> is <code>CONTACT</code> for everyone today (code to phone or email). <code>ID</code> and <code>PROVIDER</code> exist for later.</li><li>The user id is the Kratos identity id: the same value appears in <code>whoami</code> (<a href="08e-kratos-flows.html">8e</a>).</li></ul>
+</div></details>
+<details class="endpoint" id="ep-user-patch-me">
+<summary><span class="method m-patch">PATCH</span><span class="path">/api/v1/me</span><span class="sum">Update my profile (partial)</span></summary>
+<div class="body"><dl class="meta">
+<dt>Audience</dt><dd>signed-in end user (the Flutter app)</dd>
+<dt>Client path</dt><dd><code>/api/v1/me</code> (through the gateway, base <code>$GATEWAY</code>)</dd>
+<dt>Internal path</dt><dd>same path on the service (the gateway does not rewrite it)</dd>
+<dt>Auth</dt><dd><code>Authorization: Bearer $TOKEN</code>, where <code>$TOKEN</code> is the Kratos <code>session_token</code> (see <a href="08e-kratos-flows.html">8e</a>). The gateway validates it through forward-auth before the request reaches the service.</dd>
+<dt>Rate limit</dt><dd>300 per 60 s per client IP (gateway route <code>me</code>); over the limit the gateway answers <code>429</code></dd>
+<dt>Implemented in</dt><dd><code>services/user-service/src/main/java/app/adera/user/profile/ProfileController.java#update, ProfilePatch.java</code></dd>
+</dl>
+<h4>Purpose</h4><p>Partial update. Send only the fields that change: a missing key leaves the field alone, an explicit <code>null</code> clears an optional field. Unknown keys are rejected on purpose, so a typo can never silently do nothing. All problems are reported together in <code>fields</code>. <code>extra</code> is merged with JSON Merge Patch (RFC 7386): add or change keys, set a key to <code>null</code> to remove it, nested objects merge recursively. <code>extra</code> exists for data we did not plan columns for; it is stored as <code>jsonb</code>.</p>
+<h4>Request parameters</h4><div class="table-wrap"><table><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why it exists</th></tr></thead><tbody><tr><td><code>firstName</code></td><td>body</td><td>string</td><td>no</td><td>max 100 chars after trimming; empty string clears it</td><td>Display name.</td></tr><tr><td><code>lastName</code></td><td>body</td><td>string</td><td>no</td><td>max 100 chars</td><td>Display name.</td></tr><tr><td><code>gender</code></td><td>body</td><td>string</td><td>no</td><td>MALE, FEMALE, OTHER, PREFER_NOT_TO_SAY (case-insensitive, stored upper-case); null clears</td><td>Optional profile data; PREFER_NOT_TO_SAY exists so the field never has to be forced.</td></tr><tr><td><code>dateOfBirth</code></td><td>body</td><td>date</td><td>no</td><td>ISO <code>YYYY-MM-DD</code>, not in the future, year &ge; 1900; null clears</td><td>Age-gating of mini apps later.</td></tr><tr><td><code>language</code></td><td>body</td><td>string</td><td>no</td><td>am, en or om (lower-cased); cannot be null</td><td>Language of messages we send (SMS, push).</td></tr><tr><td><code>market</code></td><td>body</td><td>string</td><td>no</td><td>ET or US (upper-cased); cannot be null</td><td>Which regional catalog and sender rules apply.</td></tr><tr><td><code>timezone</code></td><td>body</td><td>string</td><td>no</td><td>valid IANA zone, e.g. <code>Africa/Addis_Ababa</code>; cannot be null</td><td>Quiet hours and date display.</td></tr><tr><td><code>termsAcceptedVersion</code></td><td>body</td><td>string</td><td>no</td><td>max 32 chars</td><td>Records which terms text the user accepted; <code>termsAcceptedAt</code> is set by the server at that moment.</td></tr><tr><td><code>extra</code></td><td>body</td><td>object</td><td>no</td><td>must be a JSON object; serialized size at most 16384 bytes (<code>EXTRA_MAX_BYTES</code>), checked before and after the merge</td><td>Free-form data without a schema change.</td></tr></tbody></table></div>
+<h4>Example request</h4>
+<pre><code>curl -s -X PATCH "$GATEWAY/api/v1/me" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"firstName": "Selam", "lastName": "Tadesse", "gender": "female", "dateOfBirth": "1995-04-12", "language": "am", "timezone": "Africa/Addis_Ababa", "termsAcceptedVersion": "2026-10", "extra": {"occupation": "nurse", "prefs": {"theme": "dark"}}}'</code></pre>
+<pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+X-RateLimit-Limit: 300
+X-RateLimit-Remaining: 298
+X-Request-Id: a04b9970-84a5-4182-800e-1ff0d518ebaf
+
+{
+  "id": "ff11b469-af24-4970-9ecd-8fed609a1bc7",
+  "email": null,
+  "phone": "+2519******49",
+  "firstName": "Selam",
+  "lastName": "Tadesse",
+  "gender": "FEMALE",
+  "dateOfBirth": "1995-04-12",
+  "language": "am",
+  "market": "ET",
+  "timezone": "Africa/Addis_Ababa",
+  "avatarImageId": null,
+  "avatarUrl": null,
+  "location": null,
+  "verificationTier": "CONTACT",
+  "status": "ACTIVE",
+  "termsAcceptedVersion": "2026-10",
+  "termsAcceptedAt": "2026-10-25T05:46:18.039771431Z",
+  "extra": {
+    "occupation": "nurse",
+    "prefs": {
+      "theme": "dark"
+    }
+  },
+  "createdAt": "2026-10-25T05:45:16.457673Z",
+  "updatedAt": "2026-10-25T05:46:18.039771431Z"
+}</code></pre><p class="masked">Values masked: the phone number.</p>
+<h4>Example: merging extra (set a nested key, remove one, keep siblings)</h4>
+<pre><code>curl -s -X PATCH "$GATEWAY/api/v1/me" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"extra": {"occupation": null, "prefs": {"font": 16}}}'</code></pre>
+<pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+X-RateLimit-Limit: 300
+X-RateLimit-Remaining: 297
+X-Request-Id: bc1ebe88-c9ff-4183-9801-5e587dedfb7c
+
+{
+  "extra": {
+    "prefs": {
+      "theme": "dark",
+      "font": 16
+    }
+  },
+  "updatedAt": "2026-10-25T05:46:18.146471580Z",
+  "...": "other fields unchanged"
+}</code></pre>
+<h4>Example: several validation problems at once</h4>
+<pre><code>curl -s -X PATCH "$GATEWAY/api/v1/me" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"gender": "robot", "dateOfBirth": "2999-01-01", "language": "fr", "market": "XX", "timezone": "Mars/Base", "firstName": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"}'</code></pre>
+<pre class="out"><code>HTTP/1.1 400 Bad Request
+Content-Type: application/json
+X-RateLimit-Limit: 300
+X-RateLimit-Remaining: 296
+X-Request-Id: 18cfe234-2fe3-4408-b00b-269119dd06c7
+
+{
+  "error": "validation_failed",
+  "fields": {
+    "firstName": "max 100 characters",
+    "gender": "must be one of MALE, FEMALE, OTHER, PREFER_NOT_TO_SAY",
+    "dateOfBirth": "must be a real past date (YYYY-MM-DD)",
+    "language": "must be one of am, en, om",
+    "market": "must be one of ET, US",
+    "timezone": "must be a valid IANA time zone, e.g. Africa/Addis_Ababa"
+  }
+}</code></pre>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th>Error code</th><th>When it happens</th></tr></thead><tbody><tr><td><strong>400</strong></td><td><code>validation_failed</code></td><td>One or more fields are invalid; <code>fields</code> maps each field name to a message. An unknown key gives <code>"unknown field"</code>.</td></tr><tr><td><strong>400</strong></td><td><code>invalid_json</code></td><td>The body is not valid JSON or not a JSON object (e.g. <code>{not json</code>).</td></tr><tr><td><strong>409</strong></td><td><code>conflict</code></td><td>A database uniqueness rule was violated (for example an email or phone already owned by another account). Not reachable with the fields PATCH accepts today.</td></tr><tr><td><strong>401</strong></td><td><code>(empty body)</code></td><td>Missing, expired, revoked or malformed session token. Produced by the gateway's forward-auth step (user-service <code>/internal/auth/verify</code> answers 401, the body is empty). A session of an account that has an authenticator app but only completed the first step (<code>aal1</code>) is also a 401 here.</td></tr><tr><td><strong>429</strong></td><td><code>(HTML page)</code></td><td>Gateway rate limit exceeded. The body is APISIX's HTML page, not JSON; the response carries <code>X-RateLimit-*</code> headers (see <a href="08f-operational.html#gateway-behaviour">8f</a>).</td></tr><tr><td><strong>503</strong></td><td><code>identity_service_unavailable</code></td><td>Kratos could not be reached while the gateway asked who the token belongs to (forward-auth is sent to user-service, which answers 503 instead of a misleading 401).</td></tr></tbody></table></div>
+<h4>How to use it</h4><ul><li>Send the whole <code>extra</code> sub-tree you care about; siblings you do not mention are kept.</li><li><code>email</code> and <code>phone</code> cannot be edited here: they are copies of the Kratos identity (the login identifiers).</li><li>An empty body <code>{}</code> succeeds and only bumps <code>updatedAt</code>.</li></ul>
+</div></details>
+<details class="endpoint" id="ep-user-put-location">
+<summary><span class="method m-put">PUT</span><span class="path">/api/v1/me/location</span><span class="sum">Share my location</span></summary>
+<div class="body"><dl class="meta">
+<dt>Audience</dt><dd>signed-in end user (the Flutter app)</dd>
+<dt>Client path</dt><dd><code>/api/v1/me/location</code> (through the gateway, base <code>$GATEWAY</code>)</dd>
+<dt>Internal path</dt><dd>same path on the service (the gateway does not rewrite it)</dd>
+<dt>Auth</dt><dd><code>Authorization: Bearer $TOKEN</code>, where <code>$TOKEN</code> is the Kratos <code>session_token</code> (see <a href="08e-kratos-flows.html">8e</a>). The gateway validates it through forward-auth before the request reaches the service.</dd>
+<dt>Rate limit</dt><dd>300 per 60 s per client IP (gateway route <code>me</code>); over the limit the gateway answers <code>429</code></dd>
+<dt>Implemented in</dt><dd><code>services/user-service/src/main/java/app/adera/user/profile/ProfileController.java#setLocation, LocationRequest.java</code></dd>
+</dl>
+<h4>Purpose</h4><p>Stores the place the user chose to share. City level is enough; coordinates are optional and only ever sent because the user initiated it. Sending it again replaces the previous location. At least one of country, region, city or coordinates is required.</p>
+<h4>Request parameters</h4><div class="table-wrap"><table><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why it exists</th></tr></thead><tbody><tr><td><code>countryCode</code></td><td>body</td><td>string</td><td>no</td><td>exactly 2 letters (ISO 3166-1 alpha-2), stored upper-case</td><td>Coarse location for catalog and regional rules.</td></tr><tr><td><code>region</code></td><td>body</td><td>string</td><td>no</td><td>max 100 chars</td><td>State or region.</td></tr><tr><td><code>city</code></td><td>body</td><td>string</td><td>no</td><td>max 100 chars</td><td>Shown to mini apps that were granted <code>location.coarse</code> (later).</td></tr><tr><td><code>latitude</code></td><td>body</td><td>number</td><td>no</td><td>-90 to 90; must be sent together with longitude</td><td>Optional precise point.</td></tr><tr><td><code>longitude</code></td><td>body</td><td>number</td><td>no</td><td>-180 to 180; must be sent together with latitude</td><td>Optional precise point.</td></tr></tbody></table></div>
+<h4>Example request</h4>
+<pre><code>curl -s -X PUT "$GATEWAY/api/v1/me/location" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"countryCode": "et", "region": "Addis Ababa", "city": "Addis Ababa", "latitude": 9.0054, "longitude": 38.7636}'</code></pre>
+<pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+X-RateLimit-Limit: 300
+X-RateLimit-Remaining: 292
+X-Request-Id: 1c7fb4ec-4e71-4dea-aca9-84a046411bce
+
+{
+  "location": {
+    "countryCode": "ET",
+    "region": "Addis Ababa",
+    "city": "Addis Ababa",
+    "latitude": 9.0054,
+    "longitude": 38.7636,
+    "updatedAt": "2026-10-25T05:46:18.541976325Z"
+  },
+  "...": "other profile fields as in GET /me"
+}</code></pre>
+<h4>Example: invalid values</h4>
+<pre><code>curl -s -X PUT "$GATEWAY/api/v1/me/location" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"countryCode": "ETH", "latitude": 123.0}'</code></pre>
+<pre class="out"><code>HTTP/1.1 400 Bad Request
+Content-Type: application/json
+X-RateLimit-Limit: 300
+X-RateLimit-Remaining: 291
+X-Request-Id: f9c74d94-2d46-4b71-bdcc-032473941ab2
+
+{
+  "error": "validation_failed",
+  "fields": {
+    "countryCode": "must be a 2-letter ISO country code",
+    "latitude": "must be less than or equal to 90.0"
+  }
+}</code></pre>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th>Error code</th><th>When it happens</th></tr></thead><tbody><tr><td><strong>400</strong></td><td><code>validation_failed</code></td><td>Bad country code or out-of-range coordinates; only one of latitude/longitude (<code>fields.latitude</code>: "latitude and longitude must be given together"); nothing given at all (<code>fields.location</code>: "give at least a city, region, country or coordinates").</td></tr><tr><td><strong>400</strong></td><td><code>invalid_json</code></td><td>Body is not valid JSON.</td></tr><tr><td><strong>401</strong></td><td><code>(empty body)</code></td><td>Missing, expired, revoked or malformed session token. Produced by the gateway's forward-auth step (user-service <code>/internal/auth/verify</code> answers 401, the body is empty). A session of an account that has an authenticator app but only completed the first step (<code>aal1</code>) is also a 401 here.</td></tr><tr><td><strong>429</strong></td><td><code>(HTML page)</code></td><td>Gateway rate limit exceeded. The body is APISIX's HTML page, not JSON; the response carries <code>X-RateLimit-*</code> headers (see <a href="08f-operational.html#gateway-behaviour">8f</a>).</td></tr><tr><td><strong>503</strong></td><td><code>identity_service_unavailable</code></td><td>Kratos could not be reached while the gateway asked who the token belongs to (forward-auth is sent to user-service, which answers 503 instead of a misleading 401).</td></tr></tbody></table></div>
+<h4>How to use it</h4><ul><li>The response is the full profile; <code>location.updatedAt</code> tells when it was last shared.</li><li>Withdraw it with <code>DELETE /api/v1/me/location</code>.</li></ul>
+</div></details>
+<details class="endpoint" id="ep-user-delete-location">
+<summary><span class="method m-delete">DELETE</span><span class="path">/api/v1/me/location</span><span class="sum">Withdraw my location</span></summary>
+<div class="body"><dl class="meta">
+<dt>Audience</dt><dd>signed-in end user (the Flutter app)</dd>
+<dt>Client path</dt><dd><code>/api/v1/me/location</code> (through the gateway, base <code>$GATEWAY</code>)</dd>
+<dt>Internal path</dt><dd>same path on the service (the gateway does not rewrite it)</dd>
+<dt>Auth</dt><dd><code>Authorization: Bearer $TOKEN</code>, where <code>$TOKEN</code> is the Kratos <code>session_token</code> (see <a href="08e-kratos-flows.html">8e</a>). The gateway validates it through forward-auth before the request reaches the service.</dd>
+<dt>Rate limit</dt><dd>300 per 60 s per client IP (gateway route <code>me</code>); over the limit the gateway answers <code>429</code></dd>
+<dt>Implemented in</dt><dd><code>services/user-service/src/main/java/app/adera/user/profile/ProfileController.java#clearLocation</code></dd>
+</dl>
+<h4>Purpose</h4><p>Removes every location field (country, region, city, coordinates, timestamp). Idempotent: deleting when nothing is stored still answers 200. Exists so sharing is always reversible.</p>
+<h4>Request parameters</h4><p>None.</p>
+<h4>Example request</h4>
+<pre><code>curl -s -X DELETE "$GATEWAY/api/v1/me/location" \
+  -H "Authorization: Bearer $TOKEN"</code></pre>
+<pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+X-RateLimit-Limit: 300
+X-RateLimit-Remaining: 288
+X-Request-Id: 2c7af249-285a-48ee-a109-a6cb4b3e1b6d
+
+{
+  "location": null,
+  "...": "other profile fields"
+}</code></pre>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th>Error code</th><th>When it happens</th></tr></thead><tbody><tr><td><strong>401</strong></td><td><code>(empty body)</code></td><td>Missing, expired, revoked or malformed session token. Produced by the gateway's forward-auth step (user-service <code>/internal/auth/verify</code> answers 401, the body is empty). A session of an account that has an authenticator app but only completed the first step (<code>aal1</code>) is also a 401 here.</td></tr><tr><td><strong>429</strong></td><td><code>(HTML page)</code></td><td>Gateway rate limit exceeded. The body is APISIX's HTML page, not JSON; the response carries <code>X-RateLimit-*</code> headers (see <a href="08f-operational.html#gateway-behaviour">8f</a>).</td></tr><tr><td><strong>503</strong></td><td><code>identity_service_unavailable</code></td><td>Kratos could not be reached while the gateway asked who the token belongs to (forward-auth is sent to user-service, which answers 503 instead of a misleading 401).</td></tr></tbody></table></div>
+</div></details>
+<details class="endpoint" id="ep-user-post-avatar">
+<summary><span class="method m-post">POST</span><span class="path">/api/v1/me/avatar</span><span class="sum">Upload or replace my avatar</span></summary>
+<div class="body"><dl class="meta">
+<dt>Audience</dt><dd>signed-in end user (the Flutter app)</dd>
+<dt>Client path</dt><dd><code>/api/v1/me/avatar</code> (through the gateway, base <code>$GATEWAY</code>)</dd>
+<dt>Internal path</dt><dd>same path on the service (the gateway does not rewrite it)</dd>
+<dt>Auth</dt><dd><code>Authorization: Bearer $TOKEN</code>, where <code>$TOKEN</code> is the Kratos <code>session_token</code> (see <a href="08e-kratos-flows.html">8e</a>). The gateway validates it through forward-auth before the request reaches the service.</dd>
+<dt>Rate limit</dt><dd>20 per 60 s per client IP (stricter: multipart is heavy) (gateway route <code>me-avatar</code>); over the limit the gateway answers <code>429</code></dd>
+<dt>Implemented in</dt><dd><code>services/user-service/src/main/java/app/adera/user/profile/ProfileController.java#uploadAvatar, avatar/AvatarService.java, AvatarImageProcessor.java</code></dd>
+</dl>
+<h4>Purpose</h4><p>Multipart upload of one image. The server decodes it, centre-crops to a square, resizes to at most 512 px, flattens transparency and <strong>re-encodes it as JPEG</strong>. That drops EXIF (GPS, camera) data and neutralises odd or hostile files; dimension limits guard against decompression bombs. The file is stored in RustFS at <code>avatars/{userId}/{imageId}.jpg</code> and the previous image is deleted. The response is the full profile with a fresh signed <code>avatarUrl</code>.</p>
+<h4>Request parameters</h4><div class="table-wrap"><table><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why it exists</th></tr></thead><tbody><tr><td><code>file</code></td><td>body (multipart/form-data)</td><td>file</td><td>yes</td><td>JPEG, PNG, GIF or BMP; at most 5 MB (<code>AVATAR_MAX_BYTES</code>); dimension-checked</td><td>The image. HEIC and WebP are not decoded by the JDK: the app should convert to JPEG first.</td></tr></tbody></table></div>
+<h4>Example request</h4>
+<pre><code>curl -s -X POST "$GATEWAY/api/v1/me/avatar" \
+  -H "Authorization: Bearer $TOKEN" \
+  -F "file=@me.png;type=image/png"</code></pre>
+<pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+X-RateLimit-Limit: 20
+X-RateLimit-Remaining: 19
+X-Request-Id: 585c8536-1ef1-4c7b-aa2b-5c97cab457f4
+
+{
+  "avatarImageId": "47c8c104-eef4-42ac-b3a5-a2a06513e405",
+  "avatarUrl": "http://127.0.0.1:9000/adera-media/avatars/ff11b469-af24-4970-9ecd-8fed609a1bc7/47c8c104-eef4-42ac-b3a5-a2a06513e405.jpg?X-Amz-Algorithm=AWS4-HMAC-SHA256&amp;X-Amz-Date=20261025T054619Z&amp;X-Amz-SignedHeaders=host&amp;X-Amz-Credential=&lt;masked&gt;&amp;X-Amz-Expires=3600&amp;X-Amz-Signature=&lt;masked&gt;",
+  "...": "other profile fields as in GET /me"
+}</code></pre><p class="masked">Values masked: the credential and signature inside the signed URL.</p>
+<h4>Example: not an image</h4>
+<pre><code>curl -s -X POST "$GATEWAY/api/v1/me/avatar" \
+  -H "Authorization: Bearer $TOKEN" -F "file=@notes.html;type=image/png"</code></pre>
+<pre class="out"><code>HTTP/1.1 400 Bad Request
+Content-Type: application/json
+X-RateLimit-Limit: 20
+X-RateLimit-Remaining: 17
+X-Request-Id: b09ac676-1106-4d69-a9f0-1b87cb10c4fb
+
+{
+  "error": "validation_failed",
+  "fields": {
+    "file": "not a supported image (use JPEG, PNG, GIF or BMP)"
+  }
+}</code></pre>
+<h4>Example: file too large (7 MB)</h4>
+<pre class="out"><code>HTTP/1.1 413 Content Too Large
+Content-Type: application/json
+X-RateLimit-Limit: 20
+X-RateLimit-Remaining: 16
+X-Request-Id: 9665e1d9-6141-482b-9cbf-0291ab3d1a23
+
+{
+  "error": "file_too_large"
+}</code></pre>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th>Error code</th><th>When it happens</th></tr></thead><tbody><tr><td><strong>400</strong></td><td><code>validation_failed</code></td><td><code>fields.file</code>: no part named <code>file</code> ("a file is required (multipart field 'file')"); not a decodable image ("not a supported image (use JPEG, PNG, GIF or BMP)"); dimensions too large; corrupt image.</td></tr><tr><td><strong>413</strong></td><td><code>file_too_large</code></td><td>Upload above 5 MB (the servlet limit is 6 MB per file so our own message wins up to that point; larger requests are cut off by the container and may close the connection right after the status line: handle that in the client).</td></tr><tr><td><strong>415</strong></td><td>(Spring default JSON, no <code>error</code> code)</td><td>The request is not <code>multipart/form-data</code>. This is the framework's default error body (<code>timestamp, status, error, path</code>), not the Adera error shape.</td></tr><tr><td><strong>401</strong></td><td><code>(empty body)</code></td><td>Missing, expired, revoked or malformed session token. Produced by the gateway's forward-auth step (user-service <code>/internal/auth/verify</code> answers 401, the body is empty). A session of an account that has an authenticator app but only completed the first step (<code>aal1</code>) is also a 401 here.</td></tr><tr><td><strong>429</strong></td><td><code>(HTML page)</code></td><td>Gateway rate limit exceeded. The body is APISIX's HTML page, not JSON; the response carries <code>X-RateLimit-*</code> headers (see <a href="08f-operational.html#gateway-behaviour">8f</a>).</td></tr><tr><td><strong>503</strong></td><td><code>identity_service_unavailable</code></td><td>Kratos could not be reached while the gateway asked who the token belongs to (forward-auth is sent to user-service, which answers 503 instead of a misleading 401).</td></tr></tbody></table></div>
+<h4>How to use it</h4><ul><li>The signed URL is built against <code>STORAGE_PUBLIC_ENDPOINT</code> (dev: <code>http://127.0.0.1:9000</code>); the host is part of the signature, so it must be an address the phone can reach.</li><li>An unsigned URL to the same object returns 403: the bucket is not public.</li></ul>
+</div></details>
+<details class="endpoint" id="ep-user-delete-avatar">
+<summary><span class="method m-delete">DELETE</span><span class="path">/api/v1/me/avatar</span><span class="sum">Remove my avatar</span></summary>
+<div class="body"><dl class="meta">
+<dt>Audience</dt><dd>signed-in end user (the Flutter app)</dd>
+<dt>Client path</dt><dd><code>/api/v1/me/avatar</code> (through the gateway, base <code>$GATEWAY</code>)</dd>
+<dt>Internal path</dt><dd>same path on the service (the gateway does not rewrite it)</dd>
+<dt>Auth</dt><dd><code>Authorization: Bearer $TOKEN</code>, where <code>$TOKEN</code> is the Kratos <code>session_token</code> (see <a href="08e-kratos-flows.html">8e</a>). The gateway validates it through forward-auth before the request reaches the service.</dd>
+<dt>Rate limit</dt><dd>20 per 60 s per client IP (gateway route <code>me-avatar</code>); over the limit the gateway answers <code>429</code></dd>
+<dt>Implemented in</dt><dd><code>services/user-service/src/main/java/app/adera/user/profile/ProfileController.java#removeAvatar</code></dd>
+</dl>
+<h4>Purpose</h4><p>Deletes the stored image and clears <code>avatarImageId</code>/<code>avatarUrl</code>. Idempotent. Shares the avatar route's stricter limit.</p>
+<h4>Request parameters</h4><p>None.</p>
+<h4>Example request</h4>
+<pre><code>curl -s -X DELETE "$GATEWAY/api/v1/me/avatar" \
+  -H "Authorization: Bearer $TOKEN"</code></pre>
+<pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+X-RateLimit-Limit: 20
+X-RateLimit-Remaining: 14
+X-Request-Id: 7d9a0977-16f4-47ca-87bd-b218ac7ffffd
+
+{
+  "avatarImageId": null,
+  "avatarUrl": null,
+  "...": "other profile fields"
+}</code></pre>
+<h4>Example: gateway rate limit (21st call within 60 s)</h4>
+<pre class="out"><code>HTTP/1.1 429 Too Many Requests
+Content-Type: text/html; charset=utf-8
+X-RateLimit-Limit: 20
+X-RateLimit-Remaining: 0
+X-Request-Id: 9332c8ee-ae40-44a8-b0f6-35af688fa9ac
+
+&lt;html&gt;
+&lt;head&gt;&lt;title&gt;429 Too Many Requests&lt;/title&gt;&lt;/head&gt;
+&lt;body&gt;
+&lt;center&gt;&lt;h1&gt;429 Too Many Requests&lt;/h1&gt;&lt;/center&gt;
+&lt;hr&gt;&lt;center&gt;openresty&lt;/center&gt;
+&lt;p&gt;&lt;em&gt;Powered by &lt;a href="https://apisix.apache.org/"&gt;APISIX&lt;/a&gt;.&lt;/em&gt;&lt;/p&gt;&lt;/body&gt;
+&lt;/html&gt;</code></pre>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th>Error code</th><th>When it happens</th></tr></thead><tbody><tr><td><strong>429</strong></td><td><code>(HTML page)</code></td><td>More than 20 calls to any avatar method in 60 s from the same IP.</td></tr></tbody></table></div>
+</div></details>
+<details class="endpoint" id="ep-user-put-devices">
+<summary><span class="method m-put">PUT</span><span class="path">/api/v1/me/devices</span><span class="sum">Register or refresh a push token</span></summary>
+<div class="body"><dl class="meta">
+<dt>Audience</dt><dd>signed-in end user (the Flutter app)</dd>
+<dt>Client path</dt><dd><code>/api/v1/me/devices</code> (through the gateway, base <code>$GATEWAY</code>)</dd>
+<dt>Internal path</dt><dd>same path on the service (the gateway does not rewrite it)</dd>
+<dt>Auth</dt><dd><code>Authorization: Bearer $TOKEN</code>, where <code>$TOKEN</code> is the Kratos <code>session_token</code> (see <a href="08e-kratos-flows.html">8e</a>). The gateway validates it through forward-auth before the request reaches the service.</dd>
+<dt>Rate limit</dt><dd>300 per 60 s per client IP (gateway route <code>me</code>); over the limit the gateway answers <code>429</code></dd>
+<dt>Implemented in</dt><dd><code>services/user-service/src/main/java/app/adera/user/device/DeviceController.java#register, DeviceService.java, DeviceDtos.java</code></dd>
+</dl>
+<h4>Purpose</h4><p>Call right after login and whenever the Firebase SDK rotates the token. Idempotent. Rules: an FCM token is unique, so registering a token that already exists moves it to the current user and re-activates it (one phone, two accounts over time). When <code>installationId</code> is given, a rotated token <strong>replaces</strong> the old token of that installation. The token itself is never echoed back.</p>
+<h4>Request parameters</h4><div class="table-wrap"><table><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why it exists</th></tr></thead><tbody><tr><td><code>fcmToken</code></td><td>body</td><td>string</td><td>yes</td><td>not blank, max 4096 chars</td><td>The Firebase Cloud Messaging token used to push to this phone.</td></tr><tr><td><code>platform</code></td><td>body</td><td>enum</td><td>yes</td><td>ANDROID, IOS or WEB</td><td>Selects the push channel and lets us show per-platform info.</td></tr><tr><td><code>installationId</code></td><td>body</td><td>string</td><td>no</td><td>max 64 chars; a stable id the app generates once per install</td><td>Lets a rotated token <em>replace</em> the old one instead of piling up dead tokens.</td></tr><tr><td><code>appVersion</code></td><td>body</td><td>string</td><td>no</td><td>max 32</td><td>Support and rollout information.</td></tr><tr><td><code>osVersion</code></td><td>body</td><td>string</td><td>no</td><td>max 32</td><td>Support information.</td></tr><tr><td><code>deviceName</code></td><td>body</td><td>string</td><td>no</td><td>max 100</td><td>Shown in a future "your devices" list.</td></tr><tr><td><code>locale</code></td><td>body</td><td>string</td><td>no</td><td>max 16, e.g. <code>am-ET</code></td><td>Language of push text for this device.</td></tr></tbody></table></div>
+<h4>Example request</h4>
+<pre><code>curl -s -X PUT "$GATEWAY/api/v1/me/devices" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"fcmToken": "fcm-6675dcc2a9c04862984b2995", "platform": "ANDROID", "installationId": "inst-ff11b469", "appVersion": "1.0.3", "osVersion": "14", "deviceName": "Pixel 7", "locale": "am-ET"}'</code></pre>
+<pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+X-RateLimit-Limit: 300
+X-RateLimit-Remaining: 287
+X-Request-Id: abcab407-759e-47d1-9dba-59c5220e0612
+
+{
+  "id": "dd5e8868-8867-46a7-be48-55e85929627a",
+  "installationId": "inst-ff11b469",
+  "platform": "ANDROID",
+  "appVersion": "1.0.3",
+  "osVersion": "14",
+  "deviceName": "Pixel 7",
+  "locale": "am-ET",
+  "active": true,
+  "createdAt": "2026-10-25T05:46:19.929159345Z",
+  "lastSeenAt": "2026-10-25T05:46:19.929159345Z"
+}</code></pre><p class="masked">The token value in the request is a throwaway test string.</p>
+<h4>Example: invalid body</h4>
+<pre><code>curl -s -X PUT "$GATEWAY/api/v1/me/devices" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"fcmToken": "", "platform": "WINDOWS"}'</code></pre>
+<pre class="out"><code>HTTP/1.1 400 Bad Request
+Content-Type: application/json
+X-RateLimit-Limit: 300
+X-RateLimit-Remaining: 285
+X-Request-Id: 64f0b435-8d78-4aeb-821f-ca3cb1cd832a
+
+{
+  "error": "invalid_json"
+}</code></pre>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th>Error code</th><th>When it happens</th></tr></thead><tbody><tr><td><strong>400</strong></td><td><code>invalid_json</code></td><td>Not valid JSON, or a value that cannot be parsed into the request type, such as an unknown <code>platform</code> enum value (the parser rejects it before field validation runs).</td></tr><tr><td><strong>400</strong></td><td><code>validation_failed</code></td><td>Blank <code>fcmToken</code>, values longer than the limits (<code>fields</code> names each).</td></tr><tr><td><strong>401</strong></td><td><code>(empty body)</code></td><td>Missing, expired, revoked or malformed session token. Produced by the gateway's forward-auth step (user-service <code>/internal/auth/verify</code> answers 401, the body is empty). A session of an account that has an authenticator app but only completed the first step (<code>aal1</code>) is also a 401 here.</td></tr><tr><td><strong>429</strong></td><td><code>(HTML page)</code></td><td>Gateway rate limit exceeded. The body is APISIX's HTML page, not JSON; the response carries <code>X-RateLimit-*</code> headers (see <a href="08f-operational.html#gateway-behaviour">8f</a>).</td></tr><tr><td><strong>503</strong></td><td><code>identity_service_unavailable</code></td><td>Kratos could not be reached while the gateway asked who the token belongs to (forward-auth is sent to user-service, which answers 503 instead of a misleading 401).</td></tr></tbody></table></div>
+<h4>How to use it</h4><ul><li>Push sending is not built yet (no Firebase key): tokens are stored so that, once FCM is on, notifications for the user reach every active device.</li><li>Sign out with <code>POST /api/v1/me/logout</code>, which removes the token for you.</li></ul>
+</div></details>
+<details class="endpoint" id="ep-user-get-devices">
+<summary><span class="method m-get">GET</span><span class="path">/api/v1/me/devices</span><span class="sum">List my active devices</span></summary>
+<div class="body"><dl class="meta">
+<dt>Audience</dt><dd>signed-in end user (the Flutter app)</dd>
+<dt>Client path</dt><dd><code>/api/v1/me/devices</code> (through the gateway, base <code>$GATEWAY</code>)</dd>
+<dt>Internal path</dt><dd>same path on the service (the gateway does not rewrite it)</dd>
+<dt>Auth</dt><dd><code>Authorization: Bearer $TOKEN</code>, where <code>$TOKEN</code> is the Kratos <code>session_token</code> (see <a href="08e-kratos-flows.html">8e</a>). The gateway validates it through forward-auth before the request reaches the service.</dd>
+<dt>Rate limit</dt><dd>300 per 60 s per client IP (gateway route <code>me</code>); over the limit the gateway answers <code>429</code></dd>
+<dt>Implemented in</dt><dd><code>services/user-service/src/main/java/app/adera/user/device/DeviceController.java#list</code></dd>
+</dl>
+<h4>Purpose</h4><p>Lists the user's active devices, most recently seen first. The FCM token is deliberately not part of the answer.</p>
+<h4>Request parameters</h4><p>None.</p>
+<h4>Example request</h4>
+<pre><code>curl -s "$GATEWAY/api/v1/me/devices" \
+  -H "Authorization: Bearer $TOKEN"</code></pre>
+<pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+X-RateLimit-Limit: 300
+X-RateLimit-Remaining: 284
+X-Request-Id: 9238c080-3944-4521-a6aa-2a542117a6cd
+
+[
+  {
+    "id": "dd5e8868-8867-46a7-be48-55e85929627a",
+    "installationId": "inst-ff11b469",
+    "platform": "ANDROID",
+    "appVersion": "1.0.3",
+    "osVersion": "14",
+    "deviceName": "Pixel 7",
+    "locale": "am-ET",
+    "active": true,
+    "createdAt": "2026-10-25T05:46:19.929159Z",
+    "lastSeenAt": "2026-10-25T05:46:20.019864Z"
+  }
+]</code></pre>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th>Error code</th><th>When it happens</th></tr></thead><tbody><tr><td><strong>401</strong></td><td><code>(empty body)</code></td><td>Missing, expired, revoked or malformed session token. Produced by the gateway's forward-auth step (user-service <code>/internal/auth/verify</code> answers 401, the body is empty). A session of an account that has an authenticator app but only completed the first step (<code>aal1</code>) is also a 401 here.</td></tr><tr><td><strong>429</strong></td><td><code>(HTML page)</code></td><td>Gateway rate limit exceeded. The body is APISIX's HTML page, not JSON; the response carries <code>X-RateLimit-*</code> headers (see <a href="08f-operational.html#gateway-behaviour">8f</a>).</td></tr><tr><td><strong>503</strong></td><td><code>identity_service_unavailable</code></td><td>Kratos could not be reached while the gateway asked who the token belongs to (forward-auth is sent to user-service, which answers 503 instead of a misleading 401).</td></tr></tbody></table></div>
+</div></details>
+<details class="endpoint" id="ep-user-delete-devices">
+<summary><span class="method m-delete">DELETE</span><span class="path">/api/v1/me/devices</span><span class="sum">Remove a device</span></summary>
+<div class="body"><dl class="meta">
+<dt>Audience</dt><dd>signed-in end user (the Flutter app)</dd>
+<dt>Client path</dt><dd><code>/api/v1/me/devices</code> (through the gateway, base <code>$GATEWAY</code>)</dd>
+<dt>Internal path</dt><dd>same path on the service (the gateway does not rewrite it)</dd>
+<dt>Auth</dt><dd><code>Authorization: Bearer $TOKEN</code>, where <code>$TOKEN</code> is the Kratos <code>session_token</code> (see <a href="08e-kratos-flows.html">8e</a>). The gateway validates it through forward-auth before the request reaches the service.</dd>
+<dt>Rate limit</dt><dd>300 per 60 s per client IP (gateway route <code>me</code>); over the limit the gateway answers <code>429</code></dd>
+<dt>Implemented in</dt><dd><code>services/user-service/src/main/java/app/adera/user/device/DeviceController.java#remove</code></dd>
+</dl>
+<h4>Purpose</h4><p>Removes the device row identified by token and/or installation id. Removing something that is not there is not an error (<code>removed: 0</code>), so the app can call it blindly.</p>
+<h4>Request parameters</h4><div class="table-wrap"><table><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why it exists</th></tr></thead><tbody><tr><td><code>fcmToken</code></td><td>body</td><td>string</td><td>one of the two</td><td>max 4096</td><td>Remove by token.</td></tr><tr><td><code>installationId</code></td><td>body</td><td>string</td><td>one of the two</td><td>max 64</td><td>Remove by installation (when the token is no longer known).</td></tr></tbody></table></div>
+<h4>Example request (nothing matches)</h4>
+<pre><code>curl -s -X DELETE "$GATEWAY/api/v1/me/devices" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"installationId": "nope"}'</code></pre>
+<pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+X-RateLimit-Limit: 300
+X-RateLimit-Remaining: 282
+X-Request-Id: 572e675a-0e58-4a2b-80aa-c70d381d199c
+
+{
+  "removed": 0
+}</code></pre>
+<h4>Example: neither field given</h4>
+<pre><code>curl -s -X DELETE "$GATEWAY/api/v1/me/devices" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{}'</code></pre>
+<pre class="out"><code>HTTP/1.1 400 Bad Request
+Content-Type: application/json
+X-RateLimit-Limit: 300
+X-RateLimit-Remaining: 283
+X-Request-Id: 05f73f3f-2cc9-42be-be48-d67c22b34532
+
+{
+  "error": "validation_failed",
+  "fields": {
+    "fcmToken": "give fcmToken or installationId"
+  }
+}</code></pre>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th>Error code</th><th>When it happens</th></tr></thead><tbody><tr><td><strong>400</strong></td><td><code>validation_failed</code></td><td>Neither <code>fcmToken</code> nor <code>installationId</code> given (reported on <code>fields.fcmToken</code>).</td></tr><tr><td><strong>400</strong></td><td><code>invalid_json</code></td><td>No JSON body at all: the body is required (send <code>{}</code> to get the validation message). From code, not captured.</td></tr><tr><td><strong>401</strong></td><td><code>(empty body)</code></td><td>Missing, expired, revoked or malformed session token. Produced by the gateway's forward-auth step (user-service <code>/internal/auth/verify</code> answers 401, the body is empty). A session of an account that has an authenticator app but only completed the first step (<code>aal1</code>) is also a 401 here.</td></tr><tr><td><strong>429</strong></td><td><code>(HTML page)</code></td><td>Gateway rate limit exceeded. The body is APISIX's HTML page, not JSON; the response carries <code>X-RateLimit-*</code> headers (see <a href="08f-operational.html#gateway-behaviour">8f</a>).</td></tr><tr><td><strong>503</strong></td><td><code>identity_service_unavailable</code></td><td>Kratos could not be reached while the gateway asked who the token belongs to (forward-auth is sent to user-service, which answers 503 instead of a misleading 401).</td></tr></tbody></table></div>
+<h4>How to use it</h4><ul><li>A DELETE with a JSON body is unusual; some HTTP libraries drop the body of DELETE. If yours does, use <code>POST /api/v1/me/logout</code> (which accepts the same fields) or a client that allows it.</li></ul>
+</div></details>
+<details class="endpoint" id="ep-user-post-logout">
+<summary><span class="method m-post">POST</span><span class="path">/api/v1/me/logout</span><span class="sum">Sign out this device (push token and session)</span></summary>
+<div class="body"><dl class="meta">
+<dt>Audience</dt><dd>signed-in end user (the Flutter app)</dd>
+<dt>Client path</dt><dd><code>/api/v1/me/logout</code> (through the gateway, base <code>$GATEWAY</code>)</dd>
+<dt>Internal path</dt><dd>same path on the service (the gateway does not rewrite it)</dd>
+<dt>Auth</dt><dd><code>Authorization: Bearer $TOKEN</code>, where <code>$TOKEN</code> is the Kratos <code>session_token</code> (see <a href="08e-kratos-flows.html">8e</a>). The gateway validates it through forward-auth before the request reaches the service.</dd>
+<dt>Rate limit</dt><dd>300 per 60 s per client IP (gateway route <code>me</code>); over the limit the gateway answers <code>429</code></dd>
+<dt>Implemented in</dt><dd><code>services/user-service/src/main/java/app/adera/user/auth/LogoutController.java</code></dd>
+</dl>
+<h4>Purpose</h4><p>One call that fully signs a device out: removes its push token (so the next person on the phone does not get this user's notifications) and revokes the Kratos session behind the bearer token. Kratos has no logout hook for native apps, which is why this lives in our service instead of being automatic. The body is optional; if it names a device, that device is removed first.</p>
+<h4>Request parameters</h4><div class="table-wrap"><table><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why it exists</th></tr></thead><tbody><tr><td><code>fcmToken</code></td><td>body</td><td>string</td><td>no</td><td>max 4096</td><td>Device to remove before the session is revoked.</td></tr><tr><td><code>installationId</code></td><td>body</td><td>string</td><td>no</td><td>max 64</td><td>Same, by installation.</td></tr><tr><td><code>Authorization</code></td><td>header</td><td>string</td><td>yes</td><td>must be <code>Bearer &lt;token&gt;</code>; a cookie alone is not enough</td><td>The endpoint needs the actual token to revoke it.</td></tr></tbody></table></div>
+<h4>Example request</h4>
+<pre><code>curl -s -X POST "$GATEWAY/api/v1/me/logout" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"fcmToken": "fcm-6675dcc2a9c04862984b2995", "installationId": "inst-ff11b469"}'</code></pre>
+<pre class="out"><code>HTTP/1.1 204 No Content
+X-RateLimit-Limit: 300
+X-RateLimit-Remaining: 277
+X-Request-Id: 06102056-0c2e-4808-9db9-2228e8882813</code></pre>
+<h4>The same token afterwards</h4>
+<pre><code>curl -s "$GATEWAY/api/v1/me" \
+  -H "Authorization: Bearer $TOKEN"</code></pre>
+<pre class="out"><code>HTTP/1.1 401 Unauthorized
+Content-Type: text/plain; charset=utf-8
+X-Request-Id: 47fcb5ea-a36f-496c-9e93-93efc0939797</code></pre>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th>Error code</th><th>When it happens</th></tr></thead><tbody><tr><td><strong>400</strong></td><td><code>validation_failed</code></td><td>No bearer token in the <code>Authorization</code> header (<code>fields.Authorization</code>); possible only when the session was proven by a cookie. From code, not captured.</td></tr><tr><td><strong>503</strong></td><td><code>identity_service_unavailable</code></td><td>Kratos answered with a server error while revoking. The push token may already have been removed.</td></tr><tr><td><strong>401</strong></td><td><code>(empty body)</code></td><td>Missing, expired, revoked or malformed session token. Produced by the gateway's forward-auth step (user-service <code>/internal/auth/verify</code> answers 401, the body is empty). A session of an account that has an authenticator app but only completed the first step (<code>aal1</code>) is also a 401 here.</td></tr><tr><td><strong>429</strong></td><td><code>(HTML page)</code></td><td>Gateway rate limit exceeded. The body is APISIX's HTML page, not JSON; the response carries <code>X-RateLimit-*</code> headers (see <a href="08f-operational.html#gateway-behaviour">8f</a>).</td></tr><tr><td><strong>503</strong></td><td><code>identity_service_unavailable</code></td><td>Kratos could not be reached while the gateway asked who the token belongs to (forward-auth is sent to user-service, which answers 503 instead of a misleading 401).</td></tr></tbody></table></div>
+<h4>How to use it</h4><ul><li>Revoking an already-invalid token counts as logged out, so repeating the call is safe. After logout the same token is rejected (<code>401</code>) everywhere.</li><li>To revoke other sessions of the account use the Kratos session endpoints (<a href="08e-kratos-flows.html#sessions">8e</a>).</li></ul>
+</div></details>
+<details class="endpoint" id="ep-user-get-prefs">
+<summary><span class="method m-get">GET</span><span class="path">/api/v1/me/apps/{appId}/preferences</span><span class="sum">Read my mute switches for one mini app</span></summary>
+<div class="body"><dl class="meta">
+<dt>Audience</dt><dd>signed-in end user (the Flutter app)</dd>
+<dt>Client path</dt><dd><code>/api/v1/me/apps/{appId}/preferences</code> (through the gateway, base <code>$GATEWAY</code>)</dd>
+<dt>Internal path</dt><dd>same path on the service (the gateway does not rewrite it)</dd>
+<dt>Auth</dt><dd><code>Authorization: Bearer $TOKEN</code>, where <code>$TOKEN</code> is the Kratos <code>session_token</code> (see <a href="08e-kratos-flows.html">8e</a>). The gateway validates it through forward-auth before the request reaches the service.</dd>
+<dt>Rate limit</dt><dd>300 per 60 s per client IP (gateway route <code>me</code>); over the limit the gateway answers <code>429</code></dd>
+<dt>Implemented in</dt><dd><code>services/user-service/src/main/java/app/adera/user/alias/PreferenceController.java#get, PreferenceService.java</code></dd>
+</dl>
+<h4>Purpose</h4><p>The "3-dot menu" switches of a mini app window: mute in-app messages, SMS or email from that app. Without a stored row everything is <code>false</code>. Muted notifications are accepted from the partner but not delivered (the partner sees <code>SUPPRESSED</code>, never the reason).</p>
+<h4>Request parameters</h4><div class="table-wrap"><table><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why it exists</th></tr></thead><tbody><tr><td><code>appId</code></td><td>path</td><td>UUID</td><td>yes</td><td>the mini app's id (not the slug)</td><td>Preferences are per user and per app. The id is not checked against the registry: any well-formed UUID answers with the defaults.</td></tr></tbody></table></div>
+<h4>Example request</h4>
+<pre><code>curl -s "$GATEWAY/api/v1/me/apps/$APP_ID/preferences" \
+  -H "Authorization: Bearer $TOKEN"</code></pre>
+<pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+X-RateLimit-Limit: 300
+X-RateLimit-Remaining: 281
+X-Request-Id: 6892aa62-d319-49e6-b33f-dac252d66fc3
+
+{
+  "muteInApp": false,
+  "muteSms": false,
+  "muteEmail": false
+}</code></pre>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th>Error code</th><th>When it happens</th></tr></thead><tbody><tr><td><strong>400</strong></td><td><code>(Spring default JSON)</code></td><td><code>appId</code> is not a UUID (<code>{timestamp,status,error,path}</code> body, not the Adera error shape).</td></tr><tr><td><strong>401</strong></td><td><code>(empty body)</code></td><td>Missing, expired, revoked or malformed session token. Produced by the gateway's forward-auth step (user-service <code>/internal/auth/verify</code> answers 401, the body is empty). A session of an account that has an authenticator app but only completed the first step (<code>aal1</code>) is also a 401 here.</td></tr><tr><td><strong>429</strong></td><td><code>(HTML page)</code></td><td>Gateway rate limit exceeded. The body is APISIX's HTML page, not JSON; the response carries <code>X-RateLimit-*</code> headers (see <a href="08f-operational.html#gateway-behaviour">8f</a>).</td></tr><tr><td><strong>503</strong></td><td><code>identity_service_unavailable</code></td><td>Kratos could not be reached while the gateway asked who the token belongs to (forward-auth is sent to user-service, which answers 503 instead of a misleading 401).</td></tr></tbody></table></div>
+</div></details>
+<details class="endpoint" id="ep-user-put-prefs">
+<summary><span class="method m-put">PUT</span><span class="path">/api/v1/me/apps/{appId}/preferences</span><span class="sum">Change my mute switches for one mini app</span></summary>
+<div class="body"><dl class="meta">
+<dt>Audience</dt><dd>signed-in end user (the Flutter app)</dd>
+<dt>Client path</dt><dd><code>/api/v1/me/apps/{appId}/preferences</code> (through the gateway, base <code>$GATEWAY</code>)</dd>
+<dt>Internal path</dt><dd>same path on the service (the gateway does not rewrite it)</dd>
+<dt>Auth</dt><dd><code>Authorization: Bearer $TOKEN</code>, where <code>$TOKEN</code> is the Kratos <code>session_token</code> (see <a href="08e-kratos-flows.html">8e</a>). The gateway validates it through forward-auth before the request reaches the service.</dd>
+<dt>Rate limit</dt><dd>300 per 60 s per client IP (gateway route <code>me</code>); over the limit the gateway answers <code>429</code></dd>
+<dt>Implemented in</dt><dd><code>services/user-service/src/main/java/app/adera/user/alias/PreferenceController.java#update, PreferenceService.java</code></dd>
+</dl>
+<h4>Purpose</h4><p>Partial update despite the verb: only the switches you send change; the answer is the resulting full state. Stored in <code>app_notification_preference</code> (upsert).</p>
+<h4>Request parameters</h4><div class="table-wrap"><table><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why it exists</th></tr></thead><tbody><tr><td><code>appId</code></td><td>path</td><td>UUID</td><td>yes</td><td>mini app id</td><td>Which app the choice is for.</td></tr><tr><td><code>muteInApp</code></td><td>body</td><td>boolean</td><td>no</td><td>must be a JSON boolean</td><td>Do not put this app's messages in my inbox / push.</td></tr><tr><td><code>muteSms</code></td><td>body</td><td>boolean</td><td>no</td><td>boolean</td><td>No SMS from this app.</td></tr><tr><td><code>muteEmail</code></td><td>body</td><td>boolean</td><td>no</td><td>boolean</td><td>No email from this app.</td></tr></tbody></table></div>
+<h4>Example request</h4>
+<pre><code>curl -s -X PUT "$GATEWAY/api/v1/me/apps/$APP_ID/preferences" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"muteSms": true}'</code></pre>
+<pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+X-RateLimit-Limit: 300
+X-RateLimit-Remaining: 280
+X-Request-Id: 1a87700c-e7c6-4e07-8f13-a42e1d9b922a
+
+{
+  "muteInApp": false,
+  "muteSms": true,
+  "muteEmail": false
+}</code></pre>
+<h4>Example: wrong type and unknown key</h4>
+<pre><code>curl -s -X PUT "$GATEWAY/api/v1/me/apps/$APP_ID/preferences" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"muteSms": "yes", "shout": true}'</code></pre>
+<pre class="out"><code>HTTP/1.1 400 Bad Request
+Content-Type: application/json
+X-RateLimit-Limit: 300
+X-RateLimit-Remaining: 279
+X-Request-Id: 46a26360-a677-4a63-abda-75946f441e8d
+
+{
+  "error": "validation_failed",
+  "fields": {
+    "muteSms": "must be true or false"
+  }
+}</code></pre>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th>Error code</th><th>When it happens</th></tr></thead><tbody><tr><td><strong>400</strong></td><td><code>validation_failed</code></td><td>Unknown key (<code>"unknown field"</code>) or a non-boolean value (<code>"must be true or false"</code>); the first problem found is reported.</td></tr><tr><td><strong>400</strong></td><td><code>invalid_json</code></td><td>Not valid JSON.</td></tr><tr><td><strong>400</strong></td><td><code>(Spring default JSON)</code></td><td><code>appId</code> is not a UUID.</td></tr><tr><td><strong>401</strong></td><td><code>(empty body)</code></td><td>Missing, expired, revoked or malformed session token. Produced by the gateway's forward-auth step (user-service <code>/internal/auth/verify</code> answers 401, the body is empty). A session of an account that has an authenticator app but only completed the first step (<code>aal1</code>) is also a 401 here.</td></tr><tr><td><strong>429</strong></td><td><code>(HTML page)</code></td><td>Gateway rate limit exceeded. The body is APISIX's HTML page, not JSON; the response carries <code>X-RateLimit-*</code> headers (see <a href="08f-operational.html#gateway-behaviour">8f</a>).</td></tr><tr><td><strong>503</strong></td><td><code>identity_service_unavailable</code></td><td>Kratos could not be reached while the gateway asked who the token belongs to (forward-auth is sent to user-service, which answers 503 instead of a misleading 401).</td></tr></tbody></table></div>
+<h4>How to use it</h4><ul><li>The partner never learns about muting: its request returns <code>200</code> with status <code>SUPPRESSED</code> (<a href="08c-partner-api.html">8c</a>).</li></ul>
+</div></details>
+<details class="endpoint" id="ep-user-get-notifications">
+<summary><span class="method m-get">GET</span><span class="path">/api/v1/me/notifications</span><span class="sum">List my inbox (bell menu)</span></summary>
+<div class="body"><dl class="meta">
+<dt>Audience</dt><dd>signed-in end user (the Flutter app)</dd>
+<dt>Client path</dt><dd><code>/api/v1/me/notifications</code> (through the gateway, base <code>$GATEWAY</code>)</dd>
+<dt>Internal path</dt><dd>served by <strong>notification-service</strong> (gateway route <code>me-notifications</code>, not user-service)</dd>
+<dt>Auth</dt><dd><code>Authorization: Bearer $TOKEN</code>, where <code>$TOKEN</code> is the Kratos <code>session_token</code> (see <a href="08e-kratos-flows.html">8e</a>). The gateway validates it through forward-auth before the request reaches the service.</dd>
+<dt>Rate limit</dt><dd>300 per 60 s per client IP (gateway route <code>me-notifications</code>); over the limit the gateway answers <code>429</code></dd>
+<dt>Implemented in</dt><dd><code>services/notification-service/src/main/java/app/adera/notification/partner/inbox/InboxController.java#list</code></dd>
+</dl>
+<h4>Purpose</h4><p>The signed-in user's in-app notifications from mini apps, newest first. This is the inbox behind the bell icon; a push (when FCM is on) is only a nudge to open it.</p>
+<h4>Request parameters</h4><div class="table-wrap"><table><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why it exists</th></tr></thead><tbody><tr><td><code>unread</code></td><td>query</td><td>boolean</td><td>no</td><td>default <code>false</code>; <code>true</code> returns only unread items</td><td>Badge and "new" tab.</td></tr><tr><td><code>page</code></td><td>query</td><td>integer</td><td>no</td><td>default 0; negative values are treated as 0</td><td>Zero-based page number.</td></tr><tr><td><code>size</code></td><td>query</td><td>integer</td><td>no</td><td>default 20; clamped to 1-100</td><td>Page size.</td></tr></tbody></table></div>
+<h4>Example request</h4>
+<pre><code>curl -s "$GATEWAY/api/v1/me/notifications" \
+  -H "Authorization: Bearer $TOKEN"</code></pre>
+<pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+X-RateLimit-Limit: 300
+X-RateLimit-Remaining: 299
+X-Request-Id: 07c8f669-449d-4d8a-8063-f359c467b5a5
+
+[
+  {
+    "id": "69f7217d-f4f2-4f77-8578-89e3bcecc565",
+    "appId": "fc32bca2-89a9-4426-b834-aad34a3eebbe",
+    "title": "Hello Abebe",
+    "body": "Your ride is here",
+    "data": "{\"rideId\": \"102\"}",
+    "createdAt": "2026-10-25T05:46:13.509Z",
+    "readAt": null
+  },
+  {
+    "id": "e9103dbb-a43c-4f96-acfd-62d711cc2416",
+    "appId": "fc32bca2-89a9-4426-b834-aad34a3eebbe",
+    "title": "Hello Abebe",
+    "body": "Your ride is here",
+    "data": "{\"rideId\": \"101\"}",
+    "createdAt": "2026-10-25T05:46:13.423Z",
+    "readAt": null
+  }
+]</code></pre>
+<h4>Example: unread only, one per page</h4>
+<pre><code>curl -s "$GATEWAY/api/v1/me/notifications?unread=true&amp;page=0&amp;size=1" \
+  -H "Authorization: Bearer $TOKEN"</code></pre>
+<pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+X-RateLimit-Limit: 300
+X-RateLimit-Remaining: 298
+X-Request-Id: a6a0bd3b-f672-4637-8fc3-c976cb00907b
+
+[
+  {
+    "id": "69f7217d-f4f2-4f77-8578-89e3bcecc565",
+    "appId": "fc32bca2-89a9-4426-b834-aad34a3eebbe",
+    "title": "Hello Abebe",
+    "body": "Your ride is here",
+    "data": "{\"rideId\": \"102\"}",
+    "createdAt": "2026-10-25T05:46:13.509Z",
+    "readAt": null
+  }
+]</code></pre>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th>Error code</th><th>When it happens</th></tr></thead><tbody><tr><td><strong>400</strong></td><td><code>invalid_request</code></td><td>A parameter cannot be parsed (e.g. <code>size=abc</code>).</td></tr><tr><td><strong>401</strong></td><td><code>(empty body)</code></td><td>Missing, expired, revoked or malformed session token. Produced by the gateway's forward-auth step (user-service <code>/internal/auth/verify</code> answers 401, the body is empty). A session of an account that has an authenticator app but only completed the first step (<code>aal1</code>) is also a 401 here.</td></tr><tr><td><strong>429</strong></td><td><code>(HTML page)</code></td><td>Gateway rate limit exceeded. The body is APISIX's HTML page, not JSON; the response carries <code>X-RateLimit-*</code> headers (see <a href="08f-operational.html#gateway-behaviour">8f</a>).</td></tr><tr><td><strong>503</strong></td><td><code>identity_service_unavailable</code></td><td>Kratos could not be reached while the gateway asked who the token belongs to (forward-auth is sent to user-service, which answers 503 instead of a misleading 401).</td></tr></tbody></table></div>
+<h4>How to use it</h4><ul><li><code>data</code> is the partner's <code>data</code> object <strong>serialized as a string</strong> (the jsonb column is returned as text); parse it in the app.</li><li>The answer is a bare JSON array: there is no total count. Page until you get fewer than <code>size</code> items.</li><li>Items are written by notification-service when a partner sends an <code>IN_APP</code> template (<a href="08c-partner-api.html">8c</a>).</li></ul>
+</div></details>
+<details class="endpoint" id="ep-user-get-unread">
+<summary><span class="method m-get">GET</span><span class="path">/api/v1/me/notifications/unread-count</span><span class="sum">Count my unread notifications</span></summary>
+<div class="body"><dl class="meta">
+<dt>Audience</dt><dd>signed-in end user (the Flutter app)</dd>
+<dt>Client path</dt><dd><code>/api/v1/me/notifications/unread-count</code> (through the gateway, base <code>$GATEWAY</code>)</dd>
+<dt>Internal path</dt><dd>served by <strong>notification-service</strong> (gateway route <code>me-notifications</code>, not user-service)</dd>
+<dt>Auth</dt><dd><code>Authorization: Bearer $TOKEN</code>, where <code>$TOKEN</code> is the Kratos <code>session_token</code> (see <a href="08e-kratos-flows.html">8e</a>). The gateway validates it through forward-auth before the request reaches the service.</dd>
+<dt>Rate limit</dt><dd>300 per 60 s per client IP (gateway route <code>me-notifications</code>); over the limit the gateway answers <code>429</code></dd>
+<dt>Implemented in</dt><dd><code>services/notification-service/src/main/java/app/adera/notification/partner/inbox/InboxController.java#unreadCount</code></dd>
+</dl>
+<h4>Purpose</h4><p>Cheap counter for the bell badge.</p>
+<h4>Request parameters</h4><p>None.</p>
+<h4>Example request</h4>
+<pre><code>curl -s "$GATEWAY/api/v1/me/notifications/unread-count" \
+  -H "Authorization: Bearer $TOKEN"</code></pre>
+<pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+X-RateLimit-Limit: 300
+X-RateLimit-Remaining: 297
+X-Request-Id: 9ccfc3ca-28af-4274-be1d-4d94cd7d754b
+
+{
+  "count": 2
+}</code></pre>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th>Error code</th><th>When it happens</th></tr></thead><tbody><tr><td><strong>401</strong></td><td><code>(empty body)</code></td><td>Missing, expired, revoked or malformed session token. Produced by the gateway's forward-auth step (user-service <code>/internal/auth/verify</code> answers 401, the body is empty). A session of an account that has an authenticator app but only completed the first step (<code>aal1</code>) is also a 401 here.</td></tr><tr><td><strong>429</strong></td><td><code>(HTML page)</code></td><td>Gateway rate limit exceeded. The body is APISIX's HTML page, not JSON; the response carries <code>X-RateLimit-*</code> headers (see <a href="08f-operational.html#gateway-behaviour">8f</a>).</td></tr><tr><td><strong>503</strong></td><td><code>identity_service_unavailable</code></td><td>Kratos could not be reached while the gateway asked who the token belongs to (forward-auth is sent to user-service, which answers 503 instead of a misleading 401).</td></tr></tbody></table></div>
+</div></details>
+<details class="endpoint" id="ep-user-put-read">
+<summary><span class="method m-put">PUT</span><span class="path">/api/v1/me/notifications/{id}/read</span><span class="sum">Mark one notification as read</span></summary>
+<div class="body"><dl class="meta">
+<dt>Audience</dt><dd>signed-in end user (the Flutter app)</dd>
+<dt>Client path</dt><dd><code>/api/v1/me/notifications/{id}/read</code> (through the gateway, base <code>$GATEWAY</code>)</dd>
+<dt>Internal path</dt><dd>served by <strong>notification-service</strong> (gateway route <code>me-notifications</code>, not user-service)</dd>
+<dt>Auth</dt><dd><code>Authorization: Bearer $TOKEN</code>, where <code>$TOKEN</code> is the Kratos <code>session_token</code> (see <a href="08e-kratos-flows.html">8e</a>). The gateway validates it through forward-auth before the request reaches the service.</dd>
+<dt>Rate limit</dt><dd>300 per 60 s per client IP (gateway route <code>me-notifications</code>); over the limit the gateway answers <code>429</code></dd>
+<dt>Implemented in</dt><dd><code>services/notification-service/src/main/java/app/adera/notification/partner/inbox/InboxController.java#markRead</code></dd>
+</dl>
+<h4>Purpose</h4><p>Idempotent: <code>read_at</code> is set once and never moved. You can only mark your own items; someone else's id looks like an unknown id.</p>
+<h4>Request parameters</h4><div class="table-wrap"><table><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why it exists</th></tr></thead><tbody><tr><td><code>id</code></td><td>path</td><td>UUID</td><td>yes</td><td>inbox item id from the list</td><td>Which item.</td></tr></tbody></table></div>
+<h4>Example request</h4>
+<pre><code>curl -s -X PUT "$GATEWAY/api/v1/me/notifications/$ITEM_ID/read" \
+  -H "Authorization: Bearer $TOKEN"</code></pre>
+<pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+X-RateLimit-Limit: 300
+X-RateLimit-Remaining: 295
+X-Request-Id: 3e1826c4-1822-4dc4-92a7-a6d875e3525c
+
+{
+  "read": true,
+  "id": "69f7217d-f4f2-4f77-8578-89e3bcecc565"
+}</code></pre>
+<h4>Example: unknown or foreign id</h4>
+<pre class="out"><code>HTTP/1.1 404 Not Found
+Content-Type: application/json
+X-RateLimit-Limit: 300
+X-RateLimit-Remaining: 294
+X-Request-Id: 95fa9b57-5147-48f8-97bc-b4c8ea57a987
+
+{
+  "error": "not_found"
+}</code></pre>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th>Error code</th><th>When it happens</th></tr></thead><tbody><tr><td><strong>404</strong></td><td><code>not_found</code></td><td>No item with this id belongs to the caller.</td></tr><tr><td><strong>400</strong></td><td><code>invalid_request</code></td><td><code>id</code> is not a UUID.</td></tr><tr><td><strong>401</strong></td><td><code>(empty body)</code></td><td>Missing, expired, revoked or malformed session token. Produced by the gateway's forward-auth step (user-service <code>/internal/auth/verify</code> answers 401, the body is empty). A session of an account that has an authenticator app but only completed the first step (<code>aal1</code>) is also a 401 here.</td></tr><tr><td><strong>429</strong></td><td><code>(HTML page)</code></td><td>Gateway rate limit exceeded. The body is APISIX's HTML page, not JSON; the response carries <code>X-RateLimit-*</code> headers (see <a href="08f-operational.html#gateway-behaviour">8f</a>).</td></tr><tr><td><strong>503</strong></td><td><code>identity_service_unavailable</code></td><td>Kratos could not be reached while the gateway asked who the token belongs to (forward-auth is sent to user-service, which answers 503 instead of a misleading 401).</td></tr></tbody></table></div>
+</div></details>
+<details class="endpoint" id="ep-user-put-read-all">
+<summary><span class="method m-put">PUT</span><span class="path">/api/v1/me/notifications/read-all</span><span class="sum">Mark all my notifications as read</span></summary>
+<div class="body"><dl class="meta">
+<dt>Audience</dt><dd>signed-in end user (the Flutter app)</dd>
+<dt>Client path</dt><dd><code>/api/v1/me/notifications/read-all</code> (through the gateway, base <code>$GATEWAY</code>)</dd>
+<dt>Internal path</dt><dd>served by <strong>notification-service</strong> (gateway route <code>me-notifications</code>, not user-service)</dd>
+<dt>Auth</dt><dd><code>Authorization: Bearer $TOKEN</code>, where <code>$TOKEN</code> is the Kratos <code>session_token</code> (see <a href="08e-kratos-flows.html">8e</a>). The gateway validates it through forward-auth before the request reaches the service.</dd>
+<dt>Rate limit</dt><dd>300 per 60 s per client IP (gateway route <code>me-notifications</code>); over the limit the gateway answers <code>429</code></dd>
+<dt>Implemented in</dt><dd><code>services/notification-service/src/main/java/app/adera/notification/partner/inbox/InboxController.java#markAllRead</code></dd>
+</dl>
+<h4>Purpose</h4><p>Marks every unread item of the caller as read and tells how many changed.</p>
+<h4>Request parameters</h4><p>None.</p>
+<h4>Example request</h4>
+<pre><code>curl -s -X PUT "$GATEWAY/api/v1/me/notifications/read-all" \
+  -H "Authorization: Bearer $TOKEN"</code></pre>
+<pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+X-RateLimit-Limit: 300
+X-RateLimit-Remaining: 292
+X-Request-Id: 940be2b3-464f-452a-ba4b-e86e01884eba
+
+{
+  "markedRead": 1
+}</code></pre><p class="masked">Called after one of the two items had already been marked read, hence 1.</p>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th>Error code</th><th>When it happens</th></tr></thead><tbody><tr><td><strong>401</strong></td><td><code>(empty body)</code></td><td>Missing, expired, revoked or malformed session token. Produced by the gateway's forward-auth step (user-service <code>/internal/auth/verify</code> answers 401, the body is empty). A session of an account that has an authenticator app but only completed the first step (<code>aal1</code>) is also a 401 here.</td></tr><tr><td><strong>429</strong></td><td><code>(HTML page)</code></td><td>Gateway rate limit exceeded. The body is APISIX's HTML page, not JSON; the response carries <code>X-RateLimit-*</code> headers (see <a href="08f-operational.html#gateway-behaviour">8f</a>).</td></tr><tr><td><strong>503</strong></td><td><code>identity_service_unavailable</code></td><td>Kratos could not be reached while the gateway asked who the token belongs to (forward-auth is sent to user-service, which answers 503 instead of a misleading 401).</td></tr></tbody></table></div>
+</div></details>
+<details class="endpoint" id="ep-apps-get-list">
+<summary><span class="method m-get">GET</span><span class="path">/api/v1/apps</span><span class="sum">List the mini apps I can open</span></summary>
+<div class="body"><dl class="meta">
+<dt>Audience</dt><dd>signed-in end user (the Flutter app)</dd>
+<dt>Client path</dt><dd><code>/api/v1/apps</code> (through the gateway, base <code>$GATEWAY</code>)</dd>
+<dt>Internal path</dt><dd>served by <strong>registry-service</strong> (gateway route <code>apps-catalog</code>, not user-service)</dd>
+<dt>Auth</dt><dd><code>Authorization: Bearer $TOKEN</code>, where <code>$TOKEN</code> is the Kratos <code>session_token</code> (see <a href="08e-kratos-flows.html">8e</a>). The gateway validates it through forward-auth before the request reaches the service.</dd>
+<dt>Rate limit</dt><dd>300 per 60 s per client IP (gateway route <code>apps-catalog</code>); over the limit the gateway answers <code>429</code></dd>
+<dt>Implemented in</dt><dd><code>services/registry-service/src/main/java/app/adera/registry/app/AppPublicController.java#list</code></dd>
+</dl>
+<h4>Purpose</h4><p>The catalog: every LIVE mini app, ordered by <code>priority</code> (lower first). Each entry carries what the user needs to decide to open it, including the list of permissions the app was granted and the plain-language reason staff recorded.</p>
+<h4>Request parameters</h4><div class="table-wrap"><table><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why it exists</th></tr></thead><tbody><tr><td><code>market</code></td><td>query</td><td>string</td><td>no</td><td>ET or US (case-insensitive); other values return an empty list</td><td>Show only apps available in the user's market.</td></tr></tbody></table></div>
+<h4>Example request</h4>
+<pre><code>curl -s "$GATEWAY/api/v1/apps" \
+  -H "Authorization: Bearer $TOKEN"</code></pre>
+<pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+X-RateLimit-Limit: 300
+X-RateLimit-Remaining: 299
+X-Request-Id: 2555d0fb-c1de-47d9-b472-79a0925a3962
+
+[
+  {
+    "id": "fc32bca2-89a9-4426-b834-aad34a3eebbe",
+    "slug": "docs-demo-2015",
+    "name": {
+      "am": "የሙከራ መተግበሪያ",
+      "en": "Docs Demo Ride"
+    },
+    "description": {
+      "en": "Demo app used to capture the documentation examples."
+    },
+    "logoUrl": "http://127.0.0.1:9000/adera-media/apps/fc32bca2-89a9-4426-b834-aad34a3eebbe/logo/6871b51d-38db-487d-9b3b-8fdb26a10f54.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&amp;X-Amz-Date=20261025T054621Z&amp;X-Amz-SignedHeaders=host&amp;X-Amz-Credential=&lt;masked&gt;&amp;X-Amz-Expires=3600&amp;X-Amz-Signature=&lt;masked&gt;",
+    "brandColor": "#0F9D58",
+    "categories": [
+      "travel"
+    ],
+    "markets": [
+      "ET"
+    ],
+    "publisher": {
+      "name": "Docs Demo Ltd",
+      "legalName": null,
+      "supportEmail": "support@example.com",
+      "supportPhone": null,
+      "website": "https://example.com"
+    },
+    "entryUrl": "https://example.com/app",
+    "ratingAvg": 0.0,
+    "ratingCount": 0,
+    "permissions": [
+      {
+        "capability": "location.coarse",
+        "description": "City-level location",
+        "reason": {
+          "en": "To show technicians near you"
+        }
+      },
+      {
+        "capability": "notify.inapp",
+        "description": "Send in-app notifications (inbox + push) to users",
+        "reason": {}
+      }
+    ]
+  }
+]</code></pre><p class="masked">Values masked: the credential and signature inside the signed logo URL. The app is a throwaway that was deleted afterwards.</p>
+<h4>Example: market filter with no matching app</h4>
+<pre><code>curl -s "$GATEWAY/api/v1/apps?market=US" \
+  -H "Authorization: Bearer $TOKEN"</code></pre>
+<pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+X-RateLimit-Limit: 300
+X-RateLimit-Remaining: 298
+X-Request-Id: 189f7332-af52-4e52-8145-24e0817942c7
+
+[]</code></pre>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th>Error code</th><th>When it happens</th></tr></thead><tbody><tr><td><strong>401</strong></td><td><code>(empty body)</code></td><td>Missing, expired, revoked or malformed session token. Produced by the gateway's forward-auth step (user-service <code>/internal/auth/verify</code> answers 401, the body is empty). A session of an account that has an authenticator app but only completed the first step (<code>aal1</code>) is also a 401 here.</td></tr><tr><td><strong>429</strong></td><td><code>(HTML page)</code></td><td>Gateway rate limit exceeded. The body is APISIX's HTML page, not JSON; the response carries <code>X-RateLimit-*</code> headers (see <a href="08f-operational.html#gateway-behaviour">8f</a>).</td></tr><tr><td><strong>503</strong></td><td><code>identity_service_unavailable</code></td><td>Kratos could not be reached while the gateway asked who the token belongs to (forward-auth is sent to user-service, which answers 503 instead of a misleading 401).</td></tr></tbody></table></div>
+<h4>How to use it</h4><ul><li><code>permissions[].reason</code> is an object keyed by language and is empty for capabilities that need no reason (<code>user.basic</code>, <code>notify.*</code>).</li><li><code>logoUrl</code> is a 60-minute signed link, like avatars.</li></ul>
+</div></details>
+<details class="endpoint" id="ep-apps-get-detail">
+<summary><span class="method m-get">GET</span><span class="path">/api/v1/apps/{idOrSlug}</span><span class="sum">Read one mini app</span></summary>
+<div class="body"><dl class="meta">
+<dt>Audience</dt><dd>signed-in end user (the Flutter app)</dd>
+<dt>Client path</dt><dd><code>/api/v1/apps/{idOrSlug}</code> (through the gateway, base <code>$GATEWAY</code>)</dd>
+<dt>Internal path</dt><dd>served by <strong>registry-service</strong> (gateway route <code>apps-catalog</code>, not user-service)</dd>
+<dt>Auth</dt><dd><code>Authorization: Bearer $TOKEN</code>, where <code>$TOKEN</code> is the Kratos <code>session_token</code> (see <a href="08e-kratos-flows.html">8e</a>). The gateway validates it through forward-auth before the request reaches the service.</dd>
+<dt>Rate limit</dt><dd>300 per 60 s per client IP (gateway route <code>apps-catalog</code>); over the limit the gateway answers <code>429</code></dd>
+<dt>Implemented in</dt><dd><code>services/registry-service/src/main/java/app/adera/registry/app/AppPublicController.java#detail</code></dd>
+</dl>
+<h4>Purpose</h4><p>The detail view of one LIVE app: names and descriptions per language, logo, brand colour, publisher (support contact), entry URL, rating and permissions.</p>
+<h4>Request parameters</h4><div class="table-wrap"><table><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why it exists</th></tr></thead><tbody><tr><td><code>idOrSlug</code></td><td>path</td><td>string</td><td>yes</td><td>the app's UUID or its permanent slug</td><td>Slugs are friendlier in links; ids never change meaning.</td></tr></tbody></table></div>
+<h4>Example request</h4>
+<pre><code>curl -s "$GATEWAY/api/v1/apps/docs-demo-2015" \
+  -H "Authorization: Bearer $TOKEN"</code></pre>
+<pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+X-RateLimit-Limit: 300
+X-RateLimit-Remaining: 297
+X-Request-Id: 8bb404a0-ed17-47f3-87db-8f93bdb7ff2b
+
+{
+  "id": "fc32bca2-89a9-4426-b834-aad34a3eebbe",
+  "slug": "docs-demo-2015",
+  "name": {
+    "am": "የሙከራ መተግበሪያ",
+    "en": "Docs Demo Ride"
+  },
+  "description": {
+    "en": "Demo app used to capture the documentation examples."
+  },
+  "logoUrl": "http://127.0.0.1:9000/adera-media/apps/fc32bca2-89a9-4426-b834-aad34a3eebbe/logo/6871b51d-38db-487d-9b3b-8fdb26a10f54.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&amp;X-Amz-Date=20261025T054621Z&amp;X-Amz-SignedHeaders=host&amp;X-Amz-Credential=&lt;masked&gt;&amp;X-Amz-Expires=3600&amp;X-Amz-Signature=&lt;masked&gt;",
+  "brandColor": "#0F9D58",
+  "categories": [
+    "travel"
+  ],
+  "markets": [
+    "ET"
+  ],
+  "publisher": {
+    "name": "Docs Demo Ltd",
+    "legalName": null,
+    "supportEmail": "support@example.com",
+    "supportPhone": null,
+    "website": "https://example.com"
+  },
+  "entryUrl": "https://example.com/app",
+  "ratingAvg": 0.0,
+  "ratingCount": 0,
+  "permissions": [
+    {
+      "capability": "location.coarse",
+      "description": "City-level location",
+      "reason": {
+        "en": "To show technicians near you"
+      }
+    },
+    {
+      "capability": "notify.inapp",
+      "description": "Send in-app notifications (inbox + push) to users",
+      "reason": {}
+    }
+  ]
+}</code></pre><p class="masked">Values masked: signed logo URL parts.</p>
+<h4>Example: a DRAFT app</h4>
+<pre class="out"><code>HTTP/1.1 404 Not Found
+Content-Type: application/json
+X-RateLimit-Limit: 300
+X-RateLimit-Remaining: 295
+X-Request-Id: ca40d572-a291-4ab3-8958-7426d07ab8af
+
+{
+  "error": "not_found"
+}</code></pre>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th>Error code</th><th>When it happens</th></tr></thead><tbody><tr><td><strong>404</strong></td><td><code>not_found</code></td><td>No such app, <em>or the app exists but is not LIVE</em> (DRAFT, PAUSED and KILLED apps are invisible to users, so they cannot be told apart from unknown ones).</td></tr><tr><td><strong>401</strong></td><td><code>(empty body)</code></td><td>Missing, expired, revoked or malformed session token. Produced by the gateway's forward-auth step (user-service <code>/internal/auth/verify</code> answers 401, the body is empty). A session of an account that has an authenticator app but only completed the first step (<code>aal1</code>) is also a 401 here.</td></tr><tr><td><strong>429</strong></td><td><code>(HTML page)</code></td><td>Gateway rate limit exceeded. The body is APISIX's HTML page, not JSON; the response carries <code>X-RateLimit-*</code> headers (see <a href="08f-operational.html#gateway-behaviour">8f</a>).</td></tr><tr><td><strong>503</strong></td><td><code>identity_service_unavailable</code></td><td>Kratos could not be reached while the gateway asked who the token belongs to (forward-auth is sent to user-service, which answers 503 instead of a misleading 401).</td></tr></tbody></table></div>
+<h4>How to use it</h4><ul><li><code>entryUrl</code> is where the app's web content is loaded from; the opening handshake (alias minting, consent) comes with the frontend bridge, which is not built yet.</li><li><code>ratingAvg</code> has two decimals; <code>ratingCount</code> counts only VISIBLE reviews.</li></ul>
+</div></details>
+<details class="endpoint" id="ep-apps-get-reviews">
+<summary><span class="method m-get">GET</span><span class="path">/api/v1/apps/{idOrSlug}/reviews</span><span class="sum">List reviews of an app</span></summary>
+<div class="body"><dl class="meta">
+<dt>Audience</dt><dd>signed-in end user (the Flutter app)</dd>
+<dt>Client path</dt><dd><code>/api/v1/apps/{idOrSlug}/reviews</code> (through the gateway, base <code>$GATEWAY</code>)</dd>
+<dt>Internal path</dt><dd>served by <strong>registry-service</strong> (gateway route <code>apps-catalog</code>, not user-service)</dd>
+<dt>Auth</dt><dd><code>Authorization: Bearer $TOKEN</code>, where <code>$TOKEN</code> is the Kratos <code>session_token</code> (see <a href="08e-kratos-flows.html">8e</a>). The gateway validates it through forward-auth before the request reaches the service.</dd>
+<dt>Rate limit</dt><dd>300 per 60 s per client IP (gateway route <code>apps-catalog</code>); over the limit the gateway answers <code>429</code></dd>
+<dt>Implemented in</dt><dd><code>services/registry-service/src/main/java/app/adera/registry/app/AppPublicController.java#reviews</code></dd>
+</dl>
+<h4>Purpose</h4><p>Visible reviews, newest first, shown anonymously: no user id and no name are returned.</p>
+<h4>Request parameters</h4><div class="table-wrap"><table><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why it exists</th></tr></thead><tbody><tr><td><code>idOrSlug</code></td><td>path</td><td>string</td><td>yes</td><td>the app's UUID or its permanent slug</td><td>Slugs are friendlier in links; ids never change meaning.</td></tr><tr><td><code>page</code></td><td>query</td><td>integer</td><td>no</td><td>default 0</td><td>Zero-based page.</td></tr><tr><td><code>size</code></td><td>query</td><td>integer</td><td>no</td><td>default 20; clamped to 1-100</td><td>Page size.</td></tr></tbody></table></div>
+<h4>Example request</h4>
+<pre><code>curl -s "$GATEWAY/api/v1/apps/docs-demo-2015/reviews?page=0&amp;size=10" \
+  -H "Authorization: Bearer $TOKEN"</code></pre>
+<pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+X-RateLimit-Limit: 300
+X-RateLimit-Remaining: 288
+X-Request-Id: abf188d3-efc7-40f5-b91b-cb5a010ef583
+
+[
+  {
+    "id": "8b9cf0ab-47e1-42e8-98ac-e68d41300478",
+    "rating": 4,
+    "comment": null,
+    "createdAt": "2026-10-25T05:46:21.925685Z",
+    "updatedAt": "2026-10-25T05:46:22.190499Z"
+  }
+]</code></pre>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th>Error code</th><th>When it happens</th></tr></thead><tbody><tr><td><strong>404</strong></td><td><code>not_found</code></td><td>No such app, <em>or the app exists but is not LIVE</em> (DRAFT, PAUSED and KILLED apps are invisible to users, so they cannot be told apart from unknown ones).</td></tr><tr><td><strong>400</strong></td><td><code>invalid_request</code></td><td>A query parameter cannot be parsed.</td></tr><tr><td><strong>401</strong></td><td><code>(empty body)</code></td><td>Missing, expired, revoked or malformed session token. Produced by the gateway's forward-auth step (user-service <code>/internal/auth/verify</code> answers 401, the body is empty). A session of an account that has an authenticator app but only completed the first step (<code>aal1</code>) is also a 401 here.</td></tr><tr><td><strong>429</strong></td><td><code>(HTML page)</code></td><td>Gateway rate limit exceeded. The body is APISIX's HTML page, not JSON; the response carries <code>X-RateLimit-*</code> headers (see <a href="08f-operational.html#gateway-behaviour">8f</a>).</td></tr><tr><td><strong>503</strong></td><td><code>identity_service_unavailable</code></td><td>Kratos could not be reached while the gateway asked who the token belongs to (forward-auth is sent to user-service, which answers 503 instead of a misleading 401).</td></tr></tbody></table></div>
+</div></details>
+<details class="endpoint" id="ep-apps-get-myreview">
+<summary><span class="method m-get">GET</span><span class="path">/api/v1/apps/{idOrSlug}/my-review</span><span class="sum">Read my own review of an app</span></summary>
+<div class="body"><dl class="meta">
+<dt>Audience</dt><dd>signed-in end user (the Flutter app)</dd>
+<dt>Client path</dt><dd><code>/api/v1/apps/{idOrSlug}/my-review</code> (through the gateway, base <code>$GATEWAY</code>)</dd>
+<dt>Internal path</dt><dd>served by <strong>registry-service</strong> (gateway route <code>apps-catalog</code>, not user-service)</dd>
+<dt>Auth</dt><dd><code>Authorization: Bearer $TOKEN</code>, where <code>$TOKEN</code> is the Kratos <code>session_token</code> (see <a href="08e-kratos-flows.html">8e</a>). The gateway validates it through forward-auth before the request reaches the service.</dd>
+<dt>Rate limit</dt><dd>300 per 60 s per client IP (gateway route <code>apps-catalog</code>); over the limit the gateway answers <code>429</code></dd>
+<dt>Implemented in</dt><dd><code>services/registry-service/src/main/java/app/adera/registry/app/AppPublicController.java#myReview</code></dd>
+</dl>
+<h4>Purpose</h4><p>The caller's review of this app, so the app can show it pre-filled for editing. One review per user and app.</p>
+<h4>Request parameters</h4><div class="table-wrap"><table><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why it exists</th></tr></thead><tbody><tr><td><code>idOrSlug</code></td><td>path</td><td>string</td><td>yes</td><td>the app's UUID or its permanent slug</td><td>Slugs are friendlier in links; ids never change meaning.</td></tr></tbody></table></div>
+<h4>Example request</h4>
+<pre><code>curl -s "$GATEWAY/api/v1/apps/docs-demo-2015/my-review" \
+  -H "Authorization: Bearer $TOKEN"</code></pre>
+<pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+X-RateLimit-Limit: 300
+X-RateLimit-Remaining: 289
+X-Request-Id: 568430a1-9f01-4cc7-8266-48227d43d100
+
+{
+  "id": "8b9cf0ab-47e1-42e8-98ac-e68d41300478",
+  "rating": 4,
+  "comment": null,
+  "createdAt": "2026-10-25T05:46:21.925685Z",
+  "updatedAt": "2026-10-25T05:46:22.190499Z"
+}</code></pre>
+<h4>Example: nothing written yet</h4>
+<pre class="out"><code>HTTP/1.1 404 Not Found
+Content-Type: application/json
+X-RateLimit-Limit: 300
+X-RateLimit-Remaining: 293
+X-Request-Id: a5a78549-275f-4ac7-8633-6df0369e370e
+
+{
+  "error": "not_found"
+}</code></pre>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th>Error code</th><th>When it happens</th></tr></thead><tbody><tr><td><strong>404</strong></td><td><code>not_found</code></td><td>No such app, <em>or the app exists but is not LIVE</em> (DRAFT, PAUSED and KILLED apps are invisible to users, so they cannot be told apart from unknown ones).</td></tr><tr><td><strong>404</strong></td><td><code>not_found</code></td><td>(same code) The caller has not reviewed this app.</td></tr><tr><td><strong>401</strong></td><td><code>(empty body)</code></td><td>Missing, expired, revoked or malformed session token. Produced by the gateway's forward-auth step (user-service <code>/internal/auth/verify</code> answers 401, the body is empty). A session of an account that has an authenticator app but only completed the first step (<code>aal1</code>) is also a 401 here.</td></tr><tr><td><strong>429</strong></td><td><code>(HTML page)</code></td><td>Gateway rate limit exceeded. The body is APISIX's HTML page, not JSON; the response carries <code>X-RateLimit-*</code> headers (see <a href="08f-operational.html#gateway-behaviour">8f</a>).</td></tr><tr><td><strong>503</strong></td><td><code>identity_service_unavailable</code></td><td>Kratos could not be reached while the gateway asked who the token belongs to (forward-auth is sent to user-service, which answers 503 instead of a misleading 401).</td></tr></tbody></table></div>
+</div></details>
+<details class="endpoint" id="ep-apps-put-myreview">
+<summary><span class="method m-put">PUT</span><span class="path">/api/v1/apps/{idOrSlug}/my-review</span><span class="sum">Rate and review an app (create or edit)</span></summary>
+<div class="body"><dl class="meta">
+<dt>Audience</dt><dd>signed-in end user (the Flutter app)</dd>
+<dt>Client path</dt><dd><code>/api/v1/apps/{idOrSlug}/my-review</code> (through the gateway, base <code>$GATEWAY</code>)</dd>
+<dt>Internal path</dt><dd>served by <strong>registry-service</strong> (gateway route <code>apps-catalog</code>, not user-service)</dd>
+<dt>Auth</dt><dd><code>Authorization: Bearer $TOKEN</code>, where <code>$TOKEN</code> is the Kratos <code>session_token</code> (see <a href="08e-kratos-flows.html">8e</a>). The gateway validates it through forward-auth before the request reaches the service.</dd>
+<dt>Rate limit</dt><dd>300 per 60 s per client IP (gateway route <code>apps-catalog</code>); over the limit the gateway answers <code>429</code></dd>
+<dt>Implemented in</dt><dd><code>services/registry-service/src/main/java/app/adera/registry/app/AppPublicController.java#review, review/ReviewService.java#upsert</code></dd>
+</dl>
+<h4>Purpose</h4><p>Creates the caller's review or edits it (sending again replaces rating and comment). The app's <code>ratingAvg</code>/<code>ratingCount</code> are recomputed in the same transaction. A review hidden by staff stays hidden after an edit.</p>
+<h4>Request parameters</h4><div class="table-wrap"><table><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why it exists</th></tr></thead><tbody><tr><td><code>idOrSlug</code></td><td>path</td><td>string</td><td>yes</td><td>the app's UUID or its permanent slug</td><td>Slugs are friendlier in links; ids never change meaning.</td></tr><tr><td><code>rating</code></td><td>body</td><td>integer</td><td>yes</td><td>whole number 1-5 (a JSON integer; <code>4.5</code> or <code>"4"</code> are refused)</td><td>The star rating.</td></tr><tr><td><code>comment</code></td><td>body</td><td>string</td><td>no</td><td>max 2000 chars after trimming; empty or null stores no comment</td><td>Optional text.</td></tr></tbody></table></div>
+<h4>Example: create</h4>
+<pre><code>curl -s -X PUT "$GATEWAY/api/v1/apps/docs-demo-2015/my-review" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"rating": 5, "comment": "Fast and friendly."}'</code></pre>
+<pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+X-RateLimit-Limit: 300
+X-RateLimit-Remaining: 292
+X-Request-Id: cebbd5e7-6fb9-481a-a58c-829d15c583f7
+
+{
+  "id": "8b9cf0ab-47e1-42e8-98ac-e68d41300478",
+  "rating": 5,
+  "comment": "Fast and friendly.",
+  "createdAt": "2026-10-25T05:46:21.925685301Z",
+  "updatedAt": "2026-10-25T05:46:21.925685301Z"
+}</code></pre>
+<h4>Example: edit (rating only, comment cleared)</h4>
+<pre><code>curl -s -X PUT "$GATEWAY/api/v1/apps/docs-demo-2015/my-review" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"rating": 4}'</code></pre>
+<pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+X-RateLimit-Limit: 300
+X-RateLimit-Remaining: 291
+X-Request-Id: 4fea5ab2-0063-4efc-af83-b965c727f869
+
+{
+  "id": "8b9cf0ab-47e1-42e8-98ac-e68d41300478",
+  "rating": 4,
+  "comment": null,
+  "createdAt": "2026-10-25T05:46:21.925685Z",
+  "updatedAt": "2026-10-25T05:46:22.190498671Z"
+}</code></pre>
+<h4>Example: invalid</h4>
+<pre><code>curl -s -X PUT "$GATEWAY/api/v1/apps/docs-demo-2015/my-review" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"rating": 9, "comment": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", "title": "t"}'</code></pre>
+<pre class="out"><code>HTTP/1.1 400 Bad Request
+Content-Type: application/json
+X-RateLimit-Limit: 300
+X-RateLimit-Remaining: 290
+X-Request-Id: 2d79f214-da2d-4671-b688-343ec5cbdbb3
+
+{
+  "error": "validation_failed",
+  "fields": {
+    "title": "unknown field",
+    "rating": "must be a whole number from 1 to 5",
+    "comment": "max 2000 characters"
+  }
+}</code></pre>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th>Error code</th><th>When it happens</th></tr></thead><tbody><tr><td><strong>404</strong></td><td><code>not_found</code></td><td>No such app, <em>or the app exists but is not LIVE</em> (DRAFT, PAUSED and KILLED apps are invisible to users, so they cannot be told apart from unknown ones).</td></tr><tr><td><strong>400</strong></td><td><code>validation_failed</code></td><td>Bad rating, comment too long, or a key other than <code>rating</code>/<code>comment</code> (<code>"unknown field"</code>).</td></tr><tr><td><strong>400</strong></td><td><code>invalid_request</code></td><td>Body is not valid JSON.</td></tr><tr><td><strong>401</strong></td><td><code>(empty body)</code></td><td>Missing, expired, revoked or malformed session token. Produced by the gateway's forward-auth step (user-service <code>/internal/auth/verify</code> answers 401, the body is empty). A session of an account that has an authenticator app but only completed the first step (<code>aal1</code>) is also a 401 here.</td></tr><tr><td><strong>429</strong></td><td><code>(HTML page)</code></td><td>Gateway rate limit exceeded. The body is APISIX's HTML page, not JSON; the response carries <code>X-RateLimit-*</code> headers (see <a href="08f-operational.html#gateway-behaviour">8f</a>).</td></tr><tr><td><strong>503</strong></td><td><code>identity_service_unavailable</code></td><td>Kratos could not be reached while the gateway asked who the token belongs to (forward-auth is sent to user-service, which answers 503 instead of a misleading 401).</td></tr></tbody></table></div>
+</div></details>
+<details class="endpoint" id="ep-apps-delete-myreview">
+<summary><span class="method m-delete">DELETE</span><span class="path">/api/v1/apps/{idOrSlug}/my-review</span><span class="sum">Delete my review</span></summary>
+<div class="body"><dl class="meta">
+<dt>Audience</dt><dd>signed-in end user (the Flutter app)</dd>
+<dt>Client path</dt><dd><code>/api/v1/apps/{idOrSlug}/my-review</code> (through the gateway, base <code>$GATEWAY</code>)</dd>
+<dt>Internal path</dt><dd>served by <strong>registry-service</strong> (gateway route <code>apps-catalog</code>, not user-service)</dd>
+<dt>Auth</dt><dd><code>Authorization: Bearer $TOKEN</code>, where <code>$TOKEN</code> is the Kratos <code>session_token</code> (see <a href="08e-kratos-flows.html">8e</a>). The gateway validates it through forward-auth before the request reaches the service.</dd>
+<dt>Rate limit</dt><dd>300 per 60 s per client IP (gateway route <code>apps-catalog</code>); over the limit the gateway answers <code>429</code></dd>
+<dt>Implemented in</dt><dd><code>services/registry-service/src/main/java/app/adera/registry/app/AppPublicController.java#deleteReview</code></dd>
+</dl>
+<h4>Purpose</h4><p>Removes the caller's review and recomputes the rating. Idempotent: deleting a review that does not exist still answers 200.</p>
+<h4>Request parameters</h4><div class="table-wrap"><table><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why it exists</th></tr></thead><tbody><tr><td><code>idOrSlug</code></td><td>path</td><td>string</td><td>yes</td><td>the app's UUID or its permanent slug</td><td>Slugs are friendlier in links; ids never change meaning.</td></tr></tbody></table></div>
+<h4>Example request</h4>
+<pre><code>curl -s -X DELETE "$GATEWAY/api/v1/apps/docs-demo-2015/my-review" \
+  -H "Authorization: Bearer $TOKEN"</code></pre>
+<pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+X-RateLimit-Limit: 300
+X-RateLimit-Remaining: 282
+X-Request-Id: 5d13d6b1-04b6-4a6f-987d-85ca0df70116
+
+{
+  "status": "deleted"
+}</code></pre>
+<h4>Example: again</h4>
+<pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+X-RateLimit-Limit: 300
+X-RateLimit-Remaining: 281
+X-Request-Id: 22f500d6-bfb4-4c5d-b7c3-1147c0db5a85
+
+{
+  "status": "deleted"
+}</code></pre>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th>Error code</th><th>When it happens</th></tr></thead><tbody><tr><td><strong>404</strong></td><td><code>not_found</code></td><td>No such app, <em>or the app exists but is not LIVE</em> (DRAFT, PAUSED and KILLED apps are invisible to users, so they cannot be told apart from unknown ones).</td></tr><tr><td><strong>401</strong></td><td><code>(empty body)</code></td><td>Missing, expired, revoked or malformed session token. Produced by the gateway's forward-auth step (user-service <code>/internal/auth/verify</code> answers 401, the body is empty). A session of an account that has an authenticator app but only completed the first step (<code>aal1</code>) is also a 401 here.</td></tr><tr><td><strong>429</strong></td><td><code>(HTML page)</code></td><td>Gateway rate limit exceeded. The body is APISIX's HTML page, not JSON; the response carries <code>X-RateLimit-*</code> headers (see <a href="08f-operational.html#gateway-behaviour">8f</a>).</td></tr><tr><td><strong>503</strong></td><td><code>identity_service_unavailable</code></td><td>Kratos could not be reached while the gateway asked who the token belongs to (forward-auth is sent to user-service, which answers 503 instead of a misleading 401).</td></tr></tbody></table></div>
+</div></details>
+<details class="endpoint" id="ep-apps-post-report">
+<summary><span class="method m-post">POST</span><span class="path">/api/v1/apps/{idOrSlug}/report</span><span class="sum">Report an app</span></summary>
+<div class="body"><dl class="meta">
+<dt>Audience</dt><dd>signed-in end user (the Flutter app)</dd>
+<dt>Client path</dt><dd><code>/api/v1/apps/{idOrSlug}/report</code> (through the gateway, base <code>$GATEWAY</code>)</dd>
+<dt>Internal path</dt><dd>served by <strong>registry-service</strong> (gateway route <code>apps-catalog</code>, not user-service)</dd>
+<dt>Auth</dt><dd><code>Authorization: Bearer $TOKEN</code>, where <code>$TOKEN</code> is the Kratos <code>session_token</code> (see <a href="08e-kratos-flows.html">8e</a>). The gateway validates it through forward-auth before the request reaches the service.</dd>
+<dt>Rate limit</dt><dd>300 per 60 s per client IP (gateway route <code>apps-catalog</code>); over the limit the gateway answers <code>429</code></dd>
+<dt>Implemented in</dt><dd><code>services/registry-service/src/main/java/app/adera/registry/app/AppPublicController.java#report, review/ReviewService.java#report</code></dd>
+</dl>
+<h4>Purpose</h4><p>The "report this app" option of the 3-dot menu. Creates an OPEN report that staff handle in the dashboard. Reporting the same app again while an earlier report of yours is still OPEN returns that same report instead of creating a pile of duplicates.</p>
+<h4>Request parameters</h4><div class="table-wrap"><table><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why it exists</th></tr></thead><tbody><tr><td><code>idOrSlug</code></td><td>path</td><td>string</td><td>yes</td><td>the app's UUID or its permanent slug</td><td>Slugs are friendlier in links; ids never change meaning.</td></tr><tr><td><code>reason</code></td><td>body</td><td>string</td><td>yes</td><td>SPAM, SCAM, INAPPROPRIATE, BROKEN or OTHER (case-insensitive)</td><td>Lets staff triage.</td></tr><tr><td><code>details</code></td><td>body</td><td>string</td><td>no</td><td>max 2000 chars</td><td>Free text from the user.</td></tr></tbody></table></div>
+<h4>Example request</h4>
+<pre><code>curl -s -X POST "$GATEWAY/api/v1/apps/docs-demo-2015/report" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"reason": "broken", "details": "Opens a blank page."}'</code></pre>
+<pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+X-RateLimit-Limit: 300
+X-RateLimit-Remaining: 286
+X-Request-Id: b568ee38-91de-4394-aba0-fe5694b08004
+
+{
+  "reportId": "d8ecdf00-b332-40c3-8bd7-43c5e9d65c37",
+  "status": "received"
+}</code></pre>
+<h4>Example: reporting again while the first is open</h4>
+<pre><code>curl -s -X POST "$GATEWAY/api/v1/apps/docs-demo-2015/report" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"reason": "spam"}'</code></pre>
+<pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+X-RateLimit-Limit: 300
+X-RateLimit-Remaining: 285
+X-Request-Id: bdd05219-cf37-48a9-82e9-a8adb03535df
+
+{
+  "reportId": "d8ecdf00-b332-40c3-8bd7-43c5e9d65c37",
+  "status": "received"
+}</code></pre><p class="masked">Same reportId as above: the second request did not create a second report.</p>
+<h4>Example: invalid reason</h4>
+<pre><code>curl -s -X POST "$GATEWAY/api/v1/apps/docs-demo-2015/report" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"reason": "rude"}'</code></pre>
+<pre class="out"><code>HTTP/1.1 400 Bad Request
+Content-Type: application/json
+X-RateLimit-Limit: 300
+X-RateLimit-Remaining: 284
+X-Request-Id: f6dcc6ab-2455-4618-816f-a35547769fb2
+
+{
+  "error": "validation_failed",
+  "fields": {
+    "reason": "must be one of SPAM, SCAM, INAPPROPRIATE, BROKEN, OTHER"
+  }
+}</code></pre>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th>Error code</th><th>When it happens</th></tr></thead><tbody><tr><td><strong>404</strong></td><td><code>not_found</code></td><td>No such app, <em>or the app exists but is not LIVE</em> (DRAFT, PAUSED and KILLED apps are invisible to users, so they cannot be told apart from unknown ones).</td></tr><tr><td><strong>400</strong></td><td><code>validation_failed</code></td><td>Missing or unknown <code>reason</code>; <code>details</code> longer than 2000 chars.</td></tr><tr><td><strong>400</strong></td><td><code>invalid_request</code></td><td>Body missing or not valid JSON.</td></tr><tr><td><strong>401</strong></td><td><code>(empty body)</code></td><td>Missing, expired, revoked or malformed session token. Produced by the gateway's forward-auth step (user-service <code>/internal/auth/verify</code> answers 401, the body is empty). A session of an account that has an authenticator app but only completed the first step (<code>aal1</code>) is also a 401 here.</td></tr><tr><td><strong>429</strong></td><td><code>(HTML page)</code></td><td>Gateway rate limit exceeded. The body is APISIX's HTML page, not JSON; the response carries <code>X-RateLimit-*</code> headers (see <a href="08f-operational.html#gateway-behaviour">8f</a>).</td></tr><tr><td><strong>503</strong></td><td><code>identity_service_unavailable</code></td><td>Kratos could not be reached while the gateway asked who the token belongs to (forward-auth is sent to user-service, which answers 503 instead of a misleading 401).</td></tr></tbody></table></div>
+</div></details>
+<div class="pager"><a class="prev" href="08-endpoints.html"><small>Previous</small>8. Endpoint reference</a><a class="next" href="08b-staff-api.html"><small>Next</small>8b. Staff / dashboard API</a></div>
+<p class="footer">Adera backend documentation &middot; last verified 2026-10-25 &middot; <a href="../index.html">contents</a></p>
+</main>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,63 @@
+spring:
+  application:
+    name: registry-service
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/registry}
+    username: ${DB_USER:registry_svc}
+    password: ${DB_PASSWORD:}
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+  servlet:
+    multipart:
+      max-file-size: 4MB
+      max-request-size: 5MB
+
+server:
+  port: 8080
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  tracing:
+    sampling:
+      probability: ${TRACING_SAMPLE_RATE:1.0}
+  otlp:
+    metrics:
+      export:
+        enabled: false   # metrics are scraped by Prometheus (/actuator/prometheus); only traces go to the OTel collector
+  opentelemetry:
+    tracing:
+      export:
+        otlp:
+          endpoint: ${OTEL_TRACES_ENDPOINT:http://localhost:4318/v1/traces}
+
+adera:
+  registry:
+    # Shared secret the gateway adds to every request it forwards (users and staff alike).
+    gateway-secret: ${GATEWAY_SECRET:}
+    # Shared secret for service-to-service calls to /internal/** (notification-service reads app config from here).
+    internal-secret: ${INTERNAL_API_SECRET:}
+    # Staff must have completed the authenticator-app (TOTP) step (aal2) to use the admin API.
+    require-aal2: ${ADMIN_REQUIRE_AAL2:true}
+    # The one environment this deployment is: dev | prod. Keys and addresses are stored for both, only this one is active.
+    environment: ${ADERA_ENV:dev}
+    # Created at startup if no active super_admin exists. Change it after the first login.
+    bootstrap-super-admin-email: ${BOOTSTRAP_SUPER_ADMIN_EMAIL:}
+    kratos:
+      public-url: ${KRATOS_PUBLIC_URL:http://localhost:4433}
+      admin-url: ${KRATOS_ADMIN_URL:http://localhost:4434}
+    storage:
+      endpoint: ${STORAGE_ENDPOINT:http://localhost:9000}
+      public-endpoint: ${STORAGE_PUBLIC_ENDPOINT:http://localhost:9000}
+      bucket: ${STORAGE_BUCKET:adera-media}
+      access-key: ${STORAGE_ACCESS_KEY:}
+      secret-key: ${STORAGE_SECRET_KEY:}
+      region: ${STORAGE_REGION:us-east-1}
+      presign-minutes: ${STORAGE_PRESIGN_MINUTES:60}
+    logo:
+      max-bytes: ${LOGO_MAX_BYTES:2097152}
+      max-px: ${LOGO_MAX_PX:512}

@@ -1,0 +1,412 @@
+# Gateway routes. The app only ever talks to this gateway (port 9080).
+upstreams:
+  - id: kratos-public
+    type: roundrobin
+    nodes:
+      "kratos:4433": 1
+  - id: user-service
+    type: roundrobin
+    nodes:
+      "user-service:8080": 1
+  - id: registry-service
+    type: roundrobin
+    nodes:
+      "registry-service:8080": 1
+  - id: notification-service
+    type: roundrobin
+    nodes:
+      "notification-service:8080": 1
+  - id: backoffice
+    type: roundrobin
+    nodes:
+      "backoffice:8080": 1
+
+# Where traces go (APISIX 3.x keeps the OpenTelemetry exporter settings here, not in config.yaml).
+plugin_metadata:
+  - id: opentelemetry
+    resource:
+      service.name: apisix
+    collector:
+      address: otel-collector:4318
+      request_timeout: 3
+    batch_span_processor:
+      drop_on_queue_full: false
+      max_queue_size: 1024
+      batch_timeout: 2
+
+global_rules:
+  - id: 1
+    plugins:
+      request-id:
+        header_name: X-Request-Id
+        include_in_response: true
+      prometheus:
+        prefer_name: true
+      opentelemetry:
+        sampler:
+          name: always_on   # dev. Use a ratio sampler in production.
+      cors:
+        allow_origins: "http://localhost:3000"
+        allow_methods: "GET,POST,PUT,PATCH,DELETE,OPTIONS"
+        allow_headers: "Authorization,Content-Type,X-Request-Id"
+        expose_headers: "X-Request-Id"
+        max_age: 3600
+
+routes:
+  # Kratos' admin API is never reachable from outside.
+  - id: kratos-admin-blocked
+    uri: /kratos/admin/*
+    priority: 100
+    plugins:
+      mocking:
+        response_status: 403
+        content_type: application/json
+        response_example: '{"error":"forbidden"}'
+
+  # Anything that submits a login/registration step (sends or checks an OTP): strict per-IP limit.
+  # This is the first line of SMS-cost protection; per-recipient limits come in the notification service.
+  - id: kratos-self-service-submit
+    uri: /kratos/self-service/*
+    methods: [POST]
+    priority: 20
+    plugins:
+      proxy-rewrite:
+        regex_uri: ["^/kratos/(.*)", "/$1"]
+        # Native (API) flows carry no cookies, so there is nothing for CSRF checks to protect, but Kratos refuses a
+        # native-flow submit that has an Origin header, and every browser fetch() POST sends one (the dashboard does).
+        headers:
+          remove: ["Origin", "Cookie"]   # a browser also sends any cookie stored for 127.0.0.1 (cookies ignore the port); Kratos refuses a native flow that carries one
+      limit-count:
+        count: 10
+        time_window: 60
+        key_type: var
+        key: remote_addr
+        rejected_code: 429
+        policy: redis
+        redis_host: redis
+        redis_port: 6379
+        redis_username: apisix
+        redis_password: ${{APISIX_REDIS_PASSWORD}}
+    upstream_id: kratos-public
+
+  # Everything else on the public Kratos API (flow creation, whoami, logout, sessions): looser limit.
+  - id: kratos-public
+    uri: /kratos/*
+    priority: 10
+    plugins:
+      proxy-rewrite:
+        regex_uri: ["^/kratos/(.*)", "/$1"]
+        headers:
+          remove: ["Cookie"]   # all Kratos use here is native (token) flows; a stray browser cookie makes Kratos block them
+      limit-count:
+        count: 120
+        time_window: 60
+        key_type: var
+        key: remote_addr
+        rejected_code: 429
+        policy: redis
+        redis_host: redis
+        redis_port: 6379
+        redis_username: apisix
+        redis_password: ${{APISIX_REDIS_PASSWORD}}
+    upstream_id: kratos-public
+
+  # ---- Signed-in user's own data: /api/v1/me/** -> user-service --------------------------------------------
+  # forward-auth asks user-service (which asks Kratos) who the session belongs to; user-service answers with
+  # X-User-Id, which APISIX then sets on the forwarded request (replacing anything the client sent).
+  # X-Gateway-Secret proves to user-service the request really came through here.
+
+  # Avatar upload: stricter limit (multipart, heavier).
+  - id: me-avatar
+    uris: ["/api/v1/me/avatar"]
+    priority: 30
+    plugins:
+      forward-auth:
+        uri: http://user-service:8080/internal/auth/verify
+        request_headers: ["Authorization", "Cookie"]
+        upstream_headers: ["X-User-Id"]
+        extra_headers:
+          X-Gateway-Secret: ${{USER_GATEWAY_SECRET}}
+        status_on_error: 503
+      proxy-rewrite:
+        headers:
+          set:
+            X-Gateway-Secret: ${{USER_GATEWAY_SECRET}}
+      limit-count:
+        count: 20
+        time_window: 60
+        key_type: var
+        key: remote_addr
+        rejected_code: 429
+        policy: redis
+        redis_host: redis
+        redis_port: 6379
+        redis_username: apisix
+        redis_password: ${{APISIX_REDIS_PASSWORD}}
+    upstream_id: user-service
+
+  # Everything else under /api/v1/me
+  - id: me
+    uris: ["/api/v1/me", "/api/v1/me/*"]
+    priority: 20
+    plugins:
+      forward-auth:
+        uri: http://user-service:8080/internal/auth/verify
+        request_headers: ["Authorization", "Cookie"]
+        upstream_headers: ["X-User-Id"]
+        extra_headers:
+          X-Gateway-Secret: ${{USER_GATEWAY_SECRET}}
+        status_on_error: 503
+      proxy-rewrite:
+        headers:
+          set:
+            X-Gateway-Secret: ${{USER_GATEWAY_SECRET}}
+      limit-count:
+        count: 300
+        time_window: 60
+        key_type: var
+        key: remote_addr
+        rejected_code: 429
+        policy: redis
+        redis_host: redis
+        redis_port: 6379
+        redis_username: apisix
+        redis_password: ${{APISIX_REDIS_PASSWORD}}
+    upstream_id: user-service
+
+  # ---- Dashboard (staff) API: /admin/api/v1/** -> registry-service -----------------------------------------------
+  # forward-auth asks registry-service (which asks Kratos) whether this is an active staff member who finished the
+  # authenticator-app step; it answers with X-Staff-Id and X-Staff-Role, which APISIX sets on the forwarded request.
+  - id: admin-api
+    uris: ["/admin/api/v1", "/admin/api/v1/*"]
+    priority: 20
+    plugins:
+      forward-auth:
+        uri: http://registry-service:8080/internal/staff/verify
+        request_headers: ["Authorization"]
+        upstream_headers: ["X-Staff-Id", "X-Staff-Role"]
+        extra_headers:
+          X-Gateway-Secret: ${{USER_GATEWAY_SECRET}}
+        status_on_error: 503
+      proxy-rewrite:
+        headers:
+          set:
+            X-Gateway-Secret: ${{USER_GATEWAY_SECRET}}
+            X-Client-IP: $remote_addr
+      limit-count:
+        count: 300
+        time_window: 60
+        key_type: var
+        key: remote_addr
+        rejected_code: 429
+        policy: redis
+        redis_host: redis
+        redis_port: 6379
+        redis_username: apisix
+        redis_password: ${{APISIX_REDIS_PASSWORD}}
+    upstream_id: registry-service
+
+  # ---- Mini-app catalog for signed-in users: apps, ratings, reviews, report ---------------------------------------
+  - id: apps-catalog
+    uris: ["/api/v1/apps", "/api/v1/apps/*"]
+    priority: 20
+    plugins:
+      forward-auth:
+        uri: http://user-service:8080/internal/auth/verify
+        request_headers: ["Authorization", "Cookie"]
+        upstream_headers: ["X-User-Id"]
+        extra_headers:
+          X-Gateway-Secret: ${{USER_GATEWAY_SECRET}}
+        status_on_error: 503
+      proxy-rewrite:
+        headers:
+          set:
+            X-Gateway-Secret: ${{USER_GATEWAY_SECRET}}
+      limit-count:
+        count: 300
+        time_window: 60
+        key_type: var
+        key: remote_addr
+        rejected_code: 429
+        policy: redis
+        redis_host: redis
+        redis_port: 6379
+        redis_username: apisix
+        redis_password: ${{APISIX_REDIS_PASSWORD}}
+    upstream_id: registry-service
+  # ---- Partner API: mini-app backends send notifications. No login here: the service checks the request signature. ---
+  - id: partner-api
+    uris: ["/v1/*"]
+    priority: 20
+    plugins:
+      proxy-rewrite:
+        headers:
+          set:
+            X-Gateway-Secret: ${{USER_GATEWAY_SECRET}}
+            X-Client-IP: $remote_addr
+      limit-count:
+        count: 600
+        time_window: 60
+        key_type: var
+        key: remote_addr
+        rejected_code: 429
+        policy: redis
+        redis_host: redis
+        redis_port: 6379
+        redis_username: apisix
+        redis_password: ${{APISIX_REDIS_PASSWORD}}
+    upstream_id: notification-service
+
+  - id: partner-jwks
+    uris: ["/.well-known/jwks.json"]
+    priority: 20
+    plugins:
+      proxy-rewrite:
+        headers:
+          set:
+            X-Gateway-Secret: ${{USER_GATEWAY_SECRET}}
+      limit-count:
+        count: 120
+        time_window: 60
+        key_type: var
+        key: remote_addr
+        rejected_code: 429
+        policy: redis
+        redis_host: redis
+        redis_port: 6379
+        redis_username: apisix
+        redis_password: ${{APISIX_REDIS_PASSWORD}}
+    upstream_id: notification-service
+
+  # ---- Staff: notification templates, delivery log, usage (more specific than admin-api, so it wins) ----------------
+  - id: admin-notification
+    uris: ["/admin/api/v1/notification/*"]
+    priority: 30
+    plugins:
+      forward-auth:
+        uri: http://registry-service:8080/internal/staff/verify
+        request_headers: ["Authorization"]
+        upstream_headers: ["X-Staff-Id", "X-Staff-Role"]
+        extra_headers:
+          X-Gateway-Secret: ${{USER_GATEWAY_SECRET}}
+        status_on_error: 503
+      proxy-rewrite:
+        headers:
+          set:
+            X-Gateway-Secret: ${{USER_GATEWAY_SECRET}}
+      limit-count:
+        count: 300
+        time_window: 60
+        key_type: var
+        key: remote_addr
+        rejected_code: 429
+        policy: redis
+        redis_host: redis
+        redis_port: 6379
+        redis_username: apisix
+        redis_password: ${{APISIX_REDIS_PASSWORD}}
+    upstream_id: notification-service
+
+  # ---- Staff: registered users (list, detail, suspend) -> user-service (more specific than admin-api, so it wins) ----
+  - id: admin-users
+    uris: ["/admin/api/v1/users", "/admin/api/v1/users/*"]
+    priority: 30
+    plugins:
+      forward-auth:
+        uri: http://registry-service:8080/internal/staff/verify
+        request_headers: ["Authorization"]
+        upstream_headers: ["X-Staff-Id", "X-Staff-Role"]
+        extra_headers:
+          X-Gateway-Secret: ${{USER_GATEWAY_SECRET}}
+        status_on_error: 503
+      proxy-rewrite:
+        headers:
+          set:
+            X-Gateway-Secret: ${{USER_GATEWAY_SECRET}}
+            X-Client-IP: $remote_addr
+      limit-count:
+        count: 300
+        time_window: 60
+        key_type: var
+        key: remote_addr
+        rejected_code: 429
+        policy: redis
+        redis_host: redis
+        redis_port: 6379
+        redis_username: apisix
+        redis_password: ${{APISIX_REDIS_PASSWORD}}
+    upstream_id: user-service
+
+  # ---- Signed-in user: in-app notifications (bell menu) ---------------------------------------------------------
+  - id: me-notifications
+    uris: ["/api/v1/me/notifications", "/api/v1/me/notifications/*"]
+    priority: 30
+    plugins:
+      forward-auth:
+        uri: http://user-service:8080/internal/auth/verify
+        request_headers: ["Authorization", "Cookie"]
+        upstream_headers: ["X-User-Id"]
+        extra_headers:
+          X-Gateway-Secret: ${{USER_GATEWAY_SECRET}}
+        status_on_error: 503
+      proxy-rewrite:
+        headers:
+          set:
+            X-Gateway-Secret: ${{USER_GATEWAY_SECRET}}
+      limit-count:
+        count: 300
+        time_window: 60
+        key_type: var
+        key: remote_addr
+        rejected_code: 429
+        policy: redis
+        redis_host: redis
+        redis_port: 6379
+        redis_username: apisix
+        redis_password: ${{APISIX_REDIS_PASSWORD}}
+    upstream_id: notification-service
+
+  # ---- Backoffice (staff dashboard): static files at /backoffice/, served from the same origin as the admin API ----
+  # The files are public (no secrets in them); everything they show comes from the staff-protected API.
+  - id: backoffice-static
+    uris: ["/backoffice", "/backoffice/*"]
+    priority: 10
+    plugins:
+      limit-count:
+        count: 600
+        time_window: 60
+        key_type: var
+        key: remote_addr
+        rejected_code: 429
+        policy: redis
+        redis_host: redis
+        redis_port: 6379
+        redis_username: apisix
+        redis_password: ${{APISIX_REDIS_PASSWORD}}
+    upstream_id: backoffice
+
+  # Service health probes for the System page: staff only (same forward-auth as the admin API).
+  - id: backoffice-health
+    uris: ["/backoffice/api/health/*"]
+    priority: 30
+    plugins:
+      forward-auth:
+        uri: http://registry-service:8080/internal/staff/verify
+        request_headers: ["Authorization"]
+        upstream_headers: ["X-Staff-Id", "X-Staff-Role"]
+        extra_headers:
+          X-Gateway-Secret: ${{USER_GATEWAY_SECRET}}
+        status_on_error: 503
+      limit-count:
+        count: 120
+        time_window: 60
+        key_type: var
+        key: remote_addr
+        rejected_code: 429
+        policy: redis
+        redis_host: redis
+        redis_port: 6379
+        redis_username: apisix
+        redis_password: ${{APISIX_REDIS_PASSWORD}}
+    upstream_id: backoffice
+#END

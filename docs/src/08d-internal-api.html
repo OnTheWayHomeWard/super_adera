@@ -1,0 +1,614 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>8d. Internal API | Adera docs</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+<button id="menu-btn" type="button" aria-label="Toggle menu">Menu</button>
+<a class="brand" href="../index.html">Adera docs</a>
+<span class="spacer"></span>
+<a href="../index.html">Contents</a>
+<button id="theme-btn" type="button" aria-label="Toggle light or dark theme">Theme</button>
+</header>
+<div class="layout">
+<nav class="sidebar" aria-label="Sections">
+<ul><li><a href="../index.html" class="">Home / contents</a></li></ul>
+<h4>Sections</h4><ul>
+<li><a href="01-overview.html">1. Overview</a>
+</li>
+<li><a href="02-setup.html">2. Setup and running</a>
+</li>
+<li><a href="03-tools.html">3. Tools</a>
+</li>
+<li><a href="04-services.html">4. Services</a>
+</li>
+<li><a href="05-communication.html">5. How it communicates</a>
+</li>
+<li><a href="06-security.html">6. Security model</a>
+</li>
+<li><a href="07-data.html">7. Data</a>
+</li>
+<li><a href="08-endpoints.html">8. Endpoint reference</a>
+</li>
+<li><a href="09-guides.html">9. Guides</a>
+</li>
+<li><a href="10-reference.html">10. Reference</a>
+</li>
+<li><a href="11-backoffice.html">11. Backoffice (staff dashboard)</a>
+</li>
+<li><a href="12-backoffice-guide.html">12. Backoffice guide (staff manual)</a>
+</li>
+<li><a href="13-sample-data.html">13. Sample data (test scenarios)</a>
+</li>
+</ul>
+<h4>Endpoints</h4><ul>
+<li><a href="08a-user-api.html">8a. End-user API</a>
+</li>
+<li><a href="08b-staff-api.html">8b. Staff / dashboard API</a>
+</li>
+<li><a href="08c-partner-api.html">8c. Partner API</a>
+</li>
+<li><a href="08d-internal-api.html" class=current>8d. Internal API</a>
+<ul><li><a href="#overview">All internal endpoints</a></li><li><a href="#secrets">The two secrets and the header overwriting rule</a></li><li><a href="#endpoints">Endpoints</a></li></ul>
+</li>
+<li><a href="08e-kratos-flows.html">8e. Kratos flows</a>
+</li>
+<li><a href="08f-operational.html">8f. Operational endpoints</a>
+</li>
+</ul>
+</nav>
+<main>
+<h1>8d. Internal service-to-service API</h1>
+<p class="lead">The endpoints that exist only so one component can call another: the gateway asking who a session belongs to, Kratos handing over events, notification-service asking the registry and user-service what it needs to deliver. 11 endpoints. None of them may ever be reachable from outside.</p>
+<div class="callout danger"><span class="label">Never expose</span><p>No gateway route points at any <code>/internal/**</code> path. Verified on 2026-10-25: every <code>/internal/...</code> call made through <code>http://127.0.0.1:9080</code> answered <code>404 {"error_msg":"404 Route Not Found"}</code>. The protection is therefore (1) no route, (2) secrets on most endpoints, (3) the compose network. In dev the service ports 8085-8087 are published on <code>127.0.0.1</code>, which is how the examples below were captured (secrets loaded from <code>.env</code> into shell variables and never printed).</p></div>
+<h2 id="overview">All internal endpoints</h2>
+<div class="table-wrap"><table><thead><tr><th>Service</th><th>Endpoint</th><th>Caller</th><th>Secret header</th></tr></thead><tbody><tr><td>user-service</td><td><code>GET /internal/auth/verify</code></td><td>APISIX forward-auth</td><td>X-Gateway-Secret</td></tr><tr><td>user-service</td><td><code>POST /internal/kratos/after-registration</code></td><td>Kratos webhook</td><td>none</td></tr><tr><td>user-service</td><td><code>POST /internal/aliases</code></td><td>future bridge, tests</td><td>X-Internal-Secret</td></tr><tr><td>user-service</td><td><code>GET /internal/aliases/resolve</code></td><td>notification-service</td><td>X-Internal-Secret</td></tr><tr><td>user-service</td><td><code>GET /internal/users/{userId}/delivery-context</code></td><td>notification-service</td><td>X-Internal-Secret</td></tr><tr><td>user-service</td><td><code>POST /internal/devices/deactivate</code></td><td>notification-service</td><td>X-Internal-Secret</td></tr><tr><td>registry-service</td><td><code>GET /internal/staff/verify</code></td><td>APISIX forward-auth</td><td>X-Gateway-Secret</td></tr><tr><td>registry-service</td><td><code>GET /internal/partner-keys/{keyId}</code></td><td>notification-service</td><td>X-Internal-Secret</td></tr><tr><td>registry-service</td><td><code>GET /internal/apps/{appId}/context</code></td><td>notification-service</td><td>X-Internal-Secret</td></tr><tr><td>notification-service</td><td><code>POST /internal/kratos/sms</code></td><td>Kratos courier</td><td>none</td></tr><tr><td>notification-service</td><td><code>POST /internal/kratos/email</code></td><td>Kratos courier</td><td>none</td></tr></tbody></table></div>
+<h2 id="secrets">The two secrets and the header overwriting rule</h2>
+<div class="table-wrap"><table><thead><tr><th>Header</th><th>Env variable</th><th>Who sends it</th><th>Who checks it</th><th>Meaning</th></tr></thead><tbody><tr><td><code>X-Gateway-Secret</code></td><td><code>USER_GATEWAY_SECRET</code> (APISIX env, and <code>GATEWAY_SECRET</code>/<code>USER_GATEWAY_SECRET</code> of each service)</td><td>APISIX: in the forward-auth sub-request <em>and</em> on the proxied request (<code>proxy-rewrite</code> sets it, replacing any client value)</td><td>user-service <code>GatewayAuthFilter</code> (<code>/api/**</code>, <code>/internal/auth/verify</code>), registry-service <code>TrustFilter</code> (<code>/api/**</code>, <code>/admin/api/**</code>, <code>/internal/staff/verify</code>), notification-service <code>GatewayTrustFilter</code> (<code>/api/**</code>, <code>/admin/api/**</code>)</td><td>"This request passed through the gateway, so the identity headers are trustworthy."</td></tr><tr><td><code>X-Internal-Secret</code></td><td><code>INTERNAL_API_SECRET</code></td><td>A service calling another service (notification-service to user-service and registry-service)</td><td>user-service (<code>/internal/aliases</code>, <code>/internal/users/</code>, <code>/internal/devices/</code>), registry-service (every other <code>/internal/**</code>)</td><td>"This caller is one of our services."</td></tr><tr><td><code>X-User-Id</code></td><td>-</td><td>Set by APISIX from the verify answer (<code>upstream_headers</code>)</td><td>Services require a UUID</td><td>Who the request is for. A client-sent value is overwritten.</td></tr><tr><td><code>X-Staff-Id</code>, <code>X-Staff-Role</code></td><td>-</td><td>Set by APISIX from the staff verify answer</td><td>registry-service and notification-service require a UUID and a known role</td><td>Which staff member and role.</td></tr><tr><td><code>X-Client-IP</code></td><td>-</td><td>APISIX (<code>$remote_addr</code>) on admin, partner routes</td><td>registry-service (audit log), notification-service (partner allowlist)</td><td>The real caller address, since the services only see the gateway's.</td></tr></tbody></table></div>
+<p>Rules that follow: secrets are compared in constant time; an empty configured secret disables its check (for local dev; registry-service logs a warning at start); <strong>user-service does not check any secret on <code>/internal/kratos/after-registration</code></strong> and <strong>notification-service checks none on <code>/internal/kratos/*</code></strong> (known limitations: Kratos' static hook config; planned shared-secret header).</p>
+<h2 id="endpoints">Endpoints</h2>
+<details class="endpoint" id="ep-int-get-auth-verify">
+<summary><span class="method m-get">GET</span><span class="path">/internal/auth/verify</span><span class="sum">Gateway forward-auth: who owns this session? (user-service)</span></summary>
+<div class="body"><dl class="meta">
+<dt>Audience</dt><dd>other services, never end users or partners</dd>
+<dt>Client path</dt><dd><strong>none</strong>: not routed by the gateway (calling it through <code>$GATEWAY</code> answers <code>404 {"error_msg":"404 Route Not Found"}</code>, captured)</dd>
+<dt>Internal path</dt><dd><code>http://user-service:8080/internal/auth/verify</code></dd>
+<dt>Called by</dt><dd>APISIX <code>forward-auth</code> plugin on routes <code>me</code>, <code>me-avatar</code>, <code>me-notifications</code>, <code>apps-catalog</code></dd>
+<dt>Auth</dt><dd><code>X-Gateway-Secret: $GATEWAY_SECRET</code> (the value of <code>USER_GATEWAY_SECRET</code> in <code>.env</code>; compared in constant time; an empty configured secret disables the check, dev only)</dd>
+<dt>Rate limit</dt><dd>none (no gateway in the path)</dd>
+<dt>Implemented in</dt><dd><code>services/user-service/.../auth/VerifyController.java, GatewayAuthFilter.java</code></dd>
+</dl>
+<h4>Purpose</h4><p>The translator that turns a Kratos session into headers. APISIX calls it before every protected user request, passing the client's <code>Authorization</code> and <code>Cookie</code> headers. It asks Kratos <code>whoami</code> and answers <code>200</code> with <code>X-User-Id</code> (the Kratos identity id) or <code>401</code>. APISIX then copies <code>X-User-Id</code> onto the real request, replacing anything the client sent. Kratos' own whoami returns the identity in its body, not in headers, so this small endpoint is what lets the gateway hand the user id to any service.</p>
+<h4>Request parameters</h4><div class="table-wrap"><table><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why it exists</th></tr></thead><tbody><tr><td><code>Authorization</code></td><td>header</td><td>string</td><td>one of the two</td><td><code>Bearer &lt;session_token&gt;</code></td><td>The user's session.</td></tr><tr><td><code>Cookie</code></td><td>header</td><td>string</td><td>one of the two</td><td>Kratos session cookie</td><td>Browser sessions.</td></tr><tr><td><code>X-Gateway-Secret</code></td><td>header</td><td>string</td><td>yes</td><td>must equal the configured gateway secret</td><td>Proves the caller is the gateway; otherwise any container could probe sessions.</td></tr></tbody></table></div>
+<h4>Example: valid session</h4>
+<pre><code>curl -s -i "http://127.0.0.1:8086/internal/auth/verify" \
+  -H "X-Gateway-Secret: $GATEWAY_SECRET" \
+  -H "Authorization: Bearer $TOKEN"</code></pre>
+<pre class="out"><code>HTTP/1.1 200
+X-User-Id: &lt;kratos identity id, a UUID&gt;
+Content-Length: 0</code></pre><p class="masked">Verified: the returned id equals the identity id of the session (checked in the capture run). Headers are not stored in the raw capture; the id is shown as a placeholder.</p>
+<h4>No credentials</h4>
+<pre><code>curl -s -i "http://127.0.0.1:8086/internal/auth/verify" -H "X-Gateway-Secret: $GATEWAY_SECRET"</code></pre>
+<pre class="out"><code>HTTP/1.1 401 Unauthorized</code></pre>
+<h4>Invalid token</h4>
+<pre class="out"><code>HTTP/1.1 401 Unauthorized</code></pre>
+<h4>Without the gateway secret</h4>
+<pre><code>curl -s -i "http://127.0.0.1:8086/internal/auth/verify" -H "Authorization: Bearer $TOKEN"</code></pre>
+<pre class="out"><code>HTTP/1.1 401 Unauthorized
+Content-Type: application/json;charset=ISO-8859-1
+
+{
+  "error": "unauthorized"
+}</code></pre>
+<h4>Through the gateway (not routed)</h4>
+<pre><code>curl -s -i "$GATEWAY/internal/auth/verify" -H "Authorization: Bearer $TOKEN"</code></pre>
+<pre class="out"><code>HTTP/1.1 404 Not Found
+Content-Type: text/plain; charset=utf-8
+
+{
+  "error_msg": "404 Route Not Found"
+}</code></pre>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th>Error code</th><th>When it happens</th></tr></thead><tbody><tr><td><strong>401</strong></td><td><code>(empty body)</code></td><td>No <code>Authorization</code>/<code>Cookie</code>, or Kratos says the session is invalid, expired, or needs a second factor (Kratos 401 and 403 are both treated as invalid here).</td></tr><tr><td><strong>401</strong></td><td><code>unauthorized</code></td><td>The required secret header is missing or wrong (body <code>{"error":"unauthorized"}</code>).</td></tr><tr><td><strong>503</strong></td><td><code>identity_service_unavailable</code></td><td>Kratos unreachable or answered a 5xx. Deliberately not a 401, so an outage does not look like a logout.</td></tr></tbody></table></div>
+<h4>How to use it</h4><ul><li>The response body is empty on success; the gateway only reads the <code>X-User-Id</code> header.</li><li>Why per-request calls to Kratos and no JWT: sessions can be revoked instantly (logout, 'sign out everywhere'); a self-contained token could not be, and the extra hop is a few milliseconds inside the Docker network.</li></ul>
+</div></details>
+<details class="endpoint" id="ep-int-post-after-registration">
+<summary><span class="method m-post">POST</span><span class="path">/internal/kratos/after-registration</span><span class="sum">Kratos webhook: create the profile row for a new identity</span></summary>
+<div class="body"><dl class="meta">
+<dt>Audience</dt><dd>other services, never end users or partners</dd>
+<dt>Client path</dt><dd><strong>none</strong>: not routed by the gateway (calling it through <code>$GATEWAY</code> answers <code>404 {"error_msg":"404 Route Not Found"}</code>, captured)</dd>
+<dt>Internal path</dt><dd><code>http://user-service:8080/internal/kratos/after-registration</code></dd>
+<dt>Called by</dt><dd>Ory Kratos, <code>selfservice.flows.registration.after.code.hooks</code> (<code>web_hook</code>, <code>response.ignore: true</code>) in <code>infra/kratos/kratos.yml</code></dd>
+<dt>Auth</dt><dd><strong>none</strong>. The only protection is that the path is not routed by the gateway and the container port is on the private compose network (published to localhost in dev). Kratos' hook configuration is static, so a secret would have to be written into <code>kratos.yml</code>; this was left as a known limitation (SETUP section 12). Worst case today: someone inside the network creates an empty profile row for an id</dd>
+<dt>Rate limit</dt><dd>none (no gateway in the path)</dd>
+<dt>Implemented in</dt><dd><code>services/user-service/.../auth/AfterRegistrationController.java, ProfileService.java#createFromRegistration</code></dd>
+</dl>
+<h4>Purpose</h4><p>Right after a sign-up completes Kratos posts the new identity here (built by a Jsonnet snippet in <code>kratos.yml</code>: <code>identityId</code>, <code>email</code>, <code>phone</code>). user-service inserts the <code>app_user</code> row with <code>INSERT ... ON CONFLICT DO NOTHING</code> (race-safe). The hook is <em>non-blocking</em>: if user-service is slow or down, sign-up still succeeds and the profile is created on first use by <code>GET /api/v1/me</code> instead.</p>
+<h4>Request parameters</h4><div class="table-wrap"><table><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why it exists</th></tr></thead><tbody><tr><td><code>identityId</code></td><td>body</td><td>UUID</td><td>yes</td><td>not null</td><td>The Kratos identity id, which becomes the user id.</td></tr><tr><td><code>email</code></td><td>body</td><td>string or null</td><td>no</td><td>copied as-is, blank becomes null</td><td>Copy of the login identifier (for emails to the user).</td></tr><tr><td><code>phone</code></td><td>body</td><td>string or null</td><td>no</td><td>E.164; <code>+1</code> prefix sets market <code>US</code>, everything else <code>ET</code></td><td>Copy of the login identifier; also decides the initial market.</td></tr></tbody></table></div>
+<h4>Profile already exists</h4>
+<pre><code>curl -s -X POST http://127.0.0.1:8086/internal/kratos/after-registration \
+  -H 'Content-Type: application/json' \
+  -d '{"identityId":"&lt;uuid&gt;","email":null,"phone":"+2519XXXXXXXX"}'</code></pre>
+<pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+
+{
+  "status": "exists"
+}</code></pre>
+<h4>New identity (profile created)</h4>
+<pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+
+{
+  "status": "created"
+}</code></pre><p class="masked">Test row, deleted afterwards.</p>
+<h4>Invalid body</h4>
+<pre class="out"><code>HTTP/1.1 400 Bad Request
+Content-Type: application/json
+
+{
+  "error": "validation_failed",
+  "fields": {
+    "identityId": "must not be null"
+  }
+}</code></pre>
+<h4>Through the gateway (not routed)</h4>
+<pre class="out"><code>HTTP/1.1 404 Not Found
+Content-Type: text/plain; charset=utf-8
+
+{
+  "error_msg": "404 Route Not Found"
+}</code></pre>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th>Error code</th><th>When it happens</th></tr></thead><tbody><tr><td><strong>400</strong></td><td><code>validation_failed</code></td><td><code>identityId</code> missing (<code>fields.identityId: "must not be null"</code>).</td></tr><tr><td><strong>400</strong></td><td><code>invalid_json</code></td><td>Not JSON.</td></tr></tbody></table></div>
+<h4>How to use it</h4><ul><li>Because Kratos ignores the response, the answer (<code>created</code> or <code>exists</code>) is for humans and tests only.</li><li>If the row exists but has no email/phone yet, the call fills the missing copy from the payload.</li></ul>
+</div></details>
+<details class="endpoint" id="ep-int-post-aliases">
+<summary><span class="method m-post">POST</span><span class="path">/internal/aliases</span><span class="sum">Mint a user's pseudonymous id for one mini app</span></summary>
+<div class="body"><dl class="meta">
+<dt>Audience</dt><dd>other services, never end users or partners</dd>
+<dt>Client path</dt><dd><strong>none</strong>: not routed by the gateway (calling it through <code>$GATEWAY</code> answers <code>404 {"error_msg":"404 Route Not Found"}</code>, captured)</dd>
+<dt>Internal path</dt><dd><code>http://user-service:8080/internal/aliases</code></dd>
+<dt>Called by</dt><dd>nobody in production yet: the future frontend bridge / user-consent step (when a user first opens a mini app); the e2e tests call it</dd>
+<dt>Auth</dt><dd><code>X-Internal-Secret: $INTERNAL_SECRET</code> (the value of <code>INTERNAL_API_SECRET</code> in <code>.env</code>; constant-time compare; an empty configured secret disables the check, dev only)</dd>
+<dt>Rate limit</dt><dd>none (no gateway in the path)</dd>
+<dt>Implemented in</dt><dd><code>services/user-service/.../internal/InternalController.java#mint, alias/AliasService.java</code></dd>
+</dl>
+<h4>Purpose</h4><p>Gives a user their id for one app: <code>u_p_</code> plus the first 32 hex characters of <code>HMAC-SHA256(ALIAS_HMAC_SECRET, userId:appId)</code>. The same user has a different id in each app and the partner cannot map it back to a real user or to the same user in another app, so a partner data leak links to nothing else. The mapping is stored in <code>app_user_alias</code> because resolving needs the table (an HMAC cannot be reversed). Minting twice returns the same alias. It also makes sure the user has a profile row.</p>
+<h4>Request parameters</h4><div class="table-wrap"><table><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why it exists</th></tr></thead><tbody><tr><td><code>appId</code></td><td>body</td><td>UUID</td><td>yes</td><td>not null; <em>not verified</em> against the registry</td><td>Which app the alias is for.</td></tr><tr><td><code>userId</code></td><td>body</td><td>UUID</td><td>yes</td><td>not null; need not exist yet (a profile is created from Kratos' record, which fails with 404 for a non-existent identity)</td><td>Whose alias.</td></tr><tr><td><code>X-Internal-Secret</code></td><td>header</td><td>string</td><td>yes</td><td>internal secret</td><td>Only services may mint aliases.</td></tr></tbody></table></div>
+<h4>Example request</h4>
+<pre><code>curl -s -X POST http://127.0.0.1:8086/internal/aliases \
+  -H "X-Internal-Secret: $INTERNAL_SECRET" -H 'Content-Type: application/json' \
+  -d '{"appId":"&lt;app uuid&gt;","userId":"&lt;user uuid&gt;"}'</code></pre>
+<pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+
+{
+  "alias": "u_p_d9daa2b3d83a3a8cefa463fb06c85832"
+}</code></pre>
+<h4>Again (idempotent)</h4>
+<pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+
+{
+  "alias": "u_p_d9daa2b3d83a3a8cefa463fb06c85832"
+}</code></pre>
+<h4>Missing field</h4>
+<pre class="out"><code>HTTP/1.1 400 Bad Request
+Content-Type: application/json
+
+{
+  "error": "validation_failed",
+  "fields": {
+    "userId": "must not be null"
+  }
+}</code></pre>
+<h4>No secret</h4>
+<pre class="out"><code>HTTP/1.1 401 Unauthorized
+Content-Type: application/json;charset=ISO-8859-1
+
+{
+  "error": "unauthorized"
+}</code></pre>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th>Error code</th><th>When it happens</th></tr></thead><tbody><tr><td><strong>401</strong></td><td><code>unauthorized</code></td><td>The required secret header is missing or wrong (body <code>{"error":"unauthorized"}</code>).</td></tr><tr><td><strong>400</strong></td><td><code>validation_failed</code></td><td>A required field is missing (<code>must not be null</code>).</td></tr><tr><td><strong>404</strong></td><td><code>not_found</code></td><td>The user id is not a Kratos identity, so no profile can be created (from code, not captured).</td></tr><tr><td><strong>500</strong></td><td><code>-</code></td><td><code>ALIAS_HMAC_SECRET</code> empty: the service refuses to start, so this cannot happen at runtime.</td></tr></tbody></table></div>
+<h4>How to use it</h4><ul><li>The alias minted here is the <code>userId</code> a partner puts into <code>POST /v1/notifications</code> (<a href="08c-partner-api.html">8c</a>).</li><li>Opening a mini app is where this gets called in the finished product; until the frontend bridge exists, staff/test scripts mint aliases by calling this endpoint directly.</li></ul>
+</div></details>
+<details class="endpoint" id="ep-int-get-alias-resolve">
+<summary><span class="method m-get">GET</span><span class="path">/internal/aliases/resolve</span><span class="sum">Turn a partner's alias back into the real user id</span></summary>
+<div class="body"><dl class="meta">
+<dt>Audience</dt><dd>other services, never end users or partners</dd>
+<dt>Client path</dt><dd><strong>none</strong>: not routed by the gateway (calling it through <code>$GATEWAY</code> answers <code>404 {"error_msg":"404 Route Not Found"}</code>, captured)</dd>
+<dt>Internal path</dt><dd><code>http://user-service:8080/internal/aliases/resolve</code></dd>
+<dt>Called by</dt><dd>notification-service (<code>UserDirectoryClient.resolve</code>) for every partner notification</dd>
+<dt>Auth</dt><dd><code>X-Internal-Secret: $INTERNAL_SECRET</code> (the value of <code>INTERNAL_API_SECRET</code> in <code>.env</code>; constant-time compare; an empty configured secret disables the check, dev only)</dd>
+<dt>Rate limit</dt><dd>none (no gateway in the path)</dd>
+<dt>Implemented in</dt><dd><code>services/user-service/.../internal/InternalController.java#resolve</code></dd>
+</dl>
+<h4>Purpose</h4><p>Lookup used when a partner sends to <code>u_p_...</code>: notification-service must know which real user that is, but only for that app. The pair (app, alias) is the key, so an alias from another app does not resolve.</p>
+<h4>Request parameters</h4><div class="table-wrap"><table><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why it exists</th></tr></thead><tbody><tr><td><code>appId</code></td><td>query</td><td>UUID</td><td>yes</td><td>uuid</td><td>The calling app.</td></tr><tr><td><code>alias</code></td><td>query</td><td>string</td><td>yes</td><td>the partner's user id</td><td>The pseudonym to resolve.</td></tr></tbody></table></div>
+<h4>Found</h4>
+<pre><code>curl -s "http://127.0.0.1:8086/internal/aliases/resolve?appId=&lt;app uuid&gt;&amp;alias=u_p_..." -H "X-Internal-Secret: $INTERNAL_SECRET"</code></pre>
+<pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+
+{
+  "userId": "ff11b469-af24-4970-9ecd-8fed609a1bc7"
+}</code></pre>
+<h4>Unknown alias</h4>
+<pre class="out"><code>HTTP/1.1 404 Not Found
+Content-Type: application/json
+
+{
+  "error": "not_found"
+}</code></pre>
+<h4>Without the parameter</h4>
+<pre><code>curl -s "http://127.0.0.1:8087/internal/apps/&lt;app uuid&gt;/context" -H "X-Internal-Secret: $INTERNAL_SECRET"</code></pre>
+<p>Answers exactly like <code>?environment=DEV</code> on a dev deployment (the deployment's environment is used).</p>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th>Error code</th><th>When it happens</th></tr></thead><tbody><tr><td><strong>401</strong></td><td><code>unauthorized</code></td><td>The required secret header is missing or wrong (body <code>{"error":"unauthorized"}</code>).</td></tr><tr><td><strong>404</strong></td><td><code>not_found</code></td><td>No such alias for this app (never minted, or from another app). notification-service turns it into the same <code>422 user_unreachable</code> a deleted user gets, so partners cannot probe for ids.</td></tr><tr><td><strong>400</strong></td><td><code>(Spring default JSON)</code></td><td>A required query parameter is missing or not a UUID: the framework's default body, not the Adera shape.</td></tr></tbody></table></div>
+</div></details>
+<details class="endpoint" id="ep-int-get-delivery-context">
+<summary><span class="method m-get">GET</span><span class="path">/internal/users/{userId}/delivery-context</span><span class="sum">How to reach one user on behalf of one app</span></summary>
+<div class="body"><dl class="meta">
+<dt>Audience</dt><dd>other services, never end users or partners</dd>
+<dt>Client path</dt><dd><strong>none</strong>: not routed by the gateway (calling it through <code>$GATEWAY</code> answers <code>404 {"error_msg":"404 Route Not Found"}</code>, captured)</dd>
+<dt>Internal path</dt><dd><code>http://user-service:8080/internal/users/{userId}/delivery-context?appId=...</code></dd>
+<dt>Called by</dt><dd>notification-service (<code>UserDirectoryClient.context</code>) while delivering</dd>
+<dt>Auth</dt><dd><code>X-Internal-Secret: $INTERNAL_SECRET</code> (the value of <code>INTERNAL_API_SECRET</code> in <code>.env</code>; constant-time compare; an empty configured secret disables the check, dev only)</dd>
+<dt>Rate limit</dt><dd>none (no gateway in the path)</dd>
+<dt>Implemented in</dt><dd><code>services/user-service/.../internal/InternalController.java#deliveryContext</code></dd>
+</dl>
+<h4>Purpose</h4><p>Everything the delivery worker needs in one call: whether the user can be reached at all (<code>reachable</code> is false for deleted or suspended users), their language, phone, email, active FCM tokens, and this app's mute switches. When <code>reachable</code> is false, the phone, email and token fields are blanked, so a deleted user's data is never used. This is the one place where real phone/email leave user-service; the partner never sees them.</p>
+<h4>Request parameters</h4><div class="table-wrap"><table><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why it exists</th></tr></thead><tbody><tr><td><code>userId</code></td><td>path</td><td>UUID</td><td>yes</td><td>real user id (as resolved from the alias)</td><td>Whose contact data.</td></tr><tr><td><code>appId</code></td><td>query</td><td>UUID</td><td>yes</td><td>uuid</td><td>Which app's mute switches to include.</td></tr></tbody></table></div>
+<h4>Example request</h4>
+<pre><code>curl -s "http://127.0.0.1:8086/internal/users/&lt;user uuid&gt;/delivery-context?appId=&lt;app uuid&gt;" -H "X-Internal-Secret: $INTERNAL_SECRET"</code></pre>
+<pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+
+{
+  "userId": "ff11b469-af24-4970-9ecd-8fed609a1bc7",
+  "reachable": true,
+  "language": "am",
+  "phone": "+2519******49",
+  "email": null,
+  "pushTokens": [],
+  "muted": {
+    "muteInApp": false,
+    "muteSms": true,
+    "muteEmail": false
+  }
+}</code></pre><p class="masked">Values masked: phone. &lt;code&gt;muted.muteSms&lt;/code&gt; was set to true by the earlier preference example.</p>
+<h4>Unknown user</h4>
+<pre class="out"><code>HTTP/1.1 404 Not Found
+Content-Type: application/json
+
+{
+  "error": "not_found"
+}</code></pre>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th>Error code</th><th>When it happens</th></tr></thead><tbody><tr><td><strong>401</strong></td><td><code>unauthorized</code></td><td>The required secret header is missing or wrong (body <code>{"error":"unauthorized"}</code>).</td></tr><tr><td><strong>404</strong></td><td><code>not_found</code></td><td>No such user row.</td></tr><tr><td><strong>400</strong></td><td><code>(Spring default JSON)</code></td><td><code>appId</code> missing or malformed.</td></tr></tbody></table></div>
+<h4>How to use it</h4><ul><li><code>pushTokens</code> are ordered by most recently seen; the FCM sender tries all of them and reports dead ones back through <code>/internal/devices/deactivate</code>.</li></ul>
+</div></details>
+<details class="endpoint" id="ep-int-post-devices-deactivate">
+<summary><span class="method m-post">POST</span><span class="path">/internal/devices/deactivate</span><span class="sum">Retire an FCM token that Firebase rejected</span></summary>
+<div class="body"><dl class="meta">
+<dt>Audience</dt><dd>other services, never end users or partners</dd>
+<dt>Client path</dt><dd><strong>none</strong>: not routed by the gateway (calling it through <code>$GATEWAY</code> answers <code>404 {"error_msg":"404 Route Not Found"}</code>, captured)</dd>
+<dt>Internal path</dt><dd><code>http://user-service:8080/internal/devices/deactivate</code></dd>
+<dt>Called by</dt><dd>notification-service (<code>UserDirectoryClient.deactivateToken</code>), best effort, after a push failed with an unregistered-token error</dd>
+<dt>Auth</dt><dd><code>X-Internal-Secret: $INTERNAL_SECRET</code> (the value of <code>INTERNAL_API_SECRET</code> in <code>.env</code>; constant-time compare; an empty configured secret disables the check, dev only)</dd>
+<dt>Rate limit</dt><dd>none (no gateway in the path)</dd>
+<dt>Implemented in</dt><dd><code>services/user-service/.../internal/InternalController.java#deactivate</code></dd>
+</dl>
+<h4>Purpose</h4><p>Marks the device row with this token inactive so it is no longer returned by <code>delivery-context</code> or <code>GET /api/v1/me/devices</code>. Failing to call it never fails a delivery.</p>
+<h4>Request parameters</h4><div class="table-wrap"><table><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why it exists</th></tr></thead><tbody><tr><td><code>fcmToken</code></td><td>body</td><td>string</td><td>yes</td><td>not blank</td><td>The token Firebase said is dead.</td></tr></tbody></table></div>
+<h4>Unknown token</h4>
+<pre><code>curl -s -X POST http://127.0.0.1:8086/internal/devices/deactivate -H "X-Internal-Secret: $INTERNAL_SECRET" \
+  -H 'Content-Type: application/json' -d '{"fcmToken":"&lt;token&gt;"}'</code></pre>
+<pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+
+{
+  "deactivated": false
+}</code></pre>
+<h4>Known token</h4>
+<pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+
+{
+  "deactivated": true
+}</code></pre>
+<h4>Missing token</h4>
+<pre class="out"><code>HTTP/1.1 400 Bad Request
+Content-Type: application/json
+
+{
+  "error": "validation_failed",
+  "fields": {
+    "fcmToken": "must not be blank"
+  }
+}</code></pre>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th>Error code</th><th>When it happens</th></tr></thead><tbody><tr><td><strong>401</strong></td><td><code>unauthorized</code></td><td>The required secret header is missing or wrong (body <code>{"error":"unauthorized"}</code>).</td></tr><tr><td><strong>400</strong></td><td><code>validation_failed</code></td><td><code>fcmToken</code> blank or missing.</td></tr></tbody></table></div>
+<h4>How to use it</h4><ul><li>The real FCM sender is not built yet (<code>FCM_PROVIDER=fake</code>), so nothing calls this in normal operation today; it was exercised directly.</li></ul>
+</div></details>
+<details class="endpoint" id="ep-int-get-staff-verify">
+<summary><span class="method m-get">GET</span><span class="path">/internal/staff/verify</span><span class="sum">Gateway forward-auth: is this an active staff member with the authenticator step done? (registry-service)</span></summary>
+<div class="body"><dl class="meta">
+<dt>Audience</dt><dd>other services, never end users or partners</dd>
+<dt>Client path</dt><dd><strong>none</strong>: not routed by the gateway (calling it through <code>$GATEWAY</code> answers <code>404 {"error_msg":"404 Route Not Found"}</code>, captured)</dd>
+<dt>Internal path</dt><dd><code>http://registry-service:8080/internal/staff/verify</code></dd>
+<dt>Called by</dt><dd>APISIX <code>forward-auth</code> on routes <code>admin-api</code> and <code>admin-notification</code></dd>
+<dt>Auth</dt><dd><code>X-Gateway-Secret: $GATEWAY_SECRET</code> (the value of <code>USER_GATEWAY_SECRET</code> in <code>.env</code>; compared in constant time; an empty configured secret disables the check, dev only)</dd>
+<dt>Rate limit</dt><dd>none (no gateway in the path)</dd>
+<dt>Implemented in</dt><dd><code>services/registry-service/.../auth/StaffVerifyController.java, TrustFilter.java</code></dd>
+</dl>
+<h4>Purpose</h4><p>Staff counterpart of the user verify endpoint. It asks Kratos <code>whoami</code>, reads the role from the identity's <code>metadata_public.role</code>, checks that a row in <code>staff</code> exists and is <code>ACTIVE</code>, and (when <code>ADMIN_REQUIRE_AAL2</code> is true, the default) that the session is <code>aal2</code>. On success it returns <code>X-Staff-Id</code> and <code>X-Staff-Role</code>, which APISIX sets on the forwarded request (overwriting client values). Controllers then check the role with <code>role.require(...)</code>.</p>
+<h4>Request parameters</h4><div class="table-wrap"><table><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why it exists</th></tr></thead><tbody><tr><td><code>Authorization</code></td><td>header</td><td>string</td><td>yes</td><td><code>Bearer &lt;staff session token&gt;</code></td><td>The staff session.</td></tr><tr><td><code>X-Gateway-Secret</code></td><td>header</td><td>string</td><td>yes</td><td>gateway secret</td><td>Only the gateway may ask.</td></tr></tbody></table></div>
+<h4>Valid staff session at aal2</h4>
+<pre><code>curl -s -i http://127.0.0.1:8087/internal/staff/verify -H "X-Gateway-Secret: $GATEWAY_SECRET" -H "Authorization: Bearer $STAFF_TOKEN"</code></pre>
+<pre class="out"><code>HTTP/1.1 200
+X-Staff-Id: &lt;staff identity id, a UUID&gt;
+X-Staff-Role: SUPER_ADMIN
+Content-Type: application/json
+
+{"status":"ok"}</code></pre><p class="masked">Verified on 2026-10-25 with the bootstrap super admin (role and 200/ok observed; the id is shown as a placeholder).</p>
+<h4>Customer session (not staff)</h4>
+<pre class="out"><code>HTTP/1.1 403 Forbidden
+Content-Type: application/json
+
+{
+  "error": "not_staff"
+}</code></pre>
+<h4>Staff, but only the emailed code so far (aal1)</h4>
+<pre class="out"><code>HTTP/1.1 403 Forbidden
+Content-Type: application/json
+
+{
+  "error": "mfa_required"
+}</code></pre>
+<h4>No Authorization header</h4>
+<pre class="out"><code>HTTP/1.1 401 Unauthorized
+Content-Type: application/json
+
+{
+  "error": "unauthorized"
+}</code></pre>
+<h4>Invalid token</h4>
+<pre class="out"><code>HTTP/1.1 401 Unauthorized
+Content-Type: application/json
+
+{
+  "error": "unauthorized"
+}</code></pre>
+<h4>Without the gateway secret</h4>
+<pre class="out"><code>HTTP/1.1 401 Unauthorized
+Content-Type: application/json;charset=ISO-8859-1
+
+{
+  "error": "unauthorized"
+}</code></pre>
+<h4>Through the gateway (not routed)</h4>
+<pre class="out"><code>HTTP/1.1 404 Not Found
+Content-Type: text/plain; charset=utf-8
+
+{
+  "error_msg": "404 Route Not Found"
+}</code></pre>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th>Error code</th><th>When it happens</th></tr></thead><tbody><tr><td><strong>401</strong></td><td><code>unauthorized</code></td><td>No <code>Authorization</code> header, invalid or expired session, or the gateway secret is missing (all use the same body).</td></tr><tr><td><strong>403</strong></td><td><code>mfa_required</code></td><td>Kratos answered 403 (an authenticator app exists but the session is aal1) or the session is not aal2 while <code>ADMIN_REQUIRE_AAL2=true</code>.</td></tr><tr><td><strong>403</strong></td><td><code>not_staff</code></td><td>Valid session but the identity has no role, no <code>staff</code> row, or the staff status is not ACTIVE (including a customer).</td></tr><tr><td><strong>503</strong></td><td><code>identity_service_unavailable</code></td><td>Kratos unreachable.</td></tr></tbody></table></div>
+<h4>How to use it</h4><ul><li>Order of checks matters for what the caller learns: invalid token first, then second factor, then staff membership.</li><li>Roles: VIEWER, ADMIN, SUPER_ADMIN (<a href="10-reference.html#glossary-status">glossary</a>).</li></ul>
+</div></details>
+<details class="endpoint" id="ep-int-get-partner-key">
+<summary><span class="method m-get">GET</span><span class="path">/internal/partner-keys/{keyId}</span><span class="sum">Look up a partner's public key</span></summary>
+<div class="body"><dl class="meta">
+<dt>Audience</dt><dd>other services, never end users or partners</dd>
+<dt>Client path</dt><dd><strong>none</strong>: not routed by the gateway (calling it through <code>$GATEWAY</code> answers <code>404 {"error_msg":"404 Route Not Found"}</code>, captured)</dd>
+<dt>Internal path</dt><dd><code>http://registry-service:8080/internal/partner-keys/{keyId}</code></dd>
+<dt>Called by</dt><dd>notification-service (<code>RegistryClient.key</code>) for every signed partner request; answers are cached 15 s, so a revoked key stops working within about 15 seconds</dd>
+<dt>Auth</dt><dd><code>X-Internal-Secret: $INTERNAL_SECRET</code> (the value of <code>INTERNAL_API_SECRET</code> in <code>.env</code>; constant-time compare; an empty configured secret disables the check, dev only)</dd>
+<dt>Rate limit</dt><dd>none (no gateway in the path)</dd>
+<dt>Implemented in</dt><dd><code>services/registry-service/.../internal/InternalController.java#key</code></dd>
+</dl>
+<h4>Purpose</h4><p>The signature check needs the public key for the <code>X-Adera-Key-Id</code> the partner sent, plus which app and environment it belongs to. <code>usable</code> is false for revoked or expired keys, so notification-service can answer <code>401 key_revoked_or_expired</code> without a second call. <code>activeHere</code> says whether the key's environment is the one this deployment runs (<code>ADERA_ENV</code>), and <code>deploymentEnvironment</code> is that environment; notification-service refuses a key of the other environment with <code>403 wrong_environment</code> (it compares with its own <code>ADERA_ENV</code> too, and answers 503 if the two services disagree). A key stored for the other environment is still returned here, with <code>activeHere: false</code>.</p>
+<h4>Request parameters</h4><div class="table-wrap"><table><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why it exists</th></tr></thead><tbody><tr><td><code>keyId</code></td><td>path</td><td>string</td><td>yes</td><td>the key id staff gave the partner, e.g. <code>ak_dev_...</code> (keys made before the rename keep <code>ak_test_...</code> / <code>ak_live_...</code>)</td><td>Which key.</td></tr></tbody></table></div>
+<h4>Example request</h4>
+<pre><code>curl -s http://127.0.0.1:8087/internal/partner-keys/&lt;keyId&gt; -H "X-Internal-Secret: $INTERNAL_SECRET"</code></pre>
+<pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+
+{
+  "keyId": "ak_dev_664cb0329011fa5d25b3e7df",
+  "appId": "fc32bca2-89a9-4426-b834-aad34a3eebbe",
+  "environment": "DEV",
+  "algorithm": "RS256",
+  "publicKeyPem": "-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA7eZEfha3s0I9/g1V5hCq\ncOK0qIV2RWHED66N80jhzBVcEnwifB1yyZFcvr+2rIP4DmZ/MJxal2yjl/8KLsWS\nBAT4B5r9zv/E7ukbeZLz3af2V5ZX6veNBJVUxdqMt2Qr3r4KMy1cPFurFlUytbXd\nPkZi3Sf2iwSDeALqQyy5QrVPl8qW1XvAnXDX+Jl6x8XW8eRbxnywxpeLkTHWptf/\n1MbRCzUQ1vkvbkshxfeiDsJWLEtdBwEYE+1f5yM/OnCw+NrNzIoHByPHwHYKkuoi\nrzM8Zr2eEJt+SOObQ6HptEN0k0aSBImXX7O2SNAPeEWLA5W1jsKFBrueUTgTqHL+\nkQIDAQAB\n-----END PUBLIC KEY-----\n",
+  "usable": true,
+  "activeHere": true,
+  "deploymentEnvironment": "DEV"
+}</code></pre><p class="masked">Shown for a dev deployment (illustrative since the DEV/PROD rename). The PEM is the public half of a throwaway key pair; the matching private key never left the test script.</p>
+<h4>Unknown key</h4>
+<pre class="out"><code>HTTP/1.1 404 Not Found
+Content-Type: application/json
+
+{
+  "error": "not_found"
+}</code></pre>
+<h4>No secret</h4>
+<pre class="out"><code>HTTP/1.1 401 Unauthorized
+Content-Type: application/json;charset=ISO-8859-1
+
+{
+  "error": "unauthorized"
+}</code></pre>
+<h4>Through the gateway (not routed)</h4>
+<pre class="out"><code>HTTP/1.1 404 Not Found
+Content-Type: text/plain; charset=utf-8
+
+{
+  "error_msg": "404 Route Not Found"
+}</code></pre>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th>Error code</th><th>When it happens</th></tr></thead><tbody><tr><td><strong>401</strong></td><td><code>unauthorized</code></td><td>The required secret header is missing or wrong (body <code>{"error":"unauthorized"}</code>).</td></tr><tr><td><strong>404</strong></td><td><code>not_found</code></td><td>No such key id (notification-service answers <code>401 unknown_key</code> to the partner).</td></tr></tbody></table></div>
+</div></details>
+<details class="endpoint" id="ep-int-get-app-context">
+<summary><span class="method m-get">GET</span><span class="path">/internal/apps/{appId}/context</span><span class="sum">What may this app do in this deployment's environment?</span></summary>
+<div class="body"><dl class="meta">
+<dt>Audience</dt><dd>other services, never end users or partners</dd>
+<dt>Client path</dt><dd><strong>none</strong>: not routed by the gateway (calling it through <code>$GATEWAY</code> answers <code>404 {"error_msg":"404 Route Not Found"}</code>, captured)</dd>
+<dt>Internal path</dt><dd><code>http://registry-service:8080/internal/apps/{appId}/context[?environment=...]</code></dd>
+<dt>Called by</dt><dd>notification-service (<code>RegistryClient.context</code>), cached 15 s</dd>
+<dt>Auth</dt><dd><code>X-Internal-Secret: $INTERNAL_SECRET</code> (the value of <code>INTERNAL_API_SECRET</code> in <code>.env</code>; constant-time compare; an empty configured secret disables the check, dev only)</dd>
+<dt>Rate limit</dt><dd>none (no gateway in the path)</dd>
+<dt>Implemented in</dt><dd><code>services/registry-service/.../internal/InternalController.java#context</code></dd>
+</dl>
+<h4>Purpose</h4><p>One call that tells the delivery side everything about an app for this deployment's environment (<code>ADERA_ENV</code>, always used): status, whether it is <code>usable</code> (DEV works for any app that is not KILLED, so partners can integrate before going live; PROD only when the app status is LIVE), the granted capabilities, the per-channel limits and the allowed server addresses (CIDRs) of that environment. The other environment's addresses are stored but never returned.</p>
+<h4>Request parameters</h4><div class="table-wrap"><table><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why it exists</th></tr></thead><tbody><tr><td><code>appId</code></td><td>path</td><td>UUID</td><td>yes</td><td>uuid</td><td>The app.</td></tr><tr><td><code>environment</code></td><td>query</td><td>string</td><td>no</td><td><code>DEV</code> or <code>PROD</code> (case-insensitive); must equal this deployment's environment</td><td>Optional. Asking for the other environment is refused with <code>403 wrong_environment</code>, so a caller cannot read the other environment's settings by mistake.</td></tr></tbody></table></div>
+<h4>DEV deployment (usable)</h4>
+<pre><code>curl -s "http://127.0.0.1:8087/internal/apps/&lt;app uuid&gt;/context?environment=DEV" -H "X-Internal-Secret: $INTERNAL_SECRET"</code></pre>
+<pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+
+{
+  "appId": "fc32bca2-89a9-4426-b834-aad34a3eebbe",
+  "slug": "docs-demo-2015",
+  "status": "LIVE",
+  "environment": "DEV",
+  "usable": true,
+  "denyReason": null,
+  "grantedCapabilities": [
+    "location.coarse",
+    "notify.inapp"
+  ],
+  "notificationLimits": [
+    {
+      "channel": "IN_APP",
+      "maxPerUserPerDay": 20,
+      "maxPerDay": 1000,
+      "maxDistinctUsersPerDay": 1000,
+      "maxTotal": 10000
+    }
+  ],
+  "allowedCidrs": [
+    "127.0.0.1/32",
+    "172.16.0.0/12"
+  ]
+}</code></pre><p class="masked">The allowed CIDRs were set for this test (loopback and the Docker range); a single address is normalised to &lt;code&gt;/32&lt;/code&gt;.</p>
+<h4>The other environment (refused)</h4>
+<pre class="out"><code>HTTP/1.1 403 Forbidden
+Content-Type: application/json
+
+{
+  "error": "wrong_environment"
+}</code></pre>
+<p class="masked">A dev deployment asked for <code>environment=PROD</code> (or the reverse). Illustrative since the DEV/PROD rename.</p>
+<h4>Bad environment</h4>
+<pre class="out"><code>HTTP/1.1 400 Bad Request
+Content-Type: application/json
+
+{
+  "error": "validation_failed",
+  "fields": {
+    "environment": "must be DEV or PROD"
+  }
+}</code></pre>
+<h4>Unknown app</h4>
+<pre class="out"><code>HTTP/1.1 404 Not Found
+Content-Type: application/json
+
+{
+  "error": "not_found"
+}</code></pre>
+<h4>Missing parameter</h4>
+<pre class="out"><code>HTTP/1.1 400 Bad Request
+Content-Type: application/json
+
+{
+  "timestamp": "2026-10-25T05:47:58.920Z",
+  "status": 400,
+  "error": "Bad Request",
+  "path": "/internal/apps/fc32bca2-89a9-4426-b834-aad34a3eebbe/context"
+}</code></pre>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th>Error code</th><th>When it happens</th></tr></thead><tbody><tr><td><strong>401</strong></td><td><code>unauthorized</code></td><td>The required secret header is missing or wrong (body <code>{"error":"unauthorized"}</code>).</td></tr><tr><td><strong>400</strong></td><td><code>validation_failed</code></td><td><code>environment</code> is not DEV or PROD.</td></tr><tr><td><strong>403</strong></td><td><code>wrong_environment</code></td><td><code>environment</code> is the other environment than this deployment's.</td></tr><tr><td><strong>404</strong></td><td><code>not_found</code></td><td>Unknown app.</td></tr></tbody></table></div>
+<h4>How to use it</h4><ul><li>When <code>usable</code> is false, <code>denyReason</code> is <code>app_&lt;status&gt;</code> (for example <code>app_paused</code>); notification-service turns it into a <code>403</code> for the partner.</li></ul>
+</div></details>
+<details class="endpoint" id="ep-int-post-kratos-sms">
+<summary><span class="method m-post">POST</span><span class="path">/internal/kratos/sms</span><span class="sum">Kratos courier: send an SMS (login/registration code)</span></summary>
+<div class="body"><dl class="meta">
+<dt>Audience</dt><dd>other services, never end users or partners</dd>
+<dt>Client path</dt><dd><strong>none</strong>: not routed by the gateway (calling it through <code>$GATEWAY</code> answers <code>404 {"error_msg":"404 Route Not Found"}</code>, captured)</dd>
+<dt>Internal path</dt><dd><code>http://notification-service:8080/internal/kratos/sms</code></dd>
+<dt>Called by</dt><dd>Ory Kratos' HTTP courier channel <code>sms</code> (<code>courier.channels</code> in <code>kratos.yml</code>; body built by a Jsonnet snippet)</dd>
+<dt>Auth</dt><dd><strong>none</strong>. The only protection is that the path is not routed by the gateway and the container port is on the private compose network (published to localhost in dev). A shared-secret header is listed as the next step in SETUP section 12</dd>
+<dt>Rate limit</dt><dd>none (no gateway in the path)</dd>
+<dt>Implemented in</dt><dd><code>services/notification-service/.../kratos/KratosCourierController.java, dispatch/NotificationDispatcher.java</code></dd>
+</dl>
+<h4>Purpose</h4><p>Every SMS Kratos wants to send (registration and login codes) arrives here, and <em>this service</em> decides how it is delivered: per-recipient limits first, then the live-mode allowlist, then the provider (<code>console</code> in dev, <code>twilio</code> live), then a row in <code>send_log</code> (masked recipient + hash, never the code). Why a courier of our own: it is the single choke point for SMS cost control and for the dev/real switch (<code>SMS_PROVIDER</code>).</p>
+<h4>Request parameters</h4><div class="table-wrap"><table><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why it exists</th></tr></thead><tbody><tr><td><code>to</code></td><td>body</td><td>string</td><td>yes</td><td>not blank; E.164 phone</td><td>Recipient.</td></tr><tr><td><code>body</code></td><td>body</td><td>string</td><td>yes</td><td>not blank</td><td>Message text (contains the code).</td></tr><tr><td><code>templateType</code></td><td>body</td><td>string</td><td>no</td><td>Kratos template name, e.g. <code>login_code_valid</code></td><td>Recorded in the send log.</td></tr></tbody></table></div>
+<h4>Dev mode</h4>
+<pre><code>curl -s -X POST http://127.0.0.1:8085/internal/kratos/sms -H 'Content-Type: application/json' \
+  -d '{"to":"+2519XXXXXXXX","body":"Your login code is: 123456","templateType":"login_code"}'</code></pre>
+<pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+
+{
+  "status": "sent",
+  "provider": "console"
+}</code></pre><p class="masked">Values masked: the number. In dev the text is only logged to the console and kept in &lt;code&gt;/dev/messages&lt;/code&gt;.</p>
+<h4>Empty fields</h4>
+<pre class="out"><code>HTTP/1.1 400 Bad Request
+Content-Type: application/json
+
+{
+  "timestamp": "2026-10-25T05:48:32.317Z",
+  "status": 400,
+  "error": "Bad Request",
+  "path": "/internal/kratos/sms"
+}</code></pre>
+<h4>Through the gateway (not routed)</h4>
+<pre class="out"><code>HTTP/1.1 404 Not Found
+Content-Type: text/plain; charset=utf-8
+
+{
+  "error_msg": "404 Route Not Found"
+}</code></pre>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th>Error code</th><th>When it happens</th></tr></thead><tbody><tr><td><strong>400</strong></td><td><code>(Spring default JSON)</code></td><td><code>to</code> or <code>body</code> blank: bean validation here is not mapped to the Adera error shape.</td></tr><tr><td><strong>400</strong></td><td><code>invalid_request</code></td><td>Body is not valid JSON (captured on the email endpoint).</td></tr><tr><td><strong>502</strong></td><td><code>delivery_failed</code></td><td>The real provider failed (body also has <code>code</code>, e.g. the Twilio error). Kratos then keeps the message queued and retries; this is intended.</td></tr><tr><td><strong>200</strong></td><td>(<code>status</code> = <code>suppressed</code> or <code>skipped</code>)</td><td>Per-recipient limit reached (<code>suppressed</code>, 5 per hour / 10 per day for SMS) or live allowlist mismatch (<code>skipped</code>). Always 200 on purpose: Kratos retries non-2xx answers, which would defeat the limit. The user never gets a code and Kratos does not know.</td></tr></tbody></table></div>
+<h4>How to use it</h4><ul><li>The success answer is <code>{"status":"sent","provider":"console"}</code>; <code>provider</code> is <code>twilio</code> in live mode.</li><li>A real send is a cost: never point this at a live provider without <code>NOTIFY_LIVE_ALLOWLIST</code> (<a href="02-setup.html#delivery-modes">delivery modes</a>).</li></ul>
+</div></details>
+<details class="endpoint" id="ep-int-post-kratos-email">
+<summary><span class="method m-post">POST</span><span class="path">/internal/kratos/email</span><span class="sum">Kratos courier: send an email (login/registration code)</span></summary>
+<div class="body"><dl class="meta">
+<dt>Audience</dt><dd>other services, never end users or partners</dd>
+<dt>Client path</dt><dd><strong>none</strong>: not routed by the gateway (calling it through <code>$GATEWAY</code> answers <code>404 {"error_msg":"404 Route Not Found"}</code>, captured)</dd>
+<dt>Internal path</dt><dd><code>http://notification-service:8080/internal/kratos/email</code></dd>
+<dt>Called by</dt><dd>Ory Kratos' HTTP courier (default channel, <code>courier.http.request_config</code>)</dd>
+<dt>Auth</dt><dd><strong>none</strong>. The only protection is that the path is not routed by the gateway and the container port is on the private compose network (published to localhost in dev)</dd>
+<dt>Rate limit</dt><dd>none (no gateway in the path)</dd>
+<dt>Implemented in</dt><dd><code>services/notification-service/.../kratos/KratosCourierController.java</code></dd>
+</dl>
+<h4>Purpose</h4><p>Same idea as the SMS endpoint for email: limits (10/hour, 20/day per recipient), allowlist, provider (<code>mailpit</code> via SMTP in dev, <code>resend</code> live), send log.</p>
+<h4>Request parameters</h4><div class="table-wrap"><table><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why it exists</th></tr></thead><tbody><tr><td><code>recipient</code></td><td>body</td><td>string</td><td>yes</td><td>not blank</td><td>Recipient address.</td></tr><tr><td><code>subject</code></td><td>body</td><td>string</td><td>yes</td><td>not blank</td><td>Subject.</td></tr><tr><td><code>body</code></td><td>body</td><td>string</td><td>no</td><td>plain text</td><td>Text part.</td></tr><tr><td><code>htmlBody</code></td><td>body</td><td>string</td><td>no</td><td>HTML</td><td>HTML part.</td></tr><tr><td><code>templateType</code></td><td>body</td><td>string</td><td>no</td><td>Kratos template name</td><td>Recorded in the send log.</td></tr></tbody></table></div>
+<h4>Dev mode</h4>
+<pre><code>curl -s -X POST http://127.0.0.1:8085/internal/kratos/email -H 'Content-Type: application/json' \
+  -d '{"recipient":"a@example.com","subject":"Use code 123456 to log in","body":"Your login code is 123456"}'</code></pre>
+<pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+
+{
+  "status": "sent",
+  "provider": "mailpit"
+}</code></pre>
+<h4>Not JSON</h4>
+<pre class="out"><code>HTTP/1.1 400 Bad Request
+Content-Type: application/json
+
+{
+  "error": "invalid_request"
+}</code></pre>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th>Error code</th><th>When it happens</th></tr></thead><tbody><tr><td><strong>400</strong></td><td><code>invalid_request</code></td><td>Body is not valid JSON.</td></tr><tr><td><strong>400</strong></td><td><code>(Spring default JSON)</code></td><td>A required field is blank.</td></tr><tr><td><strong>502</strong></td><td><code>delivery_failed</code></td><td>Resend or SMTP failed.</td></tr><tr><td><strong>200</strong></td><td>(<code>suppressed</code> / <code>skipped</code>)</td><td>Limit or allowlist, as for SMS.</td></tr></tbody></table></div>
+<h4>How to use it</h4><ul><li>Dev: the message appears in the Mailpit inbox (<a href="08f-operational.html#ep-ops-mailpit-api">8f</a>) and in <code>/dev/messages</code>.</li></ul>
+</div></details>
+<div class="pager"><a class="prev" href="08c-partner-api.html"><small>Previous</small>8c. Partner API</a><a class="next" href="08e-kratos-flows.html"><small>Next</small>8e. Kratos flows</a></div>
+<p class="footer">Adera backend documentation &middot; last verified 2026-10-25 &middot; <a href="../index.html">contents</a></p>
+</main>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,533 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>7. Data | Adera docs</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+<button id="menu-btn" type="button" aria-label="Toggle menu">Menu</button>
+<a class="brand" href="../index.html">Adera docs</a>
+<span class="spacer"></span>
+<a href="../index.html">Contents</a>
+<button id="theme-btn" type="button" aria-label="Toggle light or dark theme">Theme</button>
+</header>
+<div class="layout">
+<nav class="sidebar" aria-label="Sections">
+<ul><li><a href="../index.html" class="">Home / contents</a></li></ul>
+<h4>Sections</h4><ul>
+<li><a href="01-overview.html">1. Overview</a>
+</li>
+<li><a href="02-setup.html">2. Setup and running</a>
+</li>
+<li><a href="03-tools.html">3. Tools</a>
+</li>
+<li><a href="04-services.html">4. Services</a>
+</li>
+<li><a href="05-communication.html">5. How it communicates</a>
+</li>
+<li><a href="06-security.html">6. Security model</a>
+</li>
+<li><a href="07-data.html" class=current>7. Data</a>
+<ul><li><a href="#overview">Who owns what</a></li><li><a href="#id-equality">One id for a person: Kratos id = user id</a></li><li><a href="#db-kratos">Database kratos (Ory Kratos)</a></li><li><a href="#db-users">Database users (user-service)</a></li><li><a href="#db-notification">Database notification (notification-service)</a></li><li><a href="#db-registry">Database registry (registry-service)</a></li><li><a href="#db-infisical">Database infisical (Infisical)</a></li><li><a href="#redis-keys">Redis keys</a></li><li><a href="#rustfs-bucket">RustFS bucket adera-media</a></li><li><a href="#retention">What is kept, and for how long</a></li></ul>
+</li>
+<li><a href="08-endpoints.html">8. Endpoint reference</a>
+</li>
+<li><a href="09-guides.html">9. Guides</a>
+</li>
+<li><a href="10-reference.html">10. Reference</a>
+</li>
+<li><a href="11-backoffice.html">11. Backoffice (staff dashboard)</a>
+</li>
+<li><a href="12-backoffice-guide.html">12. Backoffice guide (staff manual)</a>
+</li>
+<li><a href="13-sample-data.html">13. Sample data (test scenarios)</a>
+</li>
+</ul>
+<h4>Endpoints</h4><ul>
+<li><a href="08a-user-api.html">8a. End-user API</a>
+</li>
+<li><a href="08b-staff-api.html">8b. Staff / dashboard API</a>
+</li>
+<li><a href="08c-partner-api.html">8c. Partner API</a>
+</li>
+<li><a href="08d-internal-api.html">8d. Internal API</a>
+</li>
+<li><a href="08e-kratos-flows.html">8e. Kratos flows</a>
+</li>
+<li><a href="08f-operational.html">8f. Operational endpoints</a>
+</li>
+</ul>
+</nav>
+<main>
+<h1>Data</h1>
+<p class="lead">Where every piece of information lives: five Postgres databases, one object-storage bucket, and a Redis that our own services do not use. For each table: the columns, why it exists, who writes and reads it, and a real example row from the dev stack.</p>
+
+<div class="callout warn"><span class="label">How the examples were made</span>
+<p>Examples were read from the running dev stack on 2026-10-25 with read-only <code>SELECT</code>s. Personal data is masked (phones <code>+2519******07</code>, emails <code>a***@adera.local</code>). Secrets, password hashes, one-time codes, session tokens, TOTP secrets, HMAC keys and key material were never selected; where a column would hold one it is shown as <span class="masked">&lt;masked&gt;</span>.</p>
+<p>The dev database is mostly <strong>empty on purpose</strong>: the e2e scripts (<code>tests/e2e/*.py</code>) delete everything they create. Tables with no rows show an example labelled <span class="badge partial">illustrative example</span>. These are made-up rows that follow the real constraints; nothing was written to the real data to produce them.</p></div>
+
+<h2 id="overview">Who owns what</h2>
+<p>One Postgres server, one database per service, and one login per database (created by <a href="03-tools.html#postgres" >infra/postgres/init-databases.sh</a>; public access is revoked). A service can only see its own database. If it needs data from another service it calls that service's internal API (see <a href="08d-internal-api.html">internal API</a>).</p>
+<div class="callout why"><span class="label">Why one database per service</span>
+<p>It keeps the services independent: user-service can be changed, restored or moved without touching registry or notification data, and a bug or leaked password in one service cannot read another service's tables. The cost is that there are no cross-database foreign keys. Ids that point across services (for example <code>notification.app_id</code> pointing at <code>registry.mini_app.id</code>) are plain UUIDs, checked by code, not by the database.</p></div>
+
+<svg class="diagram" viewBox="0 0 900 430" role="img" aria-label="Which service owns which database">
+<title>Services, databases and object storage</title>
+<defs><marker id="ah-data" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z"/></marker></defs>
+<rect class="box tool" x="20" y="20" width="170" height="60" rx="8"/><text class="title" x="105" y="46" text-anchor="middle">Ory Kratos</text><text class="muted" x="105" y="64" text-anchor="middle">identity, login, sessions</text>
+<rect class="box ours" x="250" y="20" width="170" height="60" rx="8"/><text class="title" x="335" y="46" text-anchor="middle">user-service</text><text class="muted" x="335" y="64" text-anchor="middle">profile, devices, aliases</text>
+<rect class="box ours" x="480" y="20" width="170" height="60" rx="8"/><text class="title" x="565" y="46" text-anchor="middle">notification-service</text><text class="muted" x="565" y="64" text-anchor="middle">send log, partner platform</text>
+<rect class="box ours" x="710" y="20" width="170" height="60" rx="8"/><text class="title" x="795" y="46" text-anchor="middle">registry-service</text><text class="muted" x="795" y="64" text-anchor="middle">mini apps, keys, staff</text>
+<rect class="box store" x="20" y="170" width="170" height="86" rx="8"/><text class="title" x="105" y="196" text-anchor="middle">db kratos</text><text class="muted" x="105" y="214" text-anchor="middle">identities, credentials,</text><text class="muted" x="105" y="230" text-anchor="middle">sessions, flows, courier</text>
+<rect class="box store" x="250" y="170" width="170" height="86" rx="8"/><text class="title" x="335" y="196" text-anchor="middle">db users</text><text class="muted" x="335" y="214" text-anchor="middle">app_user, device,</text><text class="muted" x="335" y="230" text-anchor="middle">alias, preferences</text>
+<rect class="box store" x="480" y="170" width="170" height="86" rx="8"/><text class="title" x="565" y="196" text-anchor="middle">db notification</text><text class="muted" x="565" y="214" text-anchor="middle">send_log, template,</text><text class="muted" x="565" y="230" text-anchor="middle">notification, inbox, usage</text>
+<rect class="box store" x="710" y="170" width="170" height="86" rx="8"/><text class="title" x="795" y="196" text-anchor="middle">db registry</text><text class="muted" x="795" y="214" text-anchor="middle">mini_app, partner_key,</text><text class="muted" x="795" y="230" text-anchor="middle">staff, audit_event</text>
+<rect class="box store" x="250" y="340" width="400" height="60" rx="8"/><text class="title" x="450" y="366" text-anchor="middle">RustFS bucket adera-media</text><text class="muted" x="450" y="384" text-anchor="middle">avatars/{userId}/{imageId}.jpg   apps/{appId}/logo/{imageId}.png</text>
+<rect class="box tool" x="710" y="340" width="170" height="60" rx="8"/><text class="title" x="795" y="366" text-anchor="middle">Redis</text><text class="muted" x="795" y="384" text-anchor="middle">APISIX counters, Infisical</text>
+<rect class="box tool" x="20" y="340" width="170" height="60" rx="8"/><text class="title" x="105" y="366" text-anchor="middle">db infisical</text><text class="muted" x="105" y="384" text-anchor="middle">Infisical's own schema</text>
+<path class="edge" d="M105 80V170" marker-end="url(#ah-data)"/><path class="edge" d="M335 80V170" marker-end="url(#ah-data)"/><path class="edge" d="M565 80V170" marker-end="url(#ah-data)"/><path class="edge" d="M795 80V170" marker-end="url(#ah-data)"/>
+<path class="edge" d="M300 256L340 340" marker-end="url(#ah-data)"/><path class="edge" d="M770 256L560 340" marker-end="url(#ah-data)"/>
+<path class="edge dash hot" d="M190 205H250" marker-end="url(#ah-data)"/><text class="muted" x="220" y="198" text-anchor="middle">same id</text>
+<path class="edge dash" d="M420 50H480" marker-end="url(#ah-data)"/><path class="edge dash" d="M650 50H710" marker-end="url(#ah-data)"/>
+<text class="muted" x="20" y="300">Solid arrows: owns / writes. Dashed arrows between services: HTTP calls to internal APIs, never a shared database.</text>
+<text class="muted" x="20" y="318">user-service and registry-service write files to RustFS (S3 API); they own different key prefixes.</text>
+</svg>
+
+<div class="table-wrap"><table><thead><tr><th>Database</th><th>Login</th><th>Owner</th><th>Schema managed by</th><th>Tables</th></tr></thead><tbody>
+<tr><td><a href="#db-kratos"><code>kratos</code></a></td><td><code>kratos</code></td><td>Ory Kratos</td><td>Kratos (<code>kratos-migrate</code> one-shot container)</td><td>26 (Kratos' schema)</td></tr>
+<tr><td><a href="#db-users"><code>users</code></a></td><td><code>users_svc</code></td><td>user-service</td><td>Flyway V1, V2</td><td>4</td></tr>
+<tr><td><a href="#db-notification"><code>notification</code></a></td><td><code>notif_svc</code></td><td>notification-service</td><td>Flyway V1, V2</td><td>8</td></tr>
+<tr><td><a href="#db-registry"><code>registry</code></a></td><td><code>registry_svc</code></td><td>registry-service</td><td>Flyway V1</td><td>10</td></tr>
+<tr><td><a href="#db-infisical"><code>infisical</code></a></td><td><code>infisical</code></td><td>Infisical</td><td>Infisical itself</td><td>about 770 (including monthly partitions)</td></tr>
+</tbody></table></div>
+<p>All three of our services use Flyway: the migration files live in <code>services/&lt;service&gt;/src/main/resources/db/migration/</code> and run automatically at startup. Flyway's own bookkeeping table <code>flyway_schema_history</code> exists in each database (users: V1 "users and devices", V2 "aliases and preferences"; notification: V1 "send log", V2 "partner platform"; registry: V1 "registry"). Admin access for the examples below: <code>docker compose exec -T postgres psql -U adera_admin -d &lt;db&gt;</code>.</p>
+
+<h2 id="id-equality">One id for a person: Kratos id = user id</h2>
+<p>Kratos creates the identity and gives it a UUID. user-service uses <strong>that same UUID</strong> as the primary key of <code>app_user</code> (no second id, no mapping table). Staff work the same way: the Kratos identity id is the primary key of <code>registry.staff</code>.</p>
+<div class="callout why"><span class="label">Why</span><p>Every request through the gateway is authenticated by a Kratos session. The gateway turns it into <code>X-User-Id</code> (the identity id), and that value can be used directly as the key of the user's row. No lookup is needed and nothing can drift out of sync.</p></div>
+<p>Real proof from the dev stack, using the staff member (the only identity that exists right now). The same UUID appears in Kratos and in the registry:</p>
+<pre><code>-- db kratos
+SELECT id, schema_id, state FROM identities;
+                  id                  | schema_id | state
+--------------------------------------+-----------+--------
+ 0b648e27-181c-4650-87d7-441a5f07fb00 | default   | active
+
+-- db registry
+SELECT identity_id, role, status FROM staff;
+             identity_id              |    role     | status
+--------------------------------------+-------------+--------
+ 0b648e27-181c-4650-87d7-441a5f07fb00 | SUPER_ADMIN | ACTIVE</code></pre>
+<p>For an ordinary end user the same equality holds between <code>kratos.identities.id</code> and <code>users.app_user.id</code>. The dev <code>users</code> database is empty right now (the e2e cleanup removed the test users, and the staff member was created through Kratos' admin API, which does not fire the registration hook, so it has no profile). <span class="badge partial">illustrative example</span> of the pair for a phone sign-up:</p>
+<pre><code>kratos.identities.id   = 7c1e4a52-3b0d-4f6e-9a1b-2d5f8e9c0a11   traits {"phone_number": "+2519*****20"}
+users.app_user.id      = 7c1e4a52-3b0d-4f6e-9a1b-2d5f8e9c0a11   phone_e164 = '+2519*****20'</code></pre>
+<p>The row is created by Kratos' registration web hook (<code>/internal/kratos/after-registration</code>), or on first <code>GET /api/v1/me</code> if the hook was lost (see <a href="05-communication.html">communication</a>).</p>
+
+<h2 id="db-kratos">Database <code>kratos</code> (Ory Kratos)</h2>
+<p>This schema belongs to Kratos. We never write to it with SQL: services talk to Kratos through its public and admin HTTP APIs. It is documented here so you know what is stored about a login and where, and so you can inspect it when something goes wrong. Kratos creates 26 tables (migrations applied by the <code>kratos-migrate</code> container); the ones that matter to us:</p>
+<div class="callout danger"><span class="label">Never query these columns casually</span><p><code>identity_credentials.config</code> (TOTP secret, code settings), <code>sessions.token</code> and <code>logout_token</code>, <code>identity_login_codes.code</code>, <code>identity_registration_codes.code</code>, <code>courier_messages.body</code> (contains the one-time code) and <code>selfservice_*_flows.ui / csrf_token</code> are credentials or hold credentials. Select named columns only. They were not read for this page.</p></div>
+
+<h3 id="kratos-identities"><code>identities</code></h3>
+<p>One row per person (customer or staff). <strong>Purpose:</strong> the account itself. <strong>Why:</strong> Kratos owns "who is this"; everything else about the person is ours, keyed by this id. <strong>Written by:</strong> Kratos (registration flow, or the admin API when registry-service creates staff). <strong>Read by:</strong> Kratos for every login and <code>whoami</code>; user-service and registry-service through Kratos' API only.</p>
+<div class="table-wrap"><table><thead><tr><th>Column</th><th>Type</th><th>Meaning</th></tr></thead><tbody>
+<tr><td><code>id</code></td><td>uuid, PK</td><td>The identity id. <strong>This is the user id everywhere in Adera.</strong></td></tr>
+<tr><td><code>schema_id</code></td><td>varchar(2048)</td><td>Which identity schema validates the traits. Always <code>default</code> (<code>infra/kratos/identity.schema.json</code>).</td></tr>
+<tr><td><code>traits</code></td><td>jsonb</td><td>What the user typed: <code>email</code> and/or <code>phone_number</code>, nothing else (<code>additionalProperties: false</code>).</td></tr>
+<tr><td><code>state</code></td><td>varchar(255)</td><td><code>active</code> (default) or <code>inactive</code>.</td></tr>
+<tr><td><code>metadata_public</code></td><td>jsonb</td><td>Data the identity may read about itself but cannot change. We keep the staff role here: <code>{"role":"SUPER_ADMIN"}</code>. Writable only through the admin API, so a user cannot promote themselves.</td></tr>
+<tr><td><code>metadata_admin</code></td><td>jsonb</td><td>Private to admins; unused by us.</td></tr>
+<tr><td><code>available_aal</code></td><td>varchar(4)</td><td>Highest assurance level this identity can reach (<code>aal2</code> once TOTP is enrolled).</td></tr>
+<tr><td><code>external_id</code>, <code>organization_id</code></td><td>varchar(64), uuid</td><td>Kratos features we do not use.</td></tr>
+<tr><td><code>state_changed_at</code>, <code>created_at</code>, <code>updated_at</code>, <code>nid</code></td><td>timestamp, uuid</td><td>Bookkeeping. <code>nid</code> is the Kratos "network" id (always the single row in <code>networks</code>).</td></tr>
+</tbody></table></div>
+<p>Real row (the only identity, the bootstrap super admin; email masked):</p>
+<pre class="out"><code>                  id                  | schema_id | state  |             traits             |     metadata_public     |         created_at
+--------------------------------------+-----------+--------+--------------------------------+-------------------------+----------------------------
+ 0b648e27-181c-4650-87d7-441a5f07fb00 | default   | active | {"email": "a***@adera.local"}  | {"role": "SUPER_ADMIN"} | 2026-10-25 00:23:29.020428</code></pre>
+
+<h3 id="kratos-credentials"><code>identity_credential_types</code>, <code>identity_credentials</code>, <code>identity_credential_identifiers</code></h3>
+<p><strong>Purpose:</strong> how an identity proves itself. A credential row is one method for one identity; the identifier table is the lookup index ("which identity owns this email or number?"). <strong>Why:</strong> login by code needs a fast, unique lookup from what the user types to the identity. The unique index <code>(nid, identity_credential_type_id, identifier)</code> is what prevents two accounts from owning the same email or phone. <strong>Written by:</strong> Kratos only.</p>
+<div class="table-wrap"><table><thead><tr><th>Table</th><th>Key columns</th><th>Notes</th></tr></thead><tbody>
+<tr><td><code>identity_credential_types</code></td><td><code>id</code> uuid, <code>name</code></td><td>Eight fixed rows Kratos creates: password, oidc, totp, lookup_secret, webauthn, code, passkey, saml. We use <code>code</code> (one-time codes for email/SMS) and <code>totp</code> (authenticator app for staff). Password is disabled in <code>kratos.yml</code>.</td></tr>
+<tr><td><code>identity_credentials</code></td><td><code>id</code>, <code>identity_id</code>, <code>identity_credential_type_id</code>, <code>config</code> jsonb, <code>version</code></td><td><code>config</code> holds method secrets: <span class="masked">&lt;masked&gt;</span> (for TOTP it is the shared secret). One row per method per identity.</td></tr>
+<tr><td><code>identity_credential_identifiers</code></td><td><code>id</code>, <code>identifier</code> varchar(255), <code>identity_credential_id</code>, <code>identity_credential_type_id</code>, <code>identity_id</code></td><td>Email or phone for <code>code</code>; for <code>totp</code> the identifier is the identity id itself.</td></tr>
+</tbody></table></div>
+<p>Real rows (types shown by name, <code>config</code> not selected):</p>
+<pre class="out"><code>SELECT c.id, t.name AS credential_type, c.identity_id, c.version
+FROM identity_credentials c JOIN identity_credential_types t ON t.id = c.identity_credential_type_id;
+
+                  id                  | credential_type |             identity_id              | version
+--------------------------------------+-----------------+--------------------------------------+---------
+ eb2b91b9-17ef-4e5f-abe8-69a9924619a9 | code            | 0b648e27-181c-4650-87d7-441a5f07fb00 |       1
+ 5cf0479d-bb6f-4d42-8ba0-2550efded9ae | totp            | 0b648e27-181c-4650-87d7-441a5f07fb00 |       0
+
+SELECT i.identifier, t.name, i.identity_id FROM identity_credential_identifiers i
+JOIN identity_credential_types t ON t.id = i.identity_credential_type_id;
+
+              identifier              | name |             identity_id
+--------------------------------------+------+--------------------------------------
+ a***@adera.local                     | code | 0b648e27-181c-4650-87d7-441a5f07fb00
+ 0b648e27-181c-4650-87d7-441a5f07fb00 | totp | 0b648e27-181c-4650-87d7-441a5f07fb00</code></pre>
+<p>(The first identifier is the real email in the database; it is masked here.)</p>
+
+<h3 id="kratos-sessions"><code>sessions</code> and <code>session_devices</code></h3>
+<p><strong>Purpose:</strong> one row per logged-in device. <strong>Why:</strong> the session token the app sends as <code>Authorization: Bearer</code> maps to a row here; deleting the row (or <code>active = false</code>) is how logout works. <code>aal</code> says how strongly the session was authenticated: <code>aal1</code> = one factor (emailed or texted code), <code>aal2</code> = plus authenticator app. The staff API requires <code>aal2</code>. <strong>Written by:</strong> Kratos on login/registration/logout. <strong>Read by:</strong> Kratos for every <code>whoami</code> (called by user-service and registry-service for gateway forward-auth).</p>
+<div class="table-wrap"><table><thead><tr><th>Column</th><th>Type</th><th>Meaning</th></tr></thead><tbody>
+<tr><td><code>id</code></td><td>uuid, PK</td><td>Session id (not the token; safe to show, used by <code>DELETE /sessions/{id}</code>).</td></tr>
+<tr><td><code>identity_id</code></td><td>uuid FK identities, cascade</td><td>Whose session.</td></tr>
+<tr><td><code>token</code>, <code>logout_token</code></td><td>varchar(39), unique</td><td>The bearer token and the browser logout token. <span class="masked">&lt;masked&gt;</span>.</td></tr>
+<tr><td><code>aal</code></td><td>varchar(4)</td><td><code>aal1</code> or <code>aal2</code>.</td></tr>
+<tr><td><code>authentication_methods</code></td><td>jsonb</td><td>Which steps were completed (for example <code>code</code>, then <code>totp</code>) and when.</td></tr>
+<tr><td><code>active</code>, <code>issued_at</code>, <code>expires_at</code>, <code>authenticated_at</code></td><td>bool, timestamp</td><td>Lifetime: <code>session.lifespan: 720h</code> in <code>kratos.yml</code> (30 days).</td></tr>
+</tbody></table></div>
+<p><code>session_devices</code> (<code>id</code>, <code>session_id</code>, <code>identity_id</code>, <code>ip_address</code>, <code>user_agent</code>, <code>location</code>) records where each session was used from; it feeds the "other sessions" list.</p>
+<pre class="out"><code>SELECT id, aal, active, issued_at, expires_at FROM sessions ORDER BY created_at DESC LIMIT 2;
+
+                  id                  | aal  | active |         issued_at          |         expires_at
+--------------------------------------+------+--------+----------------------------+----------------------------
+ 96e59404-78bf-406c-b21d-6f11f5826807 | aal2 | t      | 2026-10-25 00:52:39.682509 | 2026-11-24 00:52:39.702004
+ 92dee978-841b-45cd-a534-055d1226016c | aal2 | t      | 2026-10-25 00:52:00.040325 | 2026-11-24 00:52:00.059088</code></pre>
+<p>The 8 session rows currently present are leftovers from staff e2e runs (all aal2, 30-day lifespan).</p>
+
+<h3 id="kratos-flows">Flow and code tables</h3>
+<div class="table-wrap"><table><thead><tr><th>Table</th><th>Purpose and why</th><th>Rows now</th></tr></thead><tbody>
+<tr><td><code>selfservice_login_flows</code>, <code>selfservice_registration_flows</code>, <code>selfservice_settings_flows</code></td><td>One row per started flow (<code>GET /self-service/.../api</code>). A flow holds the form (<code>ui</code>), its expiry (login and registration <code>lifespan: 10m</code> in <code>kratos.yml</code>) and state. Needed because the app submits step 2 (the code) to the same flow id as step 1 (the identifier). Columns of note: <code>id</code>, <code>type</code> (<code>api</code>), <code>state</code>, <code>requested_aal</code> (login), <code>submit_count</code>, <code>expires_at</code>. The settings flow is used for TOTP enrolment.</td><td>74 / 23 / 4</td></tr>
+<tr><td><code>identity_login_codes</code>, <code>identity_registration_codes</code></td><td>The issued one-time codes (the <code>code</code> column is not shown here; with <code>address</code>, <code>used_at</code>, <code>expires_at</code> 5 minutes after issue per <code>lifespan: 5m</code>). Lets Kratos check a submitted code once and refuse reuse.</td><td>8 / 22</td></tr>
+<tr><td><code>courier_messages</code>, <code>courier_message_dispatches</code></td><td>Kratos' outbox. Each code to send is a message (<code>type</code> (2 seen for SMS), <code>status</code>, <code>recipient</code>, <code>template_type</code> e.g. <code>login_code_valid</code>, <code>channel</code>, <code>send_count</code>); each HTTP delivery attempt to notification-service is a dispatch row (<code>status</code> success, <code>error</code> json). Retries on a non-2xx answer come from here (see <a href="03-tools.html#kratos">Kratos</a>). <code>body</code> contains the code: do not select it.</td><td>35 / 35</td></tr>
+<tr><td><code>continuity_containers</code>, <code>selfservice_errors</code>, <code>identity_recovery_*</code>, <code>identity_verification*</code>, <code>identity_verifiable_addresses</code>, <code>session_token_exchanges</code></td><td>Kratos features we do not use (browser flows, recovery, address verification, native-app token exchange). Empty.</td><td>0</td></tr>
+<tr><td><code>networks</code>, <code>schema_migration</code></td><td>Kratos internals: the single tenant id (<code>nid</code>) and the applied migrations.</td><td>1 / 338</td></tr>
+</tbody></table></div>
+<p>Real courier metadata (no body, no recipient shown):</p>
+<pre class="out"><code>SELECT id, type, status, template_type, channel, send_count, created_at
+FROM courier_messages ORDER BY created_at DESC LIMIT 2;
+
+                  id                  | type | status |      template_type      | channel | send_count |         created_at
+--------------------------------------+------+--------+-------------------------+---------+------------+----------------------------
+ 6948d61d-e500-4c4d-bac3-db0587165228 |    2 |      2 | registration_code_valid | sms     |          1 | 2026-10-25 00:53:08.575874
+ 57277d81-e454-4de6-90c7-c4ac4a865311 |    2 |      2 | registration_code_valid | sms     |          1 | 2026-10-25 00:53:07.515092</code></pre>
+<div class="callout"><span class="label">Note</span><p>Kratos keeps flow, code and courier rows after use; it has a cleanup command (<code>kratos cleanup sql</code>) that we do not schedule yet. Expect these tables to grow in production (not verified at scale). The numeric courier <code>type</code>/<code>status</code> codes are Kratos' own enums; the values above (2 = SMS, status 2 = sent) were inferred from the data, not from Kratos' source.</p></div>
+
+<h2 id="db-users">Database <code>users</code> (user-service)</h2>
+<p>Schema: <code>services/user-service/src/main/resources/db/migration/V1__users_and_devices.sql</code> and <code>V2__aliases_and_preferences.sql</code>. All four tables are empty in the dev stack right now, so every example below is an <span class="badge partial">illustrative example</span> (made up, but valid against the real constraints).</p>
+
+<h3 id="users-app_user"><code>app_user</code></h3>
+<p><strong>Purpose:</strong> the full person record. <strong>Why:</strong> Kratos knows only "email or phone"; the app needs a name, language, avatar, location and room for fields nobody planned. Keeping this out of Kratos means profile changes never touch the login system. <strong>Written by:</strong> user-service (<code>UserRepository</code>): the Kratos registration hook creates the row, <code>PATCH /api/v1/me</code> edits it, <code>GET /me</code> creates it if the hook was lost. <strong>Read by:</strong> user-service only; other services get what they need through internal endpoints (alias resolution, contact lookup).</p>
+<div class="table-wrap"><table><thead><tr><th>Column</th><th>Type</th><th>Null / default</th><th>Meaning and why</th></tr></thead><tbody>
+<tr><td><code>id</code></td><td>uuid PK</td><td>not null</td><td>The Kratos identity id.</td></tr>
+<tr><td><code>email</code></td><td>varchar(320)</td><td>null</td><td>Copy of the Kratos trait, for convenience and uniqueness checks. 320 is the maximum email length.</td></tr>
+<tr><td><code>phone_e164</code></td><td>varchar(20)</td><td>null</td><td>Copy of Kratos <code>phone_number</code> in E.164 form.</td></tr>
+<tr><td><code>first_name</code>, <code>last_name</code></td><td>varchar(100)</td><td>null</td><td>Profile; null until the user fills it in.</td></tr>
+<tr><td><code>gender</code></td><td>varchar(20)</td><td>null</td><td><code>MALE | FEMALE | OTHER | PREFER_NOT_TO_SAY</code>.</td></tr>
+<tr><td><code>date_of_birth</code></td><td>date</td><td>null</td><td>Optional.</td></tr>
+<tr><td><code>language</code></td><td>varchar(5)</td><td>not null, <code>en</code></td><td><code>am | en | om</code>. Also picks the template language for notifications.</td></tr>
+<tr><td><code>market</code></td><td>varchar(2)</td><td>not null, <code>ET</code></td><td><code>ET | US</code>.</td></tr>
+<tr><td><code>timezone</code></td><td>varchar(64)</td><td>not null, <code>Africa/Addis_Ababa</code></td><td>IANA zone name.</td></tr>
+<tr><td><code>avatar_image_id</code>, <code>avatar_content_type</code>, <code>avatar_updated_at</code></td><td>uuid, varchar(64), timestamptz</td><td>null</td><td>Pointer to the avatar file in RustFS (<code>avatars/{id}/{avatar_image_id}.jpg</code>). The database stores only the id, never the file or a URL (URLs are signed on demand and expire in 60 minutes).</td></tr>
+<tr><td><code>country_code</code>, <code>region</code>, <code>city</code>, <code>latitude</code>, <code>longitude</code>, <code>location_updated_at</code></td><td>varchar, double precision, timestamptz</td><td>null</td><td>Optional location the user chose to share ("near me"). Cleared by <code>DELETE /me/location</code>.</td></tr>
+<tr><td><code>verification_tier</code></td><td>varchar(16)</td><td>not null, <code>CONTACT</code></td><td><code>CONTACT | ID | PROVIDER</code>: how well we know who this is (room for later ID checks).</td></tr>
+<tr><td><code>status</code></td><td>varchar(16)</td><td>not null, <code>ACTIVE</code></td><td><code>ACTIVE | SUSPENDED | DELETED</code>. Suspended and deleted users become "unreachable" to partners.</td></tr>
+<tr><td><code>terms_accepted_version</code>, <code>terms_accepted_at</code></td><td>varchar(32), timestamptz</td><td>null</td><td>Which terms the user accepted.</td></tr>
+<tr><td><code>extra</code></td><td>jsonb</td><td>not null, <code>{}</code></td><td>Free-form data for things we did not plan; edited with JSON Merge Patch, max 16 KB.</td></tr>
+<tr><td><code>last_seen_at</code>, <code>created_at</code>, <code>updated_at</code>, <code>deleted_at</code></td><td>timestamptz</td><td>created/updated not null</td><td>Bookkeeping. <code>deleted_at</code> is for soft delete (account deletion is not built yet).</td></tr>
+</tbody></table></div>
+<p>Indexes: <code>uq_app_user_email</code> (unique on <code>lower(email)</code>, only where not null and not deleted), <code>uq_app_user_phone</code> (unique, same filter), <code>idx_app_user_city</code> on <code>(country_code, city)</code>. The unique indexes are what turns "this email belongs to another account" into a 409.</p>
+<p><span class="badge partial">illustrative example</span></p>
+<pre class="out"><code>id                     7c1e4a52-3b0d-4f6e-9a1b-2d5f8e9c0a11   (= Kratos identity id)
+email                  NULL
+phone_e164             +2519*****20
+first_name, last_name  Abebe, K.            (masked name)
+language, market, tz   am, ET, Africa/Addis_Ababa
+avatar_image_id        0c9d1f3e-5a77-4a0e-8d52-6b3f1d2a9e44
+verification_tier      CONTACT          status ACTIVE
+extra                  {"favouriteChurch": "Entoto"}
+created_at             2026-10-25 09:14:02+00</code></pre>
+
+<h3 id="users-device"><code>device</code></h3>
+<p><strong>Purpose:</strong> one row per app installation that can receive push notifications. <strong>Why:</strong> a user can have several phones and an FCM token changes over time; <code>installation_id</code> (made up by the app, stable) lets a rotated token <em>replace</em> the old one instead of piling up. <strong>Written by:</strong> user-service (<code>PUT /api/v1/me/devices</code>, logout, delete). <strong>Read by:</strong> user-service; the push sender asks it for a user's active devices (real FCM is not built yet, <code>FCM_PROVIDER=fake</code>).</p>
+<div class="table-wrap"><table><thead><tr><th>Column</th><th>Type</th><th>Meaning and why</th></tr></thead><tbody>
+<tr><td><code>id</code></td><td>uuid PK</td><td>Row id.</td></tr>
+<tr><td><code>user_id</code></td><td>uuid FK app_user, on delete cascade</td><td>Owner. Deleting the user deletes their devices.</td></tr>
+<tr><td><code>installation_id</code></td><td>varchar(64), null</td><td>Stable app-generated id. Unique per user when present (<code>uq_device_installation</code>).</td></tr>
+<tr><td><code>platform</code></td><td>varchar(10)</td><td><code>ANDROID | IOS | WEB</code>.</td></tr>
+<tr><td><code>fcm_token</code></td><td>text, unique</td><td>The push address (<code>uq_device_fcm_token</code>). Unique because one phone can only belong to one account at a time: re-registering moves it to the current user. A credential-like value: never shown by the API and masked here.</td></tr>
+<tr><td><code>app_version</code>, <code>os_version</code>, <code>device_name</code>, <code>locale</code></td><td>varchar</td><td>Diagnostics.</td></tr>
+<tr><td><code>is_active</code></td><td>boolean, default true</td><td>False when a token is known dead. Partial index <code>idx_device_user</code> covers active rows.</td></tr>
+<tr><td><code>created_at</code>, <code>last_seen_at</code>, <code>token_updated_at</code></td><td>timestamptz</td><td>Lifecycle.</td></tr>
+</tbody></table></div>
+<p><span class="badge partial">illustrative example</span></p>
+<pre class="out"><code>id 5d0b8c1e-...   user_id 7c1e4a52-...   installation_id inst-3f9a   platform ANDROID
+fcm_token &lt;masked&gt;   app_version 1.0.3   os_version 14   device_name "Pixel 7"   locale am-ET   is_active t</code></pre>
+
+<h3 id="users-alias"><code>app_user_alias</code></h3>
+<p><strong>Purpose:</strong> the pseudonymous id a partner sees for a user. <strong>Why:</strong> partners must not learn our user ids, and the same person must look different in every mini app so two partners cannot join their data. The alias is <code>u_p_</code> + the first 32 hex characters of HMAC-SHA256(<code>ALIAS_HMAC_SECRET</code>, <code>userId:appId</code>). The HMAC cannot be reversed, so this table is the only way back from an alias to a user (resolution is by table lookup). Minted when the user first opens/uses that app. <strong>Written and read by:</strong> user-service (<code>AliasService</code>), called by registry/notification-service through internal endpoints.</p>
+<div class="table-wrap"><table><thead><tr><th>Column</th><th>Type</th><th>Notes</th></tr></thead><tbody>
+<tr><td><code>app_id</code></td><td>uuid, part of PK</td><td>Mini app id from registry (no cross-database FK).</td></tr>
+<tr><td><code>alias</code></td><td>varchar(40), part of PK</td><td><code>u_p_</code> + 32 hex = 36 characters.</td></tr>
+<tr><td><code>user_id</code></td><td>uuid FK app_user, cascade</td><td>Unique together with <code>app_id</code>: one alias per user per app.</td></tr>
+<tr><td><code>created_at</code></td><td>timestamptz</td><td></td></tr>
+</tbody></table></div>
+<p><span class="badge partial">illustrative example</span> (the alias is an example string, not a real HMAC output)</p>
+<pre class="out"><code>app_id  2398a5ca-1f2e-4b1f-9470-8cfbd543c643
+alias   u_p_9f2c4d6e8a1b3c5d7e9f0a2b4c6d8e10
+user_id 7c1e4a52-3b0d-4f6e-9a1b-2d5f8e9c0a11</code></pre>
+
+<h3 id="users-pref"><code>app_notification_preference</code></h3>
+<p><strong>Purpose:</strong> what a user chose about one mini app: mute in-app, SMS or email. <strong>Why:</strong> users must be able to silence an app without leaving it, and the partner must not be told (a muted send is reported as <code>SUPPRESSED</code>, status 200). <strong>Written by:</strong> user-service (<code>PreferenceService</code>, <code>PreferenceController</code>). <strong>Read by:</strong> notification-service through the internal API when deciding a channel.</p>
+<div class="table-wrap"><table><thead><tr><th>Column</th><th>Type</th><th>Notes</th></tr></thead><tbody>
+<tr><td><code>user_id</code>, <code>app_id</code></td><td>uuid, composite PK</td><td>user FK cascade; app id from registry.</td></tr>
+<tr><td><code>mute_in_app</code>, <code>mute_sms</code>, <code>mute_email</code></td><td>boolean, default false</td><td>One flag per channel.</td></tr>
+<tr><td><code>updated_at</code></td><td>timestamptz</td><td></td></tr>
+</tbody></table></div>
+<p><span class="badge partial">illustrative example</span></p>
+<pre class="out"><code>user_id 7c1e4a52-...  app_id 2398a5ca-...  mute_in_app f  mute_sms t  mute_email f  updated_at 2026-10-25 10:02:11+00</code></pre>
+
+<h2 id="db-notification">Database <code>notification</code> (notification-service)</h2>
+<p>Schema: <code>V1__send_log.sql</code> (login codes) <code>V2__partner_platform.sql</code> (partner platform) and <code>V3__environments_dev_prod.sql</code> (renames TEST/LIVE to DEV/PROD in <code>notification</code>, <code>usage_daily</code>, <code>usage_total</code> and queued callback payloads; adds the CHECK constraints). Two different jobs share this database: (1) the Kratos courier path, which logs every OTP delivery in <code>send_log</code>; (2) the partner platform, which has templates, notifications, attempts, inbox, callbacks and usage counters. Only <code>send_log</code> has rows in the dev stack; the others show <span class="badge partial">illustrative example</span> rows.</p>
+
+<h3 id="notif-send_log"><code>send_log</code></h3>
+<p><strong>Purpose:</strong> one row per delivery attempt of a Kratos message (login/registration code by SMS or email). <strong>Why:</strong> (a) answer "did the code go out?" without storing the code, (b) rate limiting. Rate limits are counted from this table (recipient + channel + recent time), <strong>not in Redis</strong>, so they survive restarts and need no extra moving part. It never stores the message body (it contains the one-time code) or the full recipient: only a masked form for humans and a SHA-256 hash for lookups. <strong>Written and read by:</strong> notification-service (<code>NotificationDispatcher</code>, <code>SendLogRepository</code>).</p>
+<div class="table-wrap"><table><thead><tr><th>Column</th><th>Type</th><th>Meaning</th></tr></thead><tbody>
+<tr><td><code>id</code></td><td>uuid PK</td><td></td></tr>
+<tr><td><code>channel</code></td><td>varchar(10)</td><td><code>SMS | EMAIL</code></td></tr>
+<tr><td><code>recipient_hash</code></td><td>varchar(64)</td><td>SHA-256 hex of the normalised recipient; used for rate-limit counting. Index <code>idx_send_log_recipient (channel, recipient_hash, created_at DESC)</code>.</td></tr>
+<tr><td><code>recipient_masked</code></td><td>varchar(64)</td><td>For humans: <code>+2519******07</code>, <code>a***@adera.local</code>.</td></tr>
+<tr><td><code>template_type</code></td><td>varchar(64), null</td><td>Kratos template name, e.g. <code>login_code_valid</code>, <code>registration_code_valid</code>.</td></tr>
+<tr><td><code>provider</code></td><td>varchar(32)</td><td><code>console | twilio | mailpit | resend</code>: which provider handled it.</td></tr>
+<tr><td><code>status</code></td><td>varchar(16)</td><td><code>SENT | FAILED | SUPPRESSED | SKIPPED</code> (<code>SUPPRESSED</code> with <code>error_code=rate_limited</code>: over the per-recipient limit; <code>SKIPPED</code> with <code>not_allowlisted</code>: live mode, recipient not on <code>NOTIFY_LIVE_ALLOWLIST</code>).</td></tr>
+<tr><td><code>error_code</code></td><td>varchar(64), null</td><td>Provider or internal error code on failure.</td></tr>
+<tr><td><code>created_at</code></td><td>timestamptz</td><td>Index <code>idx_send_log_created</code>. Nothing deletes old rows yet (no retention job found in code).</td></tr>
+</tbody></table></div>
+<p>Real rows (the hash is cut to 8 characters; nothing else altered):</p>
+<pre class="out"><code>                  id                  | channel |    h     | recipient_masked | template_type           | provider | status |         created_at
+--------------------------------------+---------+----------+------------------+-------------------------+----------+--------+-----------------------------
+ 5335c321-8f70-448e-9723-663b16c2e147 | SMS     | 7d3c0775 | +2519******07    | registration_code_valid | console  | SENT   | 2026-10-25 00:53:08.61717+00
+ af71d1ec-8b8c-42bc-972d-862345f833bf | EMAIL   | df612a5c | a***@adera.local | login_code_valid        | mailpit  | SENT   | 2026-10-25 00:52:39.42873+00
+
+SELECT channel, provider, status, count(*) FROM send_log GROUP BY 1,2,3;
+ SMS   | console | SENT    | 13      (registration + login codes in dev mode)
+ EMAIL | mailpit | SENT    | 10
+ SMS   | twilio  | SKIPPED |  1      (earlier real-mode test: not_allowlisted)
+ SMS   | twilio  | SENT    |  1      (earlier real-mode test)
+ EMAIL | resend  | SENT    |  1      (earlier real-mode test: the one real email)</code></pre>
+
+<h3 id="notif-template"><code>template</code></h3>
+<p><strong>Purpose:</strong> admin-approved message templates per mini app. <strong>Why:</strong> partners must not send free text to our users under Adera's name (spam, phishing). A partner picks a template id and fills only the declared parameters; staff control the wording, languages and expiry. <strong>Written by:</strong> notification-service, from staff calls to <code>/admin/api/v1/notification/templates</code> (<code>TemplateService</code>). <strong>Read by:</strong> notification-service (partner <code>/v1/templates</code>, rendering at delivery).</p>
+<div class="table-wrap"><table><thead><tr><th>Column</th><th>Type</th><th>Meaning and why</th></tr></thead><tbody>
+<tr><td><code>id</code></td><td>uuid PK</td><td>What the partner sends as <code>templateId</code>.</td></tr>
+<tr><td><code>app_id</code></td><td>uuid</td><td>Owner mini app (registry id). Index <code>idx_template_app</code>.</td></tr>
+<tr><td><code>code</code></td><td>varchar(60)</td><td>Human label, unique per app (<code>UNIQUE (app_id, code)</code>).</td></tr>
+<tr><td><code>kind</code></td><td>varchar(10)</td><td><code>DIRECT</code> (SMS or email) or <code>IN_APP</code> (inbox plus push). The partner never picks the channel.</td></tr>
+<tr><td><code>category</code></td><td>varchar(16)</td><td><code>TRANSACTIONAL | REMINDER | PROMOTIONAL</code>.</td></tr>
+<tr><td><code>params</code></td><td>jsonb, default <code>[]</code></td><td>Declared parameters: <code>[{"name","maxLength","required","allowLinks"}]</code>. Why: limits what a partner can inject (length, links).</td></tr>
+<tr><td><code>content</code></td><td>jsonb</td><td>Per language (<code>en</code>, <code>am</code>, <code>om</code>): <code>title, body, sms, emailSubject, emailHtml</code>.</td></tr>
+<tr><td><code>active</code>, <code>valid_from</code>, <code>expires_at</code></td><td>boolean, timestamptz</td><td>On/off and validity window, so a forgotten template switches itself off (<code>template_expired</code>).</td></tr>
+<tr><td><code>version</code></td><td>int, default 1</td><td>Bumped on edit; each notification records the version it used.</td></tr>
+<tr><td><code>created_by</code>, <code>updated_by</code>, <code>created_at</code>, <code>updated_at</code></td><td>uuid (staff id), timestamptz</td><td>Who and when.</td></tr>
+</tbody></table></div>
+<p><span class="badge partial">illustrative example</span></p>
+<pre class="out"><code>id 3b1f6a90-8c2d-4e7a-b5d1-9a0c2e4f6b81   app_id 2398a5ca-...   code job_assigned   kind DIRECT   category TRANSACTIONAL
+params   [{"name":"name","maxLength":50,"required":true,"allowLinks":false}]
+content  {"en":{"sms":"Hi {{name}}, your job was assigned.","emailSubject":"Job assigned","emailHtml":"&lt;p&gt;Hi {{name}}...&lt;/p&gt;"}}
+active t   version 1   expires_at 2027-01-01 00:00:00+00</code></pre>
+
+<h3 id="notif-notification"><code>notification</code></h3>
+<p><strong>Purpose:</strong> one row per partner request, and the work queue for delivery. <strong>Why:</strong> a row means "accepted"; background workers pick due rows, deliver, retry on temporary failure and finally set a status. A database queue (instead of RabbitMQ) was chosen because the volume is low, it is transactional with the idempotency check and inbox write, and RabbitMQ is set up but not used yet (see <a href="03-tools.html#rabbitmq">RabbitMQ</a>). <strong>Written by:</strong> notification-service (<code>NotificationAcceptor</code>, <code>NotificationStore</code>, <code>DeliveryWorker</code>). <strong>Read by:</strong> the same, plus the partner status endpoint and the staff delivery log.</p>
+<div class="table-wrap"><table><thead><tr><th>Column</th><th>Type</th><th>Meaning and why</th></tr></thead><tbody>
+<tr><td><code>id</code></td><td>uuid PK</td><td>Our notification id (<code>notificationId</code> in callbacks).</td></tr>
+<tr><td><code>app_id</code>, <code>environment</code></td><td>uuid, varchar(5)</td><td>Which app, and the environment of the deployment that took the request (<code>DEV</code> or <code>PROD</code>; <code>CHECK (environment IN ('DEV','PROD'))</code>). Rows from before the rename were migrated in place (TEST to DEV, LIVE to PROD).</td></tr>
+<tr><td><code>external_id</code></td><td>varchar(100)</td><td>Partner's own unique id. <code>UNIQUE (app_id, environment, external_id)</code> makes the API idempotent.</td></tr>
+<tr><td><code>request_hash</code></td><td>varchar(64)</td><td>Hash of the request: same externalId + same hash = replay (200), different = 409 <code>external_id_reused</code>.</td></tr>
+<tr><td><code>user_id</code>, <code>user_alias</code></td><td>uuid, varchar(40)</td><td>The real user (kept internal) and the alias the partner used.</td></tr>
+<tr><td><code>template_id</code>, <code>template_version</code></td><td>uuid, int</td><td>Which template and version were rendered (so later edits do not rewrite history).</td></tr>
+<tr><td><code>params</code>, <code>data</code></td><td>jsonb</td><td>Template values and the partner's pass-through data.</td></tr>
+<tr><td><code>kind</code>, <code>channel</code></td><td>varchar(10)</td><td>Template kind and the channel we chose: <code>SMS | EMAIL | IN_APP</code>.</td></tr>
+<tr><td><code>status</code></td><td>varchar(12)</td><td><code>QUEUED PROCESSING RETRYING SENT FAILED UNREACHABLE SUPPRESSED EXPIRED</code>.</td></tr>
+<tr><td><code>reason</code></td><td>varchar(64)</td><td>Error code behind a final status.</td></tr>
+<tr><td><code>attempts</code>, <code>next_attempt_at</code>, <code>locked_until</code></td><td>int, timestamptz</td><td>Queue state: when due, and a lease so two workers never take the same row. Partial index <code>idx_notification_due</code> covers QUEUED/RETRYING/PROCESSING.</td></tr>
+<tr><td><code>callback_url</code></td><td>varchar(500)</td><td>Where to report the final status.</td></tr>
+<tr><td><code>expires_at</code>, <code>created_at</code>, <code>updated_at</code>, <code>completed_at</code></td><td>timestamptz</td><td><code>expires_at</code> = created + <code>ttlSeconds</code>; retries stop after it (status <code>EXPIRED</code>). Index <code>idx_notification_app (app_id, created_at DESC)</code>.</td></tr>
+</tbody></table></div>
+<p><span class="badge partial">illustrative example</span></p>
+<pre class="out"><code>id 91e0c7b2-...   app_id 2398a5ca-...   environment PROD  external_id job-1   user_alias u_p_9f2c...   template_version 1
+channel SMS   kind DIRECT   status SENT   attempts 1   created_at 2026-10-25 10:30:00+00   completed_at 2026-10-25 10:30:02+00</code></pre>
+
+<h3 id="notif-attempt"><code>notification_attempt</code></h3>
+<p><strong>Purpose:</strong> one row per delivery attempt of a notification. <strong>Why:</strong> to answer "why did this not arrive?" (each retry, which provider, what error). <strong>Written and read by:</strong> notification-service (<code>NotificationStore</code>; staff read it via the delivery log). Columns: <code>id</code> uuid PK, <code>notification_id</code> uuid FK (cascade), <code>channel</code>, <code>provider</code> (the provider's <code>name()</code>: <code>sandbox</code> for synthetic <code>u_p_test_*</code> users in DEV, <code>console</code>/<code>twilio</code>, <code>mailpit</code>/<code>resend</code>, <code>fcm</code>/<code>fcm-fake</code>), <code>outcome</code> (<code>OK | TRANSIENT | PERMANENT | SKIPPED</code>), <code>error_code</code> (examples seen in code: <code>not_allowlisted</code>, <code>no_devices</code>, <code>token_unregistered</code>, <code>push_unavailable</code>), <code>at</code>. Index on <code>notification_id</code>.</p>
+<p><span class="badge partial">illustrative example</span></p>
+<pre class="out"><code>notification_id 91e0c7b2-...   channel SMS   provider console   outcome OK   error_code NULL   at 2026-10-25 10:30:02+00</code></pre>
+
+<h3 id="notif-inbox"><code>inbox_item</code></h3>
+<p><strong>Purpose:</strong> the in-app inbox (bell menu). <strong>Why:</strong> push is best effort; the inbox row is the reliable part, so the user always sees the message when they open the app. <strong>Written by:</strong> notification-service when an <code>IN_APP</code> notification is delivered. <strong>Read and updated by:</strong> <code>InboxController</code> (<code>/api/v1/me/notifications</code>, mark read). Columns: <code>id</code> uuid PK, <code>user_id</code> uuid (real user id, taken from <code>X-User-Id</code>), <code>app_id</code>, <code>notification_id</code> uuid unique (one inbox item per notification, no duplicates on retry), <code>title</code> varchar(200), <code>body</code> varchar(2000), <code>data</code> jsonb, <code>created_at</code>, <code>read_at</code> (null = unread). Index <code>idx_inbox_user (user_id, created_at DESC)</code>.</p>
+<p><span class="badge partial">illustrative example</span></p>
+<pre class="out"><code>user_id 7c1e4a52-...   app_id 2398a5ca-...   title "Job assigned"   body "Hi Abebe, your job was assigned."   data {"jobId":"1"}   read_at NULL</code></pre>
+
+<h3 id="notif-callback"><code>callback</code></h3>
+<p><strong>Purpose:</strong> the outbox of signed status reports to partners. <strong>Why:</strong> a callback must survive a restart and be retried when the partner's server is down (1 minute doubling up to 6 hours, 8 attempts). <strong>Written by:</strong> notification-service when a notification reaches a final status. <strong>Read and updated by:</strong> <code>CallbackWorker</code>. Columns: <code>id</code>, <code>notification_id</code> FK cascade, <code>url</code> varchar(500), <code>payload</code> jsonb (the event body, signed at send time), <code>status</code> (<code>PENDING | PROCESSING | DELIVERED | FAILED</code>), <code>attempts</code>, <code>next_attempt_at</code>, <code>locked_until</code>, <code>last_http_status</code>, <code>last_error</code> varchar(100), <code>created_at</code>, <code>updated_at</code>. Partial index <code>idx_callback_due</code>.</p>
+<p><span class="badge partial">illustrative example</span></p>
+<pre class="out"><code>url https://partner.example.com/hook   status DELIVERED   attempts 1   last_http_status 200
+payload {"event":"notification.status","notificationId":"91e0c7b2-...","externalId":"job-1","status":"SENT","channel":"SMS","reason":null,"at":"2026-10-25T10:30:02Z"}</code></pre>
+
+<h3 id="notif-usage"><code>usage_daily</code> and <code>usage_total</code></h3>
+<p><strong>Purpose:</strong> counters for the per-app, per-channel limits set in the registry. <strong>Why:</strong> a runaway or malicious partner must not be able to spam users or run up SMS cost; a refused request does not consume quota. <code>usage_daily</code> has one row per (app, environment, channel, day, user) with <code>sent</code> (feeds <code>max_per_user_per_day</code>, <code>max_per_day</code> as the sum, <code>max_distinct_users_per_day</code> as the row count). <code>usage_total</code> holds the lifetime total per (app, environment, channel) for <code>max_total</code>. <strong>Written and read by:</strong> notification-service (<code>UsageService</code>).</p>
+<div class="table-wrap"><table><thead><tr><th>Table</th><th>Columns</th></tr></thead><tbody>
+<tr><td><code>usage_daily</code></td><td><code>app_id</code> uuid, <code>environment</code> varchar(5), <code>channel</code> varchar(10), <code>day</code> date, <code>user_id</code> uuid, <code>sent</code> int default 0; PK is all five key columns</td></tr>
+<tr><td><code>usage_total</code></td><td><code>app_id</code>, <code>environment</code>, <code>channel</code>, <code>total</code> bigint default 0; PK is the first three</td></tr>
+</tbody></table></div>
+<p><span class="badge partial">illustrative example</span></p>
+<pre class="out"><code>usage_daily:  app 2398a5ca-... | PROD | SMS | 2026-10-25 | 7c1e4a52-... | sent 1
+usage_total:  app 2398a5ca-... | PROD | SMS | total 1</code></pre>
+
+<h2 id="db-registry">Database <code>registry</code> (registry-service)</h2>
+<p>Schema: <code>services/registry-service/src/main/resources/db/migration/V1__registry.sql</code> and <code>V2__environments_dev_prod.sql</code> (renames TEST/LIVE to DEV/PROD in <code>app_environment</code> and <code>partner_key</code>; adds CHECK constraints; key ids such as <code>ak_test_...</code> are kept). Real rows exist only in <code>staff</code> and <code>audit_event</code> (the e2e scripts delete the apps they create but the audit trail is append-only, so it remains). Everything else shows an <span class="badge partial">illustrative example</span>. Most writes come from staff through <code>/admin/api/v1</code> and every one of them leaves an <code>audit_event</code> row.</p>
+
+<h3 id="reg-staff"><code>staff</code></h3>
+<p><strong>Purpose:</strong> the list of dashboard staff, their status and role. <strong>Why:</strong> the role itself is stored in Kratos (<code>identities.metadata_public.role</code>, writable only via the admin API, so it cannot be edited by the user); this table exists to list staff, disable them and keep an audit trail without asking Kratos each time. On every staff request the registry verifies both: an active row here and an <code>aal2</code> Kratos session. <strong>Written by:</strong> registry-service (<code>StaffService</code>, and <code>StaffBootstrap</code> for the first super admin from <code>BOOTSTRAP_SUPER_ADMIN_EMAIL</code>). <strong>Read by:</strong> registry-service (<code>/internal/staff/verify</code>, <code>/admin/api/v1/staff</code>).</p>
+<div class="table-wrap"><table><thead><tr><th>Column</th><th>Type</th><th>Meaning</th></tr></thead><tbody>
+<tr><td><code>identity_id</code></td><td>uuid PK</td><td>Kratos identity id.</td></tr>
+<tr><td><code>email</code></td><td>varchar(320)</td><td>Unique case-insensitively (<code>uq_staff_email</code> on <code>lower(email)</code>).</td></tr>
+<tr><td><code>role</code></td><td>varchar(16)</td><td><code>SUPER_ADMIN | ADMIN | VIEWER</code> (copy of the Kratos metadata).</td></tr>
+<tr><td><code>status</code></td><td>varchar(10), default <code>ACTIVE</code></td><td><code>ACTIVE | DISABLED</code>.</td></tr>
+<tr><td><code>created_by</code></td><td>uuid, null</td><td>Staff id who created it; null for the bootstrap admin.</td></tr>
+<tr><td><code>created_at</code>, <code>updated_at</code></td><td>timestamptz</td><td></td></tr>
+</tbody></table></div>
+<pre class="out"><code>             identity_id              |      email       |    role     | status | created_by |          created_at
+--------------------------------------+------------------+-------------+--------+------------+-------------------------------
+ 0b648e27-181c-4650-87d7-441a5f07fb00 | a***@adera.local | SUPER_ADMIN | ACTIVE |            | 2026-10-25 00:23:28.949725+00</code></pre>
+<p>(Email masked; <code>created_at</code> shown as stored.)</p>
+
+<h3 id="reg-mini_app"><code>mini_app</code></h3>
+<p><strong>Purpose:</strong> a mini app: who it is, how it looks, and whether it may run. <strong>Why:</strong> one record is the source of truth for the catalog users see, the gateway/partner checks, and the dashboard. <strong>Written by:</strong> registry-service (<code>AppService</code>, <code>MiniAppRepository</code>; staff create/patch, status changes, logo upload, review aggregation updates <code>rating_*</code>). <strong>Read by:</strong> registry-service (catalog <code>/api/v1/apps</code>, admin API); notification-service reads a derived view through <code>/internal/apps/{id}/context</code>.</p>
+<div class="table-wrap"><table><thead><tr><th>Column</th><th>Type</th><th>Meaning and why</th></tr></thead><tbody>
+<tr><td><code>id</code></td><td>uuid PK</td><td>App id (what other services store as <code>app_id</code>).</td></tr>
+<tr><td><code>slug</code></td><td>varchar(40), unique</td><td>Permanent short name used in links.</td></tr>
+<tr><td><code>name</code>, <code>description</code></td><td>jsonb</td><td>Per language: <code>{"en","am","om"}</code>.</td></tr>
+<tr><td><code>logo_image_id</code>, <code>logo_content_type</code></td><td>uuid, varchar(64)</td><td>Pointer to <code>apps/{id}/logo/{logo_image_id}.png</code> in RustFS (the logo is re-encoded to PNG).</td></tr>
+<tr><td><code>brand_color</code></td><td>varchar(7)</td><td><code>#RRGGBB</code>.</td></tr>
+<tr><td><code>categories</code>, <code>markets</code></td><td>jsonb arrays</td><td>Catalog filters; markets default <code>["ET"]</code>.</td></tr>
+<tr><td><code>publisher_name</code>, <code>publisher_legal_name</code>, <code>support_email</code>, <code>support_phone</code>, <code>website</code></td><td>varchar</td><td>Who is responsible; shown to users and staff.</td></tr>
+<tr><td><code>entry_url</code>, <code>allowed_origins</code></td><td>varchar(500), jsonb</td><td>Where the app is served and which origins may embed it (for the future frontend bridge; not enforced yet).</td></tr>
+<tr><td><code>status</code></td><td>varchar(10), default <code>DRAFT</code></td><td><code>DRAFT | LIVE | PAUSED | KILLED</code>. Only LIVE apps appear in the catalog and are usable in PROD (DEV works for any app that is not KILLED). This status is separate from the environment.</td></tr>
+<tr><td><code>priority</code></td><td>int, default 100</td><td>Lower = shown first (index <code>idx_mini_app_listing (status, priority)</code>).</td></tr>
+<tr><td><code>rating_avg</code>, <code>rating_count</code></td><td>numeric(3,2), int</td><td>Denormalised from <code>app_review</code> so the catalog needs no aggregate query.</td></tr>
+<tr><td><code>extra</code></td><td>jsonb</td><td>Free-form, like <code>app_user.extra</code>.</td></tr>
+<tr><td><code>created_by</code>, <code>created_at</code>, <code>updated_at</code></td><td>uuid, timestamptz</td><td></td></tr>
+</tbody></table></div>
+<p><span class="badge partial">illustrative example</span></p>
+<pre class="out"><code>id 2398a5ca-1f2e-4b1f-9470-8cfbd543c643   slug demo-rides   name {"en":"Demo Rides","am":"..."}   status LIVE   priority 100
+logo_image_id 8b799f2c-7806-4b4a-9f7e-07e75dd9c541   markets ["ET"]   rating_avg 4.50   rating_count 2   brand_color #1F6FEB</code></pre>
+
+<h3 id="reg-capability"><code>app_capability</code></h3>
+<p><strong>Purpose:</strong> which data and services an app may ask for. <strong>Why:</strong> the "admin grants" gate of a two-gate model (the user-consent gate comes with the frontend bridge, not built yet). The <code>reason</code> text is what users will see in a consent sheet. Notification sending is gated by <code>notify.sms</code>, <code>notify.email</code>, <code>notify.inapp</code>. <strong>Written by:</strong> registry-service (<code>AppConfigService</code>, audited as <code>capability.set</code>). <strong>Read by:</strong> registry-service; notification-service via <code>/internal/apps/{id}/context</code> (<code>capability_not_granted</code>). Columns: <code>app_id</code> uuid FK cascade, <code>capability</code> varchar(40), <code>state</code> (<code>GRANTED | DENIED | SUSPENDED</code>), <code>reason</code> jsonb (per language), <code>updated_by</code>, <code>updated_at</code>; PK <code>(app_id, capability)</code>. The catalog of capability names is in <a href="10-reference.html#capabilities">the reference</a>.</p>
+<p><span class="badge partial">illustrative example</span></p>
+<pre class="out"><code>app_id 2398a5ca-... | notify.sms | GRANTED | {"en":"To text you job updates"} | updated_by 0b648e27-...</code></pre>
+
+<h3 id="reg-payment"><code>app_payment_settings</code></h3>
+<p><strong>Purpose:</strong> per-app payment configuration (<code>allowed_currencies</code> jsonb, <code>allow_hold</code> boolean, <code>min_amount_minor</code>, <code>max_amount_minor</code> bigint). <strong>Why:</strong> prepared ahead for the payments feature (audited as <code>payment.set</code>). Payments are not built, so nothing reads it yet. One row per app (<code>app_id</code> PK, FK cascade). Written by <code>AppConfigService</code>.</p>
+<p><span class="badge partial">illustrative example</span></p>
+<pre class="out"><code>app_id 2398a5ca-... | ["ETB"] | allow_hold f | min 100 | max 5000000   (amounts in minor units, i.e. cents)</code></pre>
+
+<h3 id="reg-limit"><code>app_notification_limit</code></h3>
+<p><strong>Purpose:</strong> how much an app may send per channel. <strong>Why:</strong> to bound cost and abuse. <code>NULL</code> means unlimited, <code>0</code> means none. Columns: <code>app_id</code>, <code>channel</code> (<code>SMS | EMAIL | IN_APP</code>) as PK, <code>max_per_user_per_day</code>, <code>max_per_day</code>, <code>max_distinct_users_per_day</code> (int), <code>max_total</code> (bigint), <code>updated_at</code>. <strong>Written by:</strong> registry-service (<code>limit.set</code>). <strong>Read by:</strong> notification-service through the internal context endpoint, which compares them with <code>usage_daily/usage_total</code>.</p>
+<p><span class="badge partial">illustrative example</span></p>
+<pre class="out"><code>2398a5ca-... | SMS | per_user_per_day 3 | per_day 500 | distinct_users_per_day 200 | total NULL</code></pre>
+
+<h3 id="reg-env"><code>app_environment</code></h3>
+<p><strong>Purpose:</strong> the server addresses (CIDR ranges) allowed to call the partner API, separately for <code>DEV</code> and <code>PROD</code> (both can be filled in; only the one matching the deployment's <code>ADERA_ENV</code> is used). The column has <code>CHECK (environment IN ('DEV','PROD'))</code>; migration <code>V2__environments_dev_prod.sql</code> renamed the old TEST/LIVE rows. <strong>Why:</strong> a stolen private key is useless from any other address (<code>ip_not_allowed</code>). Columns: <code>app_id</code>, <code>environment</code> as PK, <code>allowed_cidrs</code> jsonb (e.g. <code>["203.0.113.10/32"]</code>), <code>updated_at</code>. <strong>Written by:</strong> registry-service (<code>environment.set</code>). <strong>Read by:</strong> notification-service (internal context).</p>
+<p><span class="badge partial">illustrative example</span></p>
+<pre class="out"><code>2398a5ca-... | PROD | ["203.0.113.10/32"] | 2026-10-25 10:00:00+00</code></pre>
+
+<h3 id="reg-key"><code>partner_key</code></h3>
+<p><strong>Purpose:</strong> a partner's <em>public</em> RSA key. <strong>Why:</strong> requests are RS256-signed by the partner; we verify with this key and never hold their private key (private keys are rejected on upload). <code>key_id</code> (<code>ak_dev_&lt;hex&gt;</code> or <code>ak_prod_&lt;hex&gt;</code>; rows from before the rename keep <code>ak_test_</code> / <code>ak_live_</code>) is an identifier, not a secret. Revoking sets <code>status=REVOKED</code> and <code>revoked_at</code>; <code>expires_at</code> allows planned rotation. <strong>Written by:</strong> registry-service (<code>PartnerKeyService</code>, <code>key.register</code>, <code>key.revoke</code>). <strong>Read by:</strong> notification-service through <code>/internal/partner-keys/{keyId}</code> (cached briefly).</p>
+<div class="table-wrap"><table><thead><tr><th>Column</th><th>Type</th><th>Notes</th></tr></thead><tbody>
+<tr><td><code>key_id</code></td><td>varchar(64) PK</td><td><code>X-Adera-Key-Id</code> value.</td></tr>
+<tr><td><code>app_id</code></td><td>uuid FK cascade</td><td>Index <code>idx_partner_key_app</code>.</td></tr>
+<tr><td><code>environment</code></td><td>varchar(5)</td><td><code>DEV | PROD</code> (CHECK constraint). Old rows were migrated TEST to DEV, LIVE to PROD.</td></tr>
+<tr><td><code>algorithm</code></td><td>varchar(10), default <code>RS256</code></td><td></td></tr>
+<tr><td><code>public_key_pem</code></td><td>text</td><td>The PEM public key (public by nature; not reproduced here).</td></tr>
+<tr><td><code>fingerprint</code></td><td>varchar(64)</td><td>SHA-256 of the DER public key, for humans to compare keys.</td></tr>
+<tr><td><code>label</code>, <code>status</code>, <code>expires_at</code>, <code>created_by</code>, <code>created_at</code>, <code>revoked_at</code></td><td></td><td><code>status</code>: <code>ACTIVE | REVOKED</code>.</td></tr>
+</tbody></table></div>
+<p><span class="badge partial">illustrative example</span></p>
+<pre class="out"><code>key_id ak_prod_4e1b7c09d2a3f568  app_id 2398a5ca-...   environment PROD   algorithm RS256
+public_key_pem -----BEGIN PUBLIC KEY----- ... (public key, shortened)   fingerprint 9b0c...e41f   label "prod 2026"   status ACTIVE</code></pre>
+
+<h3 id="reg-review"><code>app_review</code> and <code>app_report</code></h3>
+<p><strong>Purpose:</strong> user feedback on an app. <code>app_review</code>: a 1 to 5 <code>rating</code> (CHECK constraint) and optional <code>comment</code> (2000), one per user per app (<code>UNIQUE (app_id, user_id)</code>), <code>status</code> <code>VISIBLE | HIDDEN</code> for moderation. <code>app_report</code>: a complaint with <code>reason</code> (<code>SPAM | SCAM | INAPPROPRIATE | BROKEN | OTHER</code>), <code>details</code>, <code>status</code> (<code>OPEN | REVIEWED | DISMISSED</code>), and who handled it (<code>handled_by</code>, <code>handled_at</code>); index <code>idx_app_report_open (status, created_at DESC)</code> serves the staff inbox of open reports. <strong>Why:</strong> a store-style catalog needs ratings and a way to flag bad apps. <strong>Written by:</strong> registry-service (<code>ReviewService</code>): users via <code>/api/v1/apps/{id}/...</code>, staff to moderate (<code>review.moderate</code>, <code>report.handle</code>). Both hold the real <code>user_id</code> of the author.</p>
+<p><span class="badge partial">illustrative example</span></p>
+<pre class="out"><code>app_review: app 2398a5ca-... | user 7c1e4a52-... | rating 5 | comment "Fast and easy" | VISIBLE
+app_report: app 2398a5ca-... | user 7c1e4a52-... | reason BROKEN | details "Page does not load" | OPEN</code></pre>
+
+<h3 id="reg-audit"><code>audit_event</code></h3>
+<p><strong>Purpose:</strong> append-only record of every staff change. <strong>Why:</strong> accountability: who changed what, when and from which address. <strong>Written by:</strong> registry-service (<code>AuditService</code>, called from the admin controllers); never updated or deleted by code. <strong>Read by:</strong> <code>AuditController</code> (staff). Columns: <code>id</code> uuid PK, <code>actor_id</code> uuid (staff id; null for system actions such as the bootstrap), <code>actor_role</code> varchar(16), <code>action</code> varchar(60), <code>target_type</code> varchar(30), <code>target_id</code> varchar(64), <code>meta</code> jsonb (what changed), <code>ip</code> varchar(64) (client IP as the gateway reported it in <code>X-Client-IP</code>), <code>at</code> timestamptz (index <code>idx_audit_at</code>).</p>
+<p>Actions found in code: <code>staff.create</code>, <code>staff.update</code>, <code>app.create</code>, <code>app.update</code>, <code>app.status</code>, <code>app.logo</code>, <code>app.logo.remove</code>, <code>capability.set</code>, <code>limit.set</code>, <code>environment.set</code>, <code>payment.set</code>, <code>key.register</code>, <code>key.revoke</code>, <code>review.moderate</code>, <code>report.handle</code>. Real rows (first four; the IP is the Docker gateway address because the stack runs locally):</p>
+<pre class="out"><code>   actor_role |     action     | target_type |              target_id               |                         meta                          |     ip
+ (system)     | staff.create   | staff       | 0b648e27-181c-4650-87d7-441a5f07fb00 | {"role": "SUPER_ADMIN", "email": "a***@adera.local"}  |
+ SUPER_ADMIN  | app.create     | mini_app    | 2398a5ca-1f2e-4b1f-9470-8cfbd543c643 | {"slug": "e2e-partner-93001d"}                        | 172.18.0.1
+ SUPER_ADMIN  | app.logo       | mini_app    | 2398a5ca-1f2e-4b1f-9470-8cfbd543c643 | {"imageId": "8b799f2c-7806-4b4a-9f7e-07e75dd9c541"}   | 172.18.0.1
+ SUPER_ADMIN  | capability.set | mini_app    | 2398a5ca-1f2e-4b1f-9470-8cfbd543c643 | {"state": "GRANTED", "capability": "notify.sms"}      | 172.18.0.1
+
+SELECT action, count(*) FROM audit_event GROUP BY 1;   (21 rows in total)
+ capability.set 6 | environment.set 4 | limit.set 2 | key.register 2 | app.status 2 | app.logo 2 | app.create 2 | staff.create 1</code></pre>
+<p>Those rows are the history of two e2e runs; the apps they refer to were deleted afterwards, so <code>target_id</code> values no longer match any <code>mini_app</code> row. The e2e script deletes the app row directly with SQL (registry-service has no endpoint to delete an app; apps are paused or killed, not deleted), so the audit trail naturally outlives its subject.</p>
+
+<h2 id="db-infisical">Database <code>infisical</code> (Infisical)</h2>
+<p>This is Infisical's own schema (about 770 tables including monthly partitions of the certificate tables), created and migrated by the Infisical container. We do not own or document it; we only note what matters. <strong>Do not query secret tables</strong>: values are encrypted with <code>INFISICAL_ENCRYPTION_KEY</code> (stored in <code>.env</code>; lose it and every secret becomes unreadable).</p>
+<div class="table-wrap"><table><thead><tr><th>Table</th><th>What it holds for us</th></tr></thead><tbody>
+<tr><td><code>projects</code>, <code>project_environments</code></td><td>The <code>Adera</code> project (type <code>secret-manager</code>) with environments <code>dev</code> and <code>prod</code> (prod is empty). A second project, <code>Certificate Manager</code>, is created by Infisical itself.</td></tr>
+<tr><td><code>secret_folders</code></td><td>The folder tree (<code>/infra</code>, <code>/kratos</code>, <code>/gateway</code>, <code>/notification</code>, <code>/user</code>, plus <code>root</code>).</td></tr>
+<tr><td><code>secrets_v2</code>, <code>secret_versions_v2</code></td><td>The secrets: <code>key</code> in clear, <code>encryptedValue</code> as bytea. Versions give history and rollback. 9 secrets at the time of writing.</td></tr>
+<tr><td><code>identities</code>, <code>identity_token_auths</code>, <code>identity_access_tokens</code></td><td>Machine identity <code>adera-local-dev</code> (Token Auth) whose token notification-service uses to read <code>/notification</code> at startup (<code>INFISICAL_TOKEN</code>, expires 2026-11-23).</td></tr>
+<tr><td><code>audit_logs</code>, <code>kms_keys</code>, <code>users</code>, <code>organizations</code></td><td>Access audit trail, key management, human logins and the organization.</td></tr>
+</tbody></table></div>
+<p>Where the secrets are and how to add or rotate one is in <a href="09-guides.html">the guides</a> and <a href="03-tools.html#infisical">the Infisical section</a>. Infisical also keeps its job queues in Redis (see below).</p>
+
+<h2 id="redis-keys">Redis keys</h2>
+<p>Redis (<code>redis:7-alpine</code>, ACL users, <code>noeviction</code>, 256 MB) is used by <strong>two clients only: APISIX (rate-limit counters) and Infisical (queues and caches)</strong>. None of our three Java services connects to Redis: their rate limits and queues are in Postgres (<code>send_log</code>, <code>notification</code>). Keys were listed by pattern with <code>SCAN</code> as the <code>admin</code> user (498 keys, 100 with a TTL at the time of reading).</p>
+<div class="table-wrap"><table><thead><tr><th>Pattern</th><th>Writer</th><th>What and how long</th></tr></thead><tbody>
+<tr><td><code>plugin-limit-count:v1:/routes/&lt;route id&gt;:&lt;hash&gt;:&lt;client ip&gt;</code></td><td>APISIX <code>limit-count</code> (user <code>apisix</code>, whose ACL allows only <code>~plugin-limit-count:*</code>)</td><td>String counter of requests in the current window. TTL = the window (60 s). Example: <code>plugin-limit-count:v1:/routes/kratos-self-service-submit:129764580:172.18.0.1</code> value 1, ttl 44 s. When the counter passes the route limit the gateway answers 429. Client IP is the Docker gateway address locally, so all clients share one counter in dev.</td></tr>
+<tr><td><code>bull:*</code> (about 120 keys)</td><td>Infisical (BullMQ job queues)</td><td>Queue metadata, stalled-job checks (TTL about 20 s). Must never be evicted, which is why Redis is <code>noeviction</code>.</td></tr>
+<tr><td><code>{cron}:run:*</code>, <code>{cron}:last:*</code>, <code>{cron}:slot:*</code>, <code>{cron}:pending</code></td><td>Infisical scheduler</td><td>Scheduled-job bookkeeping (hundreds of small hashes).</td></tr>
+<tr><td><code>secret-manager:*</code>, <code>secret-etag:*</code>, <code>project-permission-data:*</code>, <code>kms-project-sm-material:*</code>, <code>identity-*</code>, <code>worker-heartbeat:*</code>, <code>infisical-admin-cfg</code></td><td>Infisical</td><td>Caches for secret reads, permissions, token verdicts; short TTLs (minutes). These can contain cached secret material in encrypted form (not inspected).</td></tr>
+</tbody></table></div>
+<pre class="out"><code>$ redis-cli --user admin ... --scan --pattern 'plugin-limit-count:*'
+plugin-limit-count:v1:/routes/kratos-self-service-submit:129764580:172.18.0.1   ttl=44  type=string  val=1
+plugin-limit-count:v1:/routes/kratos-public:2786322059:172.18.0.1               ttl=38  type=string  val=2
+
+$ redis-cli ... config get maxmemory-policy
+noeviction</code></pre>
+<div class="callout why"><span class="label">Why noeviction</span><p>With an eviction policy Redis would silently delete keys when memory is full. For Infisical's job queues that means lost jobs. With <code>noeviction</code> Redis refuses writes instead, which is a loud, visible failure. The APISIX keys all carry a TTL so they cannot fill memory on their own. See <a href="03-tools.html#redis">Redis</a>.</p></div>
+
+<h2 id="rustfs-bucket">RustFS bucket <code>adera-media</code></h2>
+<p>RustFS is an S3-compatible object store (see <a href="03-tools.html#rustfs">RustFS</a>). One bucket, <code>adera-media</code>, private (not public): clients get <strong>signed, expiring URLs</strong> (60 minutes for avatars). The database stores only an <em>image id</em>; the object key is rebuilt from ids, so a file can never be addressed by anything a user typed.</p>
+<div class="table-wrap"><table><thead><tr><th>Key pattern</th><th>Written by</th><th>Content</th><th>Source in code</th></tr></thead><tbody>
+<tr><td><code>avatars/{userId}/{imageId}.jpg</code></td><td>user-service</td><td>Avatar, always re-encoded as a JPEG, centre-cropped square, at most 512 px. Replacing an avatar deletes the old object.</td><td><code>AvatarStorage.java</code> (<code>avatars/" + userId + "/" + imageId + ".jpg"</code>)</td></tr>
+<tr><td><code>apps/{appId}/logo/{imageId}.png</code></td><td>registry-service</td><td>Mini-app logo, re-encoded as PNG.</td><td><code>ObjectStorage.java</code></td></tr>
+</tbody></table></div>
+<p>Real listing (read-only, <code>tests/e2e/s3tool.py list</code>). No avatars exist now (the e2e user was cleaned up); two logo objects remain:</p>
+<pre class="out"><code>$ set -a; . ./.env; set +a; python3 -I tests/e2e/s3tool.py list
+2 objects
+  apps/2398a5ca-1f2e-4b1f-9470-8cfbd543c643/logo/8b799f2c-7806-4b4a-9f7e-07e75dd9c541.png
+  apps/84a874fa-ba0f-4c66-96f9-868167c550c1/logo/6b641f97-8e1a-410e-bd92-c1c554c0043d.png</code></pre>
+<p>Note the first path: it is the logo of the app whose creation is in <code>audit_event</code> above (<code>app.create</code> / <code>app.logo</code> with the same ids). The app rows were removed by the e2e cleanup (direct SQL), which does not touch RustFS, so these two logo objects are test leftovers. There is no app-delete endpoint, so this cannot happen through the API. Clean them with <code>python3 -I tests/e2e/s3tool.py delete &lt;key&gt;</code> if wanted (not done here: the directive was read-only).</p>
+<p><span class="badge partial">illustrative example</span> of the pairing between a database row and an object:</p>
+<pre class="out"><code>users.app_user.id = 7c1e4a52-3b0d-...   avatar_image_id = 0c9d1f3e-5a77-...
+-> object key   avatars/7c1e4a52-3b0d-.../0c9d1f3e-5a77-....jpg</code></pre>
+<p>user-service and registry-service currently use RustFS' <strong>admin</strong> access key (<code>RUSTFS_ACCESS_KEY</code>/<code>RUSTFS_SECRET_KEY</code>), a known limitation to fix before production (<a href="06-security.html">security</a>).</p>
+
+<h2 id="retention">What is kept, and for how long</h2>
+<div class="table-wrap"><table><thead><tr><th>Data</th><th>Kept</th></tr></thead><tbody>
+<tr><td>Kratos sessions</td><td>30 days from login (<code>session.lifespan: 720h</code>), or until logout</td></tr>
+<tr><td>One-time codes</td><td>valid 5 minutes; rows stay until Kratos cleanup is run (not scheduled)</td></tr>
+<tr><td><code>send_log</code>, <code>notification*</code>, <code>callback</code>, <code>usage_daily</code>, <code>audit_event</code></td><td>No deletion job found in the code: kept indefinitely. A retention policy is not built yet.</td></tr>
+<tr><td>Logs (Loki), traces (Tempo), metrics (Prometheus)</td><td>7 days, 3 days, 15 days (see <a href="03-tools.html#observability">observability</a>)</td></tr>
+</tbody></table></div>
+
+<div class="pager"><a class="prev" href="06-security.html"><small>Previous</small>6. Security model</a><a class="next" href="08-endpoints.html"><small>Next</small>8. Endpoint reference</a></div>
+<p class="footer">Adera backend documentation &middot; last verified 2026-10-25 &middot; <a href="../index.html">contents</a></p>
+</main>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

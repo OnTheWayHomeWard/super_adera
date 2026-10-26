@@ -1,0 +1,63 @@
+spring:
+  application:
+    name: user-service
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/users}
+    username: ${DB_USER:users_svc}
+    password: ${DB_PASSWORD:}
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+  servlet:
+    multipart:
+      max-file-size: 6MB      # a little above adera.user.avatar.max-bytes so our own clear error message wins
+      max-request-size: 7MB
+
+server:
+  port: 8080
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  tracing:
+    sampling:
+      probability: ${TRACING_SAMPLE_RATE:1.0}   # dev: trace everything; lower in production
+  otlp:
+    metrics:
+      export:
+        enabled: false   # metrics are scraped by Prometheus (/actuator/prometheus); only traces go to the OTel collector
+  opentelemetry:
+    tracing:
+      export:
+        otlp:
+          endpoint: ${OTEL_TRACES_ENDPOINT:http://localhost:4318/v1/traces}
+
+adera:
+  user:
+    # Shared secret the gateway adds to every request it forwards. When set, /api and /internal/auth requests
+    # without it are rejected, so another container cannot spoof the X-User-Id header.
+    gateway-secret: ${USER_GATEWAY_SECRET:}
+    # Shared secret for service-to-service calls to /internal/** (notification-service reads contact details from here).
+    internal-secret: ${INTERNAL_API_SECRET:}
+    # Key behind pseudonymous per-app user ids (u_p_...). NEVER change it once aliases have been given to partners.
+    alias-hmac-secret: ${ALIAS_HMAC_SECRET:}
+    kratos:
+      public-url: ${KRATOS_PUBLIC_URL:http://localhost:4433}   # whoami, logout
+      admin-url: ${KRATOS_ADMIN_URL:http://localhost:4434}     # read an identity's email/phone (internal only)
+    registry:
+      url: ${REGISTRY_URL:http://localhost:8087}   # audit log for staff actions (POST /internal/audit)
+    storage:
+      endpoint: ${STORAGE_ENDPOINT:http://localhost:9000}                 # how this service reaches RustFS
+      public-endpoint: ${STORAGE_PUBLIC_ENDPOINT:http://localhost:9000}   # what phones/browsers use (signed URLs)
+      bucket: ${STORAGE_BUCKET:adera-media}
+      access-key: ${STORAGE_ACCESS_KEY:}
+      secret-key: ${STORAGE_SECRET_KEY:}
+      region: ${STORAGE_REGION:us-east-1}
+      presign-minutes: ${STORAGE_PRESIGN_MINUTES:60}
+    avatar:
+      max-bytes: ${AVATAR_MAX_BYTES:5242880}
+      size-px: ${AVATAR_SIZE_PX:512}
+    extra-max-bytes: ${EXTRA_MAX_BYTES:16384}

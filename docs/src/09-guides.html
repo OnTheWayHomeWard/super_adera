@@ -1,0 +1,671 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>9. Guides | Adera docs</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+<button id="menu-btn" type="button" aria-label="Toggle menu">Menu</button>
+<a class="brand" href="../index.html">Adera docs</a>
+<span class="spacer"></span>
+<a href="../index.html">Contents</a>
+<button id="theme-btn" type="button" aria-label="Toggle light or dark theme">Theme</button>
+</header>
+<div class="layout">
+<nav class="sidebar" aria-label="Sections">
+<ul><li><a href="../index.html" class="">Home / contents</a></li></ul>
+<h4>Sections</h4><ul>
+<li><a href="01-overview.html">1. Overview</a>
+</li>
+<li><a href="02-setup.html">2. Setup and running</a>
+</li>
+<li><a href="03-tools.html">3. Tools</a>
+</li>
+<li><a href="04-services.html">4. Services</a>
+</li>
+<li><a href="05-communication.html">5. How it communicates</a>
+</li>
+<li><a href="06-security.html">6. Security model</a>
+</li>
+<li><a href="07-data.html">7. Data</a>
+</li>
+<li><a href="08-endpoints.html">8. Endpoint reference</a>
+</li>
+<li><a href="09-guides.html" class=current>9. Guides</a>
+<ul><li><a href="#prep">Before you start</a></li><li><a href="#user-signup">1. Sign up and log in as a user</a></li><li><a href="#staff-login">2. Log in as staff (email code and authenticator app)</a></li><li><a href="#first-super-admin">Where the first super admin comes from, and how to change it</a></li><li><a href="#register-app">4. Register a mini app end to end</a></li><li><a href="#send-notification">5. Send a notification as a partner and read the callback</a></li><li><a href="#read-inbox">6. Read the inbox (the bell menu)</a></li><li><a href="#mute-app">7. Mute an app</a></li><li><a href="#revoke-key">8. Revoke a key</a></li><li><a href="#quotas-log">9. Quotas, usage and &quot;why did it not arrive?&quot;</a></li><li><a href="#observability">Read logs, traces and metrics in Grafana</a></li><li><a href="#infisical-secrets">Infisical: where each secret is, and how to add or rotate one</a></li><li><a href="#go-real">Switch to real SMS, email and push safely</a></li></ul>
+</li>
+<li><a href="10-reference.html">10. Reference</a>
+</li>
+<li><a href="11-backoffice.html">11. Backoffice (staff dashboard)</a>
+</li>
+<li><a href="12-backoffice-guide.html">12. Backoffice guide (staff manual)</a>
+</li>
+<li><a href="13-sample-data.html">13. Sample data (test scenarios)</a>
+</li>
+</ul>
+<h4>Endpoints</h4><ul>
+<li><a href="08a-user-api.html">8a. End-user API</a>
+</li>
+<li><a href="08b-staff-api.html">8b. Staff / dashboard API</a>
+</li>
+<li><a href="08c-partner-api.html">8c. Partner API</a>
+</li>
+<li><a href="08d-internal-api.html">8d. Internal API</a>
+</li>
+<li><a href="08e-kratos-flows.html">8e. Kratos flows</a>
+</li>
+<li><a href="08f-operational.html">8f. Operational endpoints</a>
+</li>
+</ul>
+</nav>
+<main>
+<h1>Guides: how to operate it</h1>
+<p class="lead">Worked scenarios with commands you can copy and the output you should see. All commands were run against the dev stack (console SMS, Mailpit); where output is shortened with <code>jq</code> that is stated. Placeholders such as <code>$TOKEN</code> stand for values you obtain in an earlier step.</p>
+<section><h2 id="prep">Before you start</h2>
+<pre><code>cd /path/to/adera
+docker compose ps                                  # everything Up
+BASE=http://127.0.0.1:9080                         # the gateway
+DEV=http://127.0.0.1:8085                          # dev only: one-time codes
+which curl jq python3 openssl                      # tools used below</code></pre>
+<ul>
+<li><a href="#user-signup">1 Sign up and log in as a user</a></li><li><a href="#staff-login">2 Log in as staff</a></li><li><a href="#first-super-admin">3 First super admin, adding staff</a></li><li><a href="#register-app">4 Register a mini app</a></li><li><a href="#send-notification">5 Send a notification as a partner</a></li><li><a href="#read-inbox">6 Read the inbox</a></li><li><a href="#mute-app">7 Mute an app</a></li><li><a href="#revoke-key">8 Revoke a key</a></li><li><a href="#quotas-log">9 Quotas, usage and "why did it not arrive?"</a></li><li><a href="#observability">10 Logs, traces, metrics</a></li><li><a href="#infisical-secrets">11 Infisical secrets</a></li><li><a href="#go-real">12 Go real</a></li>
+</ul></section>
+<section><h2 id="user-signup">1. Sign up and log in as a user</h2>
+<p>There are no passwords. A phone number or an email gets a six-digit code; the code gives a <strong>session token</strong> that lasts 30 days. Sign-up and login are the same two steps against Kratos through the gateway. This script was run as written.</p>
+<pre><code>BASE=http://127.0.0.1:9080          # the gateway
+DEV=http://127.0.0.1:8085           # dev only: shows the one-time codes
+PHONE=+251977123456                 # any valid E.164 number in dev mode
+
+curl -s -X DELETE $DEV/dev/messages        # dev only: clear old messages
+
+# 1. start a registration flow (native app flow)
+FLOW=$(curl -s $BASE/kratos/self-service/registration/api | jq -r .id)
+
+# 2. ask for a code
+curl -s -X POST "$BASE/kratos/self-service/registration?flow=$FLOW" \
+  -H 'Content-Type: application/json' -H 'Accept: application/json' \
+  -d "{\"method\":\"code\",\"traits.phone_number\":\"$PHONE\"}" | jq '{state, message: .ui.messages[0].text}'
+
+# 3. read the code (dev mode: the console SMS provider keeps it here; in real mode it arrives on the phone)
+for i in 1 2 3 4 5 6 7 8 9 10; do   # Kratos hands the message to the courier a moment later
+  CODE=$(curl -sG "$DEV/dev/messages" --data-urlencode "to=$PHONE" | jq -r '.[0].body // empty' | grep -oE '[0-9]{6}' | head -1)
+  [ -n "$CODE" ] &amp;&amp; break; sleep 1
+done
+echo "code: $CODE"
+
+# 4. send the code: the answer holds the session token
+RESP=$(curl -s -X POST "$BASE/kratos/self-service/registration?flow=$FLOW" \
+  -H 'Content-Type: application/json' -H 'Accept: application/json' \
+  -d "{\"method\":\"code\",\"traits.phone_number\":\"$PHONE\",\"code\":\"$CODE\"}")
+TOKEN=$(echo "$RESP" | jq -r .session_token)
+echo "$RESP" | jq '{session: {active: .session.active, aal: .session.authenticator_assurance_level}, user_id: .identity.id}'
+
+# 5. use it
+curl -s $BASE/api/v1/me -H "Authorization: Bearer $TOKEN" | jq '{id, phone, status, language}'
+</code></pre>
+<pre class="out"><code>{
+  "state": "sent_email",
+  "message": "A code has been sent to the address(es) you provided. If you have not received a message, check the spelling of the address and retry the registration."
+}
+code: 899223
+{
+  "session": {
+    "active": true,
+    "aal": "aal1"
+  },
+  "user_id": "0e35641f-6a46-4128-90cd-607b185b52a8"
+}
+{
+  "id": "0e35641f-6a46-4128-90cd-607b185b52a8",
+  "phone": "+2519*****56",
+  "status": "ACTIVE",
+  "language": "en"
+}</code></pre><p class="masked">(The code, ids and phone number are from a throw-away test user; the phone is masked here. The state name <code>sent_email</code> is Kratos' wording even for SMS.)</p>
+<ul>
+<li>The <code>user_id</code> from Kratos <em>is</em> the user's id everywhere (profile, aliases, inbox).</li>
+<li>The profile row was created by the registration webhook before you called <code>/api/v1/me</code> (see <a href="05-communication.html#registration">the webhook path</a>).</li>
+<li>Unknown number at <em>login</em>: Kratos says the account does not exist (a known enumeration weakness). Wrong code: the flow shows an error and you may retry until it expires (5 minutes).</li>
+<li>Limit: 10 code requests or checks per minute per IP at the gateway; 5 SMS per hour and 10 per day per recipient. In real mode a rate-limited recipient silently receives nothing.</li>
+</ul>
+<h3 id="log-in-again-later">Log in again later</h3>
+<pre><code>BASE=http://127.0.0.1:9080
+DEV=http://127.0.0.1:8085
+PHONE=+251977123456
+
+curl -s -X DELETE $DEV/dev/messages
+FLOW=$(curl -s $BASE/kratos/self-service/login/api | jq -r .id)
+
+# ask for a code (the identifier is the phone or the email)
+curl -s -X POST "$BASE/kratos/self-service/login?flow=$FLOW" \
+  -H 'Content-Type: application/json' -H 'Accept: application/json' \
+  -d "{\"method\":\"code\",\"identifier\":\"$PHONE\"}" | jq '{state, message: .ui.messages[0].text}'
+
+for i in 1 2 3 4 5 6 7 8 9 10; do
+  CODE=$(curl -sG "$DEV/dev/messages" --data-urlencode "to=$PHONE" | jq -r '.[0].body // empty' | grep -oE '[0-9]{6}' | head -1)
+  [ -n "$CODE" ] &amp;&amp; break; sleep 1
+done
+
+RESP=$(curl -s -X POST "$BASE/kratos/self-service/login?flow=$FLOW" \
+  -H 'Content-Type: application/json' -H 'Accept: application/json' \
+  -d "{\"method\":\"code\",\"identifier\":\"$PHONE\",\"code\":\"$CODE\"}")
+TOKEN=$(echo "$RESP" | jq -r .session_token)
+echo "$RESP" | jq '{session_token: (.session_token | .[0:8] + "..."), expires_at: .session.expires_at, aal: .session.authenticator_assurance_level}'
+
+curl -s $BASE/kratos/sessions/whoami -H "Authorization: Bearer $TOKEN" | jq '{active, aal: .authenticator_assurance_level, id: .identity.id}'
+
+# log out: removes this phone's push token AND revokes the session
+curl -s -X POST $BASE/api/v1/me/logout -H "Authorization: Bearer $TOKEN" | jq .
+curl -s -o /dev/null -w 'after logout, whoami is HTTP %{http_code}\n' $BASE/kratos/sessions/whoami -H "Authorization: Bearer $TOKEN"
+</code></pre>
+<pre class="out"><code>{
+  "state": "sent_email",
+  "message": "A code was sent to the address you provided. If you didn't receive it, please check the spelling of the address and try again."
+}
+{
+  "session_token": "ory_st_r...",
+  "expires_at": "2026-11-24T06:09:56.273384706Z",
+  "aal": "aal1"
+}
+{
+  "active": true,
+  "aal": "aal1",
+  "id": "0e35641f-6a46-4128-90cd-607b185b52a8"
+}
+after logout, whoami is HTTP 401</code></pre>
+<p>Logging out uses <code>POST /api/v1/me/logout</code> (HTTP 204, no body): it removes this phone's push token and revokes the session in one call. With email instead of a phone use the same flows with <code>traits.email</code> and <code>identifier</code>. Every field and error: <a href="08e-kratos-flows.html">Kratos flows</a> and <a href="08a-user-api.html">user API</a>. Clean up a test user: delete the identity with the Kratos admin API (<code>DELETE http://127.0.0.1:4434/admin/identities/&lt;id&gt;</code>) and its rows in <code>users</code>.</p></section>
+<section><h2 id="staff-login">2. Log in as staff (email code and authenticator app)</h2>
+<p>Staff need <strong>two proofs</strong> to reach the admin API: the emailed code (aal1) and an authenticator-app code (aal2). Until both are done, the admin API answers <code>403 mfa_required</code>.</p>
+<ol>
+<li><strong>Be staff first:</strong> a super admin added you (<a href="#first-super-admin">guide 3</a>), or you are the bootstrap super admin.</li>
+<li><strong>Step A, emailed code.</strong> Same login flow as users, with your email. In dev the email is in <code>GET $DEV/dev/messages?to=EMAIL</code> and in Mailpit at <a href="http://localhost:8025">http://localhost:8025</a>; in real mode in your inbox.</li>
+<li><strong>Step B, first time only, enrol the authenticator.</strong> Kratos shows a secret key (and a QR code); add it to an app such as Google Authenticator or Aegis, then type the 6-digit code to confirm. Enrolling makes the current session aal2 immediately.</li>
+<li><strong>Step C, every later login.</strong> After step A, start the aal2 login flow with your session token in <code>X-Session-Token</code> and send the app's current code.</li>
+</ol>
+<p>The script below does all three (steps A and C were run against the real super admin; step B against a throw-away identity; the values the script reads interactively were computed for the test). If you do not have a phone app handy, compute the code with the helper that follows.</p>
+<pre><code>BASE=http://127.0.0.1:9080
+DEV=http://127.0.0.1:8085
+EMAIL=admin@adera.local             # your staff email (dev value shown)
+
+# --- A. the emailed one-time code (gives an aal1 session) ---------------------------------------------------
+curl -s -X DELETE $DEV/dev/messages
+FLOW=$(curl -s $BASE/kratos/self-service/login/api | jq -r .id)
+curl -s -X POST "$BASE/kratos/self-service/login?flow=$FLOW" -H 'Content-Type: application/json' -H 'Accept: application/json' \
+  -d "{\"method\":\"code\",\"identifier\":\"$EMAIL\"}" | jq -r '.ui.messages[0].text'
+for i in $(seq 1 10); do   # dev: the email is also kept at /dev/messages (real mode: read your inbox; dev: Mailpit at :8025)
+  CODE=$(curl -sG "$DEV/dev/messages" --data-urlencode "to=$EMAIL" | jq -r '.[0].body // empty' | grep -oE '[0-9]{6}' | head -1)
+  [ -n "$CODE" ] &amp;&amp; break; sleep 1
+done
+TOKEN=$(curl -s -X POST "$BASE/kratos/self-service/login?flow=$FLOW" -H 'Content-Type: application/json' -H 'Accept: application/json' \
+  -d "{\"method\":\"code\",\"identifier\":\"$EMAIL\",\"code\":\"$CODE\"}" | jq -r .session_token)
+curl -s -w ' HTTP %{http_code}\n' $BASE/admin/api/v1/me -H "Authorization: Bearer $TOKEN"        # refused: aal1 only
+
+# --- B. FIRST TIME ONLY: enrol the authenticator app ---------------------------------------------------------
+SF=$(curl -s $BASE/kratos/self-service/settings/api -H "Authorization: Bearer $TOKEN")
+SETTINGS_FLOW=$(echo "$SF" | jq -r .id)
+SECRET=$(echo "$SF" | jq -r '.ui.nodes[] | select(.attributes.id=="totp_secret_key") | .attributes.text.text')
+echo "Add this key to your authenticator app (Google Authenticator, Aegis, ...): $SECRET"
+# (the same secret is also offered as a QR code in the flow's "totp_qr" node)
+read -p "6-digit code from the app: " TOTP        # or compute it: python3 totp.py "$SECRET"
+curl -s -X POST "$BASE/kratos/self-service/settings?flow=$SETTINGS_FLOW" -H 'Content-Type: application/json' -H 'Accept: application/json' \
+  -H "Authorization: Bearer $TOKEN" -d "{\"method\":\"totp\",\"totp_code\":\"$TOTP\"}" | jq -r '.state'
+# enrolling makes this very session aal2 straight away:
+curl -s -w ' HTTP %{http_code}\n' $BASE/admin/api/v1/me -H "Authorization: Bearer $TOKEN"
+
+# --- C. EVERY LATER LOGIN: after step A, upgrade the session with the app's code -------------------------------
+# (wait for the next 30-second window if you just used a code: Kratos rejects a code twice)
+AF=$(curl -s "$BASE/kratos/self-service/login/api?aal=aal2&amp;refresh=false" -H "X-Session-Token: $TOKEN" | jq -r .id)
+read -p "fresh 6-digit code from the app: " TOTP
+curl -s -X POST "$BASE/kratos/self-service/login?flow=$AF" -H 'Content-Type: application/json' -H 'Accept: application/json' \
+  -H "X-Session-Token: $TOKEN" -d "{\"method\":\"totp\",\"totp_code\":\"$TOTP\"}" | jq -r '.session.authenticator_assurance_level'
+curl -s -w ' HTTP %{http_code}\n' $BASE/admin/api/v1/me -H "Authorization: Bearer $TOKEN"
+</code></pre>
+<pre class="out"><code>{"error":"mfa_required"} HTTP 403                  &lt;- after step A: aal1 is not enough
+success                                              &lt;- step B: authenticator enrolled
+{"id":"0b648e27-181c-4650-87d7-441a5f07fb00","role":"SUPER_ADMIN"} HTTP 200     &lt;- aal2: admin API works
+aal2                                                 &lt;- step C: session upgraded</code></pre>
+<h3 id="totp-helper">TOTP helper (no phone needed)</h3><p>Computes the 6-digit code (RFC 6238, HMAC-SHA1, 30-second steps) from the base32 secret shown in step B. Checked against the RFC 6238 test vector (secret <code>GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ</code> at time 59 gives <code>287082</code>). <strong>Treat the secret like a password:</strong> anyone with it can pass the second step.</p>
+<pre><code>#!/usr/bin/env python3
+"""Print the current 6-digit authenticator-app code for a base32 secret (RFC 6238: HMAC-SHA1, 30 s steps).
+Usage: python3 totp.py BASE32SECRET"""
+import base64, hashlib, hmac, struct, sys, time
+
+secret = sys.argv[1].replace(" ", "").upper()
+key = base64.b32decode(secret + "=" * (-len(secret) % 8))
+at = int(sys.argv[2]) if len(sys.argv) &amp;gt; 2 else int(time.time())       # optional unix time, for testing
+digest = hmac.new(key, struct.pack("&amp;gt;Q", at // 30), hashlib.sha1).digest()
+offset = digest[-1] &amp;amp; 0x0F
+code = (struct.unpack("&amp;gt;I", digest[offset:offset + 4])[0] &amp;amp; 0x7FFFFFFF) % 1_000_000
+print(f"{code:06d}")
+print(f"valid for another {30 - at % 30} seconds", file=sys.stderr)
+</code></pre>
+<pre><code>python3 totp.py JBSWY3DPEHPK3PXP        # example secret; prints e.g. 123456
+# the repo's own helper: python3 -I tests/e2e/staff.py [email]   (stores the secret in tests/e2e/.staff-totp-&lt;email&gt;.json, gitignored, mode 600)</code></pre>
+<ul><li>Kratos refuses the <em>same</em> code twice, so after enrolling wait for the next 30-second window before step C.</li><li>Use the resulting token as <code>Authorization: Bearer $TOKEN</code> for every <a href="08b-staff-api.html">staff endpoint</a>. Check with <code>GET /admin/api/v1/me</code>.</li><li>Lost phone: a super admin cannot reset your authenticator through the API today; use the Kratos admin API to delete the TOTP credential (see the <a href="03-tools.html#kratos">Kratos page</a>), then enrol again.</li><li>Staff sessions last as long as any Kratos session (30 days); disabling a staff member revokes them at once.</li></ul></section>
+<section>
+<h2 id="first-super-admin">Where the first super admin comes from, and how to change it</h2>
+<p>Staff are people with a row in registry-service's <code>staff</code> table <em>and</em> a role in their Kratos identity. At the very beginning nobody is staff, so something must create the first super admin: that is <code>BOOTSTRAP_SUPER_ADMIN_EMAIL</code>.</p>
+<h3 id="how-the-bootstrap-works">How the bootstrap works</h3>
+<ol>
+<li>Put the address in <code>.env</code>: <code>BOOTSTRAP_SUPER_ADMIN_EMAIL=admin@adera.local</code> (this is the dev value; use a real mailbox you can read in production). compose passes it to registry-service.</li>
+<li>At every start of registry-service, <code>StaffBootstrap</code> checks <em>if any ACTIVE super admin exists</em>. If one does, it does nothing. If none does, it creates (or re-activates) the staff member with that email as <code>SUPER_ADMIN</code>: it makes the Kratos identity (email trait, <code>metadata_public.role = SUPER_ADMIN</code>) if it does not exist, and inserts the <code>staff</code> row. It retries up to 20 times, 3 seconds apart, in the background, because Kratos may still be starting; it never blocks start-up.</li>
+<li>The log line you will see once: <code>Created the first super admin from BOOTSTRAP_SUPER_ADMIN_EMAIL. Sign in with that email, enrol an authenticator app, then change it.</code></li>
+<li>The first sign-in is <a href="#staff-login">the staff login guide</a>: emailed code, enrol an authenticator app, upgrade to aal2.</li>
+</ol>
+<pre><code>docker compose logs registry-service | grep -i "super admin"
+docker compose exec -T postgres psql -U adera_admin -d registry -c "SELECT email, role, status FROM staff"</code></pre>
+<h3 id="changing-it-afterwards">Changing it afterwards</h3>
+<p>The variable only matters while <strong>no active super admin exists</strong>. Editing it later does <em>not</em> move the role. The way to hand over:</p>
+<ol>
+<li>Sign in as the current super admin (aal2) and add the new person: <a href="08b-staff-api.html#ep-staff-post-staff"><code>POST /admin/api/v1/staff</code></a> with <code>{"email":"new.person@example.com","role":"SUPER_ADMIN"}</code>.</li>
+<li>The new person signs in (emailed code, authenticator enrolment) and checks <code>GET /admin/api/v1/me</code>.</li>
+<li>The old super admin is removed with <a href="08b-staff-api.html#ep-staff-patch-staff-id"><code>PATCH /admin/api/v1/staff/{id}</code></a> <code>{"status":"DISABLED"}</code> (made by the <em>other</em> super admin: you cannot disable yourself). Their sessions are revoked at once.</li>
+<li>Update <code>.env</code> to the new address so a fresh install does the right thing (optional; it is ignored while a super admin exists).</li>
+</ol>
+<div class="callout warn"><span class="label">Recovery</span><p>If every super admin is disabled or lost, set <code>BOOTSTRAP_SUPER_ADMIN_EMAIL</code> to an address you control and restart registry-service (<code>docker compose up -d registry-service</code>): with no active super admin the bootstrap runs again, creates or re-activates that person as <code>SUPER_ADMIN</code>, and you can sign in again (they still need an emailed code and their authenticator app; if the authenticator was lost, delete the TOTP credential of that identity in Kratos first, see the Kratos admin API on the <a href="03-tools.html#kratos">Kratos page</a>). Derived from the code (<code>StaffBootstrap</code>, <code>StaffService.ensure</code>); not run as a drill.</p></div>
+<h3 id="adding-other-staff-and-roles">Adding other staff and roles</h3>
+<div class="table-wrap"><div class="table-wrap"><table>
+<thead><tr><th>Task</th><th>Call (super admin)</th></tr></thead>
+<tbody>
+<tr><td>Add a viewer or admin</td><td><code>POST /admin/api/v1/staff</code> <code>{"email":"...","role":"VIEWER"}</code> (or <code>ADMIN</code>). Creates the Kratos identity if the person never signed in; they log in with an emailed code.</td></tr>
+<tr><td>Change a role</td><td><code>PATCH /admin/api/v1/staff/{id}</code> <code>{"role":"ADMIN"}</code>. Applies on their next request.</td></tr>
+<tr><td>Remove access</td><td><code>PATCH /admin/api/v1/staff/{id}</code> <code>{"status":"DISABLED"}</code>. Revokes sessions. Re-enable with <code>{"status":"ACTIVE"}</code> or by POSTing the email again.</td></tr>
+<tr><td>See everyone</td><td><code>GET /admin/api/v1/staff</code></td></tr>
+</tbody></table></div></div>
+<p>What each role may do: <a href="06-security.html#roles">Security: staff roles</a>.</p>
+</section>
+<section><h2 id="register-app">4. Register a mini app end to end</h2>
+<p>As an <code>ADMIN</code> or <code>SUPER_ADMIN</code> with an aal2 token. Each step maps to one <a href="08b-staff-api.html">staff endpoint</a>; the outputs below are real (filtered with <code>jq</code>) from a test app that was deleted afterwards.</p>
+<pre><code>TOKEN=...                                          # aal2 staff token from guide 2
+adm() { curl -sS -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' "$@"; }</code></pre>
+<h3 id="step-1-create-the-app-draft">Step 1: create the app (DRAFT)</h3>
+<pre><code>APP=$(adm -X POST $BASE/admin/api/v1/apps -d '{"slug": "demo-fixit-f841", "name": {"en": "Demo FixIt", "am": "ዴሞ ፊክስኢት"}, "description": {"en": "Find a technician near you."}, "brandColor": "#0F9D58", "categories": ["home", "services"], "markets": ["ET"], "publisherName": "FixIt Demo PLC", "supportEmail": "support@example.com", "website": "https://fixit.example.com", "entryUrl": "https://app.fixit.example.com/", "allowedOrigins": ["https://app.fixit.example.com"], "priority": 10, "extra": {"tier": "pilot"}}' | tee /dev/stderr | jq -r .id)</code></pre>
+<pre class="out"><code>{
+  "id": "41548c1e-b03e-412a-bbbe-1e46343505b9",
+  "slug": "demo-fixit-f841",
+  "name": {
+    "en": "Demo FixIt",
+    "am": "ዴሞ ፊክስኢት"
+  },
+  "status": "DRAFT",
+  "priority": 10
+}</code></pre>
+<h3 id="step-2-upload-the-logo">Step 2: upload the logo</h3><pre><code>curl -sS -X POST $BASE/admin/api/v1/apps/$APP/logo -H "Authorization: Bearer $TOKEN" -F file=@logo.png | jq '{logoImageId, logoUrl}'</code></pre><pre class="out"><code>{
+  "logoImageId": "48d4ac5a-64e5-4d2d-b91d-32d38a5625ba",
+  "logoUrl": "http://127.0.0.1:9000/adera-media/apps/41548c1e-b03e-412a-bbbe-1e46343505b9/logo/48d4ac5a-64e5-4d2d-b91d-32d38a5625ba.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&amp;X-Amz-Credential=&lt;masked&gt;&amp;X-Amz-Date=&lt;masked&gt;&amp;X-Amz-Expires=3600&amp;X-Amz-SignedHeaders=host&amp;X-Amz-Signature=&lt;masked&gt;"
+}</code></pre><p>The logo is converted to a PNG of at most 512 px. A logo and a support email are required before LIVE.</p>
+<h3 id="step-3-capabilities-what-the-app-may-ask-for">Step 3: capabilities (what the app may ask for)</h3><pre><code>adm -X PUT $BASE/admin/api/v1/apps/$APP/capabilities/notify.sms    -d '{"state":"GRANTED"}'   | jq '.capabilities[] | {capability, state}'
+adm -X PUT $BASE/admin/api/v1/apps/$APP/capabilities/notify.inapp -d '{"state":"GRANTED"}'
+adm -X PUT $BASE/admin/api/v1/apps/$APP/capabilities/user.full_name \
+    -d '{"state":"GRANTED","reason":{"en":"To show technicians who you are"}}'     # reason is required for this one</code></pre><pre class="out"><code>[
+  {
+    "capability": "notify.email",
+    "state": "GRANTED"
+  },
+  {
+    "capability": "notify.inapp",
+    "state": "GRANTED"
+  },
+  {
+    "capability": "notify.sms",
+    "state": "GRANTED"
+  },
+  {
+    "capability": "user.full_name",
+    "state": "GRANTED"
+  }
+]</code></pre><p>Granting a notify capability also creates a default limit for that channel (next step). List all capabilities with <code>GET /admin/api/v1/capabilities</code>.</p>
+<h3 id="step-4-limits-cost-guard">Step 4: limits (cost guard)</h3><pre><code>adm -X PUT $BASE/admin/api/v1/apps/$APP/notification-limits/SMS \
+    -d '{"maxPerUserPerDay":2,"maxPerDay":100,"maxDistinctUsersPerDay":100,"maxTotal":1000}'</code></pre><pre class="out"><code>{
+  "channel": "SMS",
+  "maxPerUserPerDay": 2,
+  "maxPerDay": 100,
+  "maxDistinctUsersPerDay": 100,
+  "maxTotal": 1000
+}</code></pre>
+<h3 id="step-5-allowed-server-addresses-per-environment">Step 5: allowed server addresses (per environment)</h3><pre><code>adm -X PUT $BASE/admin/api/v1/apps/$APP/environments/DEV -d '{"allowedCidrs":["203.0.113.10","198.51.100.0/24"]}'
+adm -X PUT $BASE/admin/api/v1/apps/$APP/environments/PROD -d '{"allowedCidrs":["203.0.113.10"]}'</code></pre><pre class="out"><code>{
+  "environment": "DEV",
+  "allowedCidrs": [
+    "203.0.113.10/32",
+    "198.51.100.0/24"
+  ]
+}</code></pre><p>The partner's server addresses (what Adera sees as the caller). An empty list means nobody can call. <code>/0</code> is refused for PROD. Fill in both DEV and PROD if you know them; only the one that matches the deployment's <code>ADERA_ENV</code> is used. Behind a proxy, see the production checklist.</p>
+<h3 id="step-6-the-partner-s-public-key">Step 6: the partner's public key</h3><p>The partner makes the key pair and sends you only <code>partner.pub</code> (never the private key):</p><pre><code># partner side
+openssl genrsa -out partner.pem 2048 &amp;&amp; openssl rsa -in partner.pem -pubout -out partner.pub
+# staff side
+PUB=$(jq -Rs . &lt; partner.pub)
+adm -X POST $BASE/admin/api/v1/apps/$APP/keys -d "{\"environment\":\"PROD\",\"publicKeyPem\":$PUB,\"label\":\"production server\"}" | jq</code></pre><pre class="out"><code>{
+  "keyId": "ak_prod_963c74c95700a968a25fb72a",
+  "environment": "PROD",
+  "algorithm": "RS256",
+  "fingerprint": "fe3a9d4646ab673ff6bf0e4d8e80ad07a3164abd07829f7bcafac5a558615c1b",
+  "label": "production server",
+  "status": "ACTIVE",
+  "expiresAt": null,
+  "createdAt": "2026-10-25T06:06:10.429433332Z",
+  "revokedAt": null
+}</code></pre><p>Give the partner the <code>keyId</code>. For quick DEV work you can instead let Adera generate a pair with <code>POST /apps/$APP/keys/generate</code> (the private key is returned once).</p>
+<h3 id="step-7-approve-a-message-template">Step 7: approve a message template</h3><pre><code>adm -X POST $BASE/admin/api/v1/notification/templates -d '{"appId": "41548c1e-b03e-412a-bbbe-1e46343505b9", "code": "job-accepted", "kind": "DIRECT", "category": "TRANSACTIONAL", "params": [{"name": "name", "maxLength": 30}], "content": {"en": {"sms": "Hi {name}, your Adera job was accepted", "body": "Hi {name}, your job was accepted", "emailSubject": "Job accepted"}, "am": {"sms": "ሰላም {name}, ስራዎ ተቀባይነት አግኝቷል", "body": "ሰላም {name}"}}}' | jq '{id, code, kind, version, usableNow}'</code></pre><pre class="out"><code>{
+  "id": "a382808f-1175-4eb3-8129-dd61aa75634a",
+  "code": "job-accepted",
+  "kind": "DIRECT",
+  "version": 1,
+  "usableNow": true
+}</code></pre><p>Partners cannot send free text: this is the only wording they can trigger. Use <code>kind: IN_APP</code> for inbox + push.</p>
+<h3 id="step-8-go-live">Step 8: go LIVE</h3><pre><code>adm -X POST $BASE/admin/api/v1/apps/$APP/status -d '{"status":"LIVE"}' | jq '{slug, status}'</code></pre><pre class="out"><code>{
+  "slug": "demo-fixit-f841",
+  "status": "LIVE"
+}</code></pre><p>Before that it answers <code>409 {"error":"not_ready_for_live","fields":{"missing":"logo"}}</code>. PAUSED stops LIVE traffic reversibly; KILLED is the emergency stop (only a super admin can undo it).</p>
+<h3 id="step-9-check-from-the-partner-side">Step 9: check from the partner side</h3><p>Allow up to 15 seconds for the changes to reach the notification service, then send a signed request: <a href="#send-notification">next guide</a>. Review what happened: <code>GET /admin/api/v1/audit?target=$APP</code>.</p></section>
+<section><h2 id="send-notification">5. Send a notification as a partner and read the callback</h2>
+<p>You need: the <code>keyId</code>, your <code>partner.pem</code>, a <code>templateId</code>, and a user's pseudonymous id for your app (<code>u_p_...</code>). (Today the id is minted through an internal call when a user opens your app; the user-facing part is not built yet. In DEV you can use the synthetic <code>u_p_test_anna</code>; it is refused in PROD.) The signing helper is explained and shown in full in <a href="06-security.html#signing-python">Security</a>; save it as <code>adera_sign.py</code>.</p>
+<h3 id="send">Send</h3>
+<pre><code>python3 adera_sign.py $KEY_ID partner.pem POST /v1/notifications \
+  '{"externalId":"guide-1","userId":"u_p_...","templateId":"&lt;template id&gt;","params":{"name":"Abebe"}}'</code></pre>
+<pre class="out"><code>202
+{"notificationId":"25fbeba6-18c9-41dc-ae40-65ea8d63ada9","externalId":"guide-1","status":"QUEUED","channel":"SMS","environment":"DEV","createdAt":"2026-10-25T06:18:05.599096Z","expiresAt":"2026-10-26T06:18:05.505239Z"}
+response signature headers: {'X-Adera-Key-Id': 'adera-sig-202610', 'X-Adera-Timestamp': '1792909085'}</code></pre>
+<p class="masked">Output of a real run (the script prints the status, the body, and the id and time of our response signature).</p><h3 id="read-the-status">Read the status</h3>
+<pre><code>python3 adera_sign.py $KEY_ID partner.pem GET /v1/notifications/guide-1</code></pre>
+<pre class="out"><code>200
+{"notificationId":"25fbeba6-18c9-41dc-ae40-65ea8d63ada9","externalId":"guide-1","status":"SENT","channel":"SMS","environment":"DEV","createdAt":"2026-10-25T06:18:05.599096Z","expiresAt":"2026-10-26T06:18:05.505239Z","completedAt":"2026-10-25T06:18:05.766505Z","attempts":1}
+response signature headers: {'X-Adera-Key-Id': 'adera-sig-202610', 'X-Adera-Timestamp': '1792909090'}</code></pre>
+<h3 id="the-same-thing-with-only-shell-and-openssl">The same thing with only shell and openssl</h3><p>The shell sketch from <a href="06-security.html#signing-openssl">Security</a>, run for real:</p>
+<pre class="out"><code>{"notificationId":"f9c4d120-48f0-4962-8def-f127b58df278","externalId":"guide-2","status":"QUEUED","channel":"SMS","environment":"DEV","createdAt":"2026-10-25T06:18:10.571522Z","expiresAt":"2026-10-26T06:18:10.517912Z"}</code></pre>
+<h3 id="the-callback">The callback</h3><p>If you passed <code>callbackUrl</code>, your server receives (a real capture; the callback target in the test was a small local receiver):</p><pre class="out"><code>POST /adera/hook HTTP/1.1
+content-type: application/json
+user-agent: Adera-Callbacks/1
+x-adera-event: notification.status
+x-adera-key-id: adera-sig-202610
+x-adera-timestamp: 1792908444
+idempotency-key: 1f2aec7c-5243-4d11-b426-792ce74fcb27
+X-Adera-Signature: p9rAZAHZICwUSJuLTnMD6diz... (base64 RS256)
+
+{
+  "at": "2026-10-25T06:07:24.580875537Z",
+  "event": "notification.status",
+  "reason": null,
+  "status": "SENT",
+  "channel": "SMS",
+  "externalId": "job-1001",
+  "environment": "DEV",
+  "notificationId": "6bfb3f59-a8c6-4033-bcc0-b5a6562776e4"
+}</code></pre>
+<ul>
+<li>Answer <code>200</code> quickly; otherwise Adera retries (1 min doubling to 6 h, 8 attempts).</li>
+<li>Verify the signature with the key at <code>/.well-known/jwks.json</code> (script in <a href="06-security.html#signing-response">Security</a>) and de-duplicate on <code>Idempotency-Key</code>.</li>
+<li>Production callbacks must be <code>https</code> on port 443 or 8443 at a public address.</li>
+<li>Safe retries: resend the identical request with the same <code>externalId</code>; you get <code>200</code> with <code>"replayed": true</code>.</li>
+</ul>
+<p>Every error, with real bodies: <a href="08c-partner-api.html">Partner API</a>.</p></section>
+<section><h2 id="read-inbox">6. Read the inbox (the bell menu)</h2><p>In-app notifications (<code>IN_APP</code> templates) land in the user's inbox and trigger a push. The app reads them with the user's token:</p>
+<pre><code>curl -sS $BASE/api/v1/me/notifications -H "Authorization: Bearer $USER_TOKEN" | jq .
+curl -sS "$BASE/api/v1/me/notifications?unread=true&amp;size=5" -H "Authorization: Bearer $USER_TOKEN"
+curl -sS $BASE/api/v1/me/notifications/unread-count -H "Authorization: Bearer $USER_TOKEN"
+curl -sS -X PUT $BASE/api/v1/me/notifications/$ITEM_ID/read -H "Authorization: Bearer $USER_TOKEN"
+curl -sS -X PUT $BASE/api/v1/me/notifications/read-all -H "Authorization: Bearer $USER_TOKEN"</code></pre>
+<pre class="out"><code>[
+  {
+    "id": "de6dffd6-7d8e-47a4-94a1-3307b8997bcb",
+    "appId": "41548c1e-b03e-412a-bbbe-1e46343505b9",
+    "title": "Hello Abebe",
+    "body": "Your technician is here",
+    "data": "{\"deepLink\": \"adera://job/1001\"}",
+    "createdAt": "2026-10-25T06:07:26.663Z",
+    "readAt": null
+  }
+]</code></pre>
+<p><code>data</code> is a JSON <em>string</em> (the key-values the partner sent), not an object: parse it. <code>readAt</code> is <code>null</code> until read. Details and errors: <a href="08a-user-api.html">user API</a>.</p></section>
+<section><h2 id="mute-app">7. Mute an app</h2><p>A user can switch off SMS, email or in-app messages <em>per app</em>. The partner is not told: its requests are answered <code>200</code> with status <code>SUPPRESSED</code> (reason <code>recipient_opted_out</code>).</p>
+<pre><code>curl -sS -X PUT $BASE/api/v1/me/apps/$APP/preferences -H "Authorization: Bearer $USER_TOKEN" -H "Content-Type: application/json" -d '{"muteSms":true}'</code></pre>
+<pre class="out"><code>{
+  "muteInApp": false,
+  "muteSms": true,
+  "muteEmail": false
+}</code></pre>
+<p>Only the switches you send change. Read them with <code>GET</code> on the same path. What the partner sees after muting (real capture):</p><pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+X-Request-Id: b91f6bd9-c6a0-4e2a-8a8e-36f050ce661a
+X-Adera-Key-Id: adera-sig-202610
+X-Adera-Timestamp: 1792908446
+X-Adera-Signature: nWjePDcUU2k2Htyn0OQn0xpy... (base64 RS256 signature)
+
+{
+  "notificationId": "caf7fc1e-1987-44bf-83ae-d2236a7715d7",
+  "externalId": "job-1013",
+  "status": "SUPPRESSED",
+  "channel": "SMS",
+  "reason": "recipient_opted_out",
+  "environment": "DEV",
+  "createdAt": "2026-10-25T06:07:26.409313Z",
+  "expiresAt": "2026-10-25T07:07:26.356333Z",
+  "completedAt": "2026-10-25T06:07:26.409313Z"
+}</code></pre><p>Unmute with <code>{"muteSms":false}</code>. Note: the app id is not checked against the registry, so any UUID returns defaults.</p></section>
+<section><h2 id="revoke-key">8. Revoke a key</h2><p>Do this first when a partner key may have leaked, then rotate: register a new key, let the partner switch, revoke the old one.</p>
+<pre><code>adm $BASE/admin/api/v1/apps/$APP/keys | jq '.[] | {keyId, environment, status, label}'   # find the key id
+adm -X DELETE $BASE/admin/api/v1/apps/$APP/keys/$KEY_ID | jq '{keyId, status, revokedAt}'</code></pre>
+<pre class="out"><code>{
+  "keyId": "ak_dev_8acbea3d0147049a72ed8464",
+  "status": "REVOKED",
+  "revokedAt": "2026-10-25T06:06:20.938855234Z"
+}</code></pre>
+<p>Within about 15 seconds the partner API refuses the key (real capture, after the revoke):</p><pre class="out"><code>HTTP/1.1 401 Unauthorized
+Content-Type: application/json
+X-Request-Id: 3d3986a2-7233-4db0-975a-2a589aaa9479
+X-Adera-Key-Id: adera-sig-202610
+X-Adera-Timestamp: 1792908495
+X-Adera-Signature: E1ca7+RRa4WwbS8J2s/wL79R... (base64 RS256 signature)
+
+{
+  "error": "key_revoked_or_expired"
+}</code></pre><p>The revoke appears in <code>GET /admin/api/v1/audit?target=&lt;keyId&gt;</code>. To stop an app completely use status <code>PAUSED</code> or <code>KILLED</code> instead.</p></section>
+<section><h2 id="quotas-log">9. Quotas, usage and "why did it not arrive?"</h2><h3 id="how-close-is-an-app-to-its-limits">How close is an app to its limits</h3>
+<pre><code>adm "$BASE/admin/api/v1/notification/usage?appId=$APP&amp;environment=DEV" | jq .
+adm $BASE/admin/api/v1/apps/$APP | jq .notificationLimits</code></pre>
+<pre class="out"><code>[
+  {
+    "channel": "IN_APP",
+    "lifetime": 1,
+    "today": 1,
+    "distinct_users_today": 1
+  },
+  {
+    "channel": "SMS",
+    "lifetime": 2,
+    "today": 2,
+    "distinct_users_today": 1
+  }
+]</code></pre>
+<p><code>today</code> and <code>distinct_users_today</code> are UTC-day counts, <code>lifetime</code> is the total. A partner over a limit gets <code>429 quota_exceeded</code> (real example):</p><pre class="out"><code>HTTP/1.1 429 Too Many Requests
+Content-Type: application/json
+X-Request-Id: 9b7a8ca6-4c1d-4edc-945b-79bf05798cfe
+X-Adera-Key-Id: adera-sig-202610
+X-Adera-Timestamp: 1792908446
+X-Adera-Signature: Gnir0Ucni/Q/0YaklPmVMQXI... (base64 RS256 signature)
+
+{
+  "error": "quota_exceeded",
+  "limit": "max_per_user_per_day",
+  "channel": "SMS"
+}</code></pre>
+<h3 id="find-a-message">Find a message</h3><pre><code>adm "$BASE/admin/api/v1/notification/notifications?appId=$APP&amp;status=FAILED&amp;limit=20" | jq .
+adm "$BASE/admin/api/v1/notification/notifications/$NOTIFICATION_ID" | jq .</code></pre>
+<pre class="out"><code>{
+  "id": "6bfb3f59-a8c6-4033-bcc0-b5a6562776e4",
+  "appId": "41548c1e-b03e-412a-bbbe-1e46343505b9",
+  "externalId": "job-1001",
+  "environment": "DEV",
+  "status": "SENT",
+  "channel": "SMS",
+  "reason": null,
+  "attempts": 1,
+  "kind": "DIRECT",
+  "templateId": "a382808f-1175-4eb3-8129-dd61aa75634a",
+  "templateVersion": 2,
+  "createdAt": "2026-10-25T06:07:24.229Z",
+  "nextAttemptAt": "2026-10-25T06:07:24.229Z",
+  "expiresAt": "2026-10-25T07:07:24.169Z",
+  "completedAt": "2026-10-25T06:07:24.580Z",
+  "attemptLog": [
+    {
+      "channel": "SMS",
+      "provider": "console",
+      "outcome": "OK",
+      "errorCode": null,
+      "at": "2026-10-25T06:07:24.574Z"
+    }
+  ],
+  "callbacks": [
+    {
+      "status": "DELIVERED",
+      "attempts": 1,
+      "lastHttpStatus": 200,
+      "lastError": null,
+      "nextAttemptAt": "2026-10-25T06:07:24.580Z"
+    }
+  ]
+}</code></pre>
+<p>The detail shows the status, the reason, every delivery attempt (channel, provider, outcome, error code) and every callback. The partner's own <code>externalId</code> is in the list; the detail call needs the <code>notificationId</code>.</p>
+<h3 id="reading-the-answer">Reading the answer</h3>
+<div class="table-wrap"><div class="table-wrap"><table>
+<thead><tr><th>You see</th><th>It means</th><th>What to do</th></tr></thead>
+<tbody>
+<tr><td>Request refused, no row at all</td><td>Refused synchronously: signature, address, capability, template, param, user, quota (see the error code)</td><td>Fix the cause; the partner got the error body. <code>ip_not_allowed</code>: add the address (wait 15 s).</td></tr>
+<tr><td><code>QUEUED</code> for long</td><td>Worker not running or database trouble</td><td><code>docker compose logs notification-service</code>; check <code>PARTNER_WORKERS_ENABLED</code>.</td></tr>
+<tr><td><code>RETRYING</code>, <code>reason</code> like <code>twilio_http_503</code>, <code>user_directory_unavailable</code></td><td>Temporary failure; backoff 30 s doubling to 1 h</td><td>Wait; check the provider or user-service. Gives up after 8 attempts or at <code>expiresAt</code>.</td></tr>
+<tr><td><code>FAILED</code> with <code>twilio_http_400</code>-style code</td><td>Permanent provider refusal (bad or unreachable number, unverified sender; Ethiopian numbers from the US sender: Twilio 21612)</td><td>Fix the number or provider setup; not retried.</td></tr>
+<tr><td><code>UNREACHABLE</code> (<code>user_unreachable</code>, <code>no_phone</code>, <code>no_email</code>)</td><td>User deleted or suspended, or no contact for the channel</td><td>Nothing to retry.</td></tr>
+<tr><td><code>SUPPRESSED</code> <code>recipient_opted_out</code></td><td>The user muted this app and channel</td><td>Respect it.</td></tr>
+<tr><td><code>SUPPRESSED</code> <code>not_allowlisted</code></td><td>Real provider with <code>NOTIFY_LIVE_ALLOWLIST</code> set, recipient not on it</td><td>Intended during first real tests.</td></tr>
+<tr><td><code>EXPIRED</code></td><td><code>ttlSeconds</code> passed while retrying</td><td>Raise <code>ttlSeconds</code> or fix the cause.</td></tr>
+<tr><td><code>SENT</code> but the user saw nothing</td><td>The provider accepted it; handset delivery is not tracked. For IN_APP, check the inbox (always written) and devices (<code>GET /api/v1/me/devices</code>); push may have had no active token (attempt reason <code>no_devices</code>)</td><td>Check the number, device tokens, and the provider's own dashboard.</td></tr>
+<tr><td>Callback <code>lastError</code> <code>address_not_public</code>, <code>scheme_not_https</code>, <code>port_not_allowed</code>, <code>unreachable</code>, <code>http_500</code></td><td>The partner's callback URL was refused or failed</td><td>Fix the URL (https, 443/8443, public) or the partner's endpoint.</td></tr>
+</tbody></table></div></div>
+<p>Codes sent by Kratos (login) are separate from partner messages. For them, look at <code>send_log</code>:</p>
+<pre><code>docker compose exec -T postgres psql -U adera_admin -d notification -c \
+  "SELECT channel, recipient_masked, provider, status, error_code, created_at FROM send_log ORDER BY created_at DESC LIMIT 5"</code></pre>
+<p>Statuses there: <code>SENT</code>, <code>FAILED</code>, <code>SUPPRESSED</code> (<code>rate_limited</code>), <code>SKIPPED</code> (<code>not_allowlisted</code>). A user who asked for too many codes sees "code sent" yet receives nothing: that is <code>SUPPRESSED rate_limited</code>.</p></section>
+<section>
+<h2 id="observability">Read logs, traces and metrics in Grafana</h2>
+<p>Open <a href="http://localhost:3001">http://localhost:3001</a> and sign in as <code>admin</code> with <code>GRAFANA_ADMIN_PASSWORD</code> from <code>.env</code>. Three data sources are pre-configured: Prometheus (default), Loki, Tempo. The queries below were run against the live stack (through Grafana's data-source proxy) and returned data.</p>
+<h3 id="dashboard">Dashboard</h3>
+<p>Dashboards, folder <strong>Adera</strong>, <strong>Adera overview</strong>: which services are up, gateway request rate by status code, p95 latency, count of <code>429</code>s, RabbitMQ queue depth, recent errors.</p>
+<h3 id="logs-loki">Logs (Loki)</h3>
+<p>Menu <strong>Explore</strong>, data source <strong>Loki</strong>, then a query. Labels available on every line: <code>service</code> (the compose service name), <code>container</code>.</p>
+<pre><code>{service="notification-service"}                              # everything from one service
+{service="notification-service"} |= "NOTIFICATION MODE"       # lines containing a phrase
+{service="registry-service"} |= "ERROR"                       # errors
+{service=~"user-service|registry-service|notification-service"} |~ "(?i)exception"
+{service="kratos"} |= "error"</code></pre>
+<p>Why did a delivery fail? <code>{service="notification-service"} |= "delivery attempt failed"</code> shows the notification id, channel, provider, error code and whether it was permanent. Logs hold masked recipients only, never codes.</p>
+<h3 id="traces-tempo">Traces (Tempo)</h3>
+<p><strong>Explore</strong>, data source <strong>Tempo</strong>, query type TraceQL:</p>
+<pre><code>{ resource.service.name = "apisix" }                                          # every request through the gateway
+{ resource.service.name = "apisix" } &amp;&amp; { resource.service.name = "kratos" }       # gateway to Kratos (login, whoami)
+{ resource.service.name = "user-service" }
+{ resource.service.name = "notification-service" &amp;&amp; duration &gt; 500ms }</code></pre>
+<p>Open a trace to see the gateway span, the forward-auth call to user-service and its call to Kratos in one waterfall. From a span, the "Logs" button jumps to the Loki lines of the same minute.</p>
+<h3 id="metrics-prometheus">Metrics (Prometheus)</h3>
+<p><strong>Explore</strong>, data source <strong>Prometheus</strong> (or <a href="http://localhost:9090">http://localhost:9090</a>):</p>
+<pre><code>up                                                                         # 12 targets, 1 = healthy
+sum by (code) (rate(apisix_http_status[5m]))                               # gateway requests per second by status
+histogram_quantile(0.95, sum by (le) (rate(apisix_http_latency_bucket{type="request"}[5m])))   # p95 latency (ms)
+sum by (status) (rate(http_server_requests_seconds_count{job="user-service"}[5m]))              # a Spring service
+jvm_memory_used_bytes{job="registry-service", area="heap"}</code></pre>
+<p>Targets page: <a href="http://localhost:9090/targets">http://localhost:9090/targets</a>. If a service shows <code>0</code> in <code>up</code>, check <code>docker compose ps</code> and its logs.</p>
+<h3 id="following-one-request-across-everything">Following one request across everything</h3>
+<ol>
+<li>Every gateway response carries <code>X-Request-Id</code>. Use it to correlate: <code>curl -i</code> shows it.</li>
+<li>In Tempo, find the trace for that time and service; in Loki, filter the service around the same minute.</li>
+</ol>
+<p>Data is kept 15 days (metrics), 7 days (logs), 3 days (traces). Traces are sampled at 100% in dev (<code>always_on</code> at the gateway, <code>TRACING_SAMPLE_RATE=1.0</code> in the services); lower this in production.</p>
+</section>
+<section>
+<h2 id="infisical-secrets">Infisical: where each secret is, and how to add or rotate one</h2>
+<h3 id="what-lives-where">What lives where</h3>
+<div class="table-wrap"><div class="table-wrap"><table>
+<thead><tr><th>Secret</th><th>Location</th><th>Read by</th></tr></thead>
+<tbody>
+<tr><td><code>TWILIO_ACCOUNT_SID</code>, <code>TWILIO_AUTH_TOKEN</code>, <code>TWILIO_MESSAGING_SERVICE_SID</code>, <code>TWILIO_PHONE_NUMBER</code></td><td>Infisical, project <code>Adera</code>, env <code>dev</code>, folder <code>/notification</code></td><td>notification-service at start, only used when <code>SMS_PROVIDER=twilio</code></td></tr>
+<tr><td><code>RESEND_API_KEY</code>, <code>RESEND_FROM_EMAIL</code>, <code>RESEND_FROM_NAME</code></td><td>same</td><td>notification-service, only when <code>EMAIL_PROVIDER=resend</code></td></tr>
+<tr><td><code>PARTNER_SIGNING_KEY_ID</code>, <code>PARTNER_SIGNING_PRIVATE_KEY_B64</code></td><td>same</td><td>notification-service: signs partner API responses and callbacks</td></tr>
+<tr><td><code>FIREBASE_SERVICE_ACCOUNT_B64</code></td><td>not added yet (target: same folder)</td><td>notification-service, when <code>FCM_PROVIDER=firebase</code></td></tr>
+<tr><td>Everything else (database, Redis, RabbitMQ, Kratos, Grafana, RustFS passwords; gateway, internal and alias secrets; Infisical's own keys and the CLI token)</td><td><code>.env</code></td><td>docker compose, passed to containers</td></tr>
+</tbody></table></div></div>
+<p>Why the split: <a href="02-setup.html#secrets">Setup: secrets</a>. Folders <code>/infra</code>, <code>/kratos</code>, <code>/gateway</code>, <code>/user</code> exist but are empty; the <code>prod</code> environment is empty.</p>
+<h3 id="open-the-web-ui-or-use-the-cli">Open the web UI or use the CLI</h3>
+<p>UI: <a href="http://localhost:8080">http://localhost:8080</a>, project <strong>Adera</strong>, environment <strong>dev</strong>, folder <strong>/notification</strong>. CLI (reads the token and project id from <code>.env</code> without printing them):</p>
+<pre><code>cd /path/to/adera
+set -a; . ./.env; set +a
+C="--env=dev --path=/notification --projectId=$INFISICAL_PROJECT_ID --domain=$INFISICAL_DOMAIN"
+
+infisical secrets $C --output json --silent | jq -r '.[].secretKey'     # NAMES only, never values</code></pre>
+<pre class="out"><code>PARTNER_SIGNING_KEY_ID
+PARTNER_SIGNING_PRIVATE_KEY_B64
+RESEND_API_KEY
+RESEND_FROM_EMAIL
+RESEND_FROM_NAME
+TWILIO_ACCOUNT_SID
+TWILIO_AUTH_TOKEN
+TWILIO_MESSAGING_SERVICE_SID
+TWILIO_PHONE_NUMBER</code></pre>
+<h3 id="add-a-secret">Add a secret</h3>
+<pre><code>infisical secrets set NEW_SECRET_NAME='the value' $C --silent</code></pre>
+<pre class="out"><code>┌───────────────────┬──────────────┬────────────────┐
+│ SECRET NAME       │ SECRET VALUE │ STATUS         │
+├───────────────────┼──────────────┼────────────────┤
+│ NEW_SECRET_NAME   │ ******       │ SECRET CREATED │
+└───────────────────┴──────────────┴────────────────┘</code></pre>
+<h3 id="rotate-change-a-secret">Rotate (change) a secret</h3>
+<pre><code>infisical secrets set TWILIO_AUTH_TOKEN='the new value' $C --silent      # status: SECRET VALUE MODIFIED
+docker compose restart notification-service                              # secrets are read at start
+docker compose logs --since 1m notification-service | grep -E "Infisical|NOTIFICATION MODE"</code></pre>
+<p>Look for <code>Loaded 9 secret(s) from Infisical (dev /notification)</code>. A rotated value reaches the service only at its next start, because notification-service reads Infisical once at start-up. (This <code>restart</code> is enough because the secret is read inside the service, not through compose; changes to <code>.env</code> need <code>docker compose up -d</code> instead.) The set, get and delete commands above were run against the dev project with a throw-away secret and removed again; the restart-picks-up-new-value step follows from the code and was not re-run.</p>
+<h3 id="delete-a-secret-and-read-one-value">Delete a secret and read one value</h3>
+<pre><code>infisical secrets get TWILIO_PHONE_NUMBER $C --plain --silent      # prints the VALUE: only in a private terminal
+infisical secrets delete OLD_NAME $C --type shared --silent        # --type shared is required for shared secrets</code></pre>
+<h3 id="rotating-the-partner-signing-key">Rotating the partner signing key</h3>
+<p>The partner signing key signs every API response and callback; partners cache the public key from <code>/.well-known/jwks.json</code> for up to an hour. To rotate: generate a new RSA key (<code>openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:3072</code> gives a PKCS#8 PEM), base64-encode the whole PEM on one line for <code>PARTNER_SIGNING_PRIVATE_KEY_B64</code>, choose a new <code>PARTNER_SIGNING_KEY_ID</code>, set both in Infisical, restart notification-service, and tell partners. The service publishes <em>one</em> key at a time, so partners verifying with a cached old key will fail until their cache refreshes: schedule the change.</p>
+<div class="callout danger"><span class="label">Never</span><p>Do not put these secrets in <code>.env</code>, in git, in chat or in an image. Back up <code>INFISICAL_ENCRYPTION_KEY</code> and <code>INFISICAL_AUTH_SECRET</code> off this machine: without them Infisical's stored secrets cannot be read. The CLI token (<code>INFISICAL_TOKEN</code>, machine identity <code>adera-local-dev</code>) expires on 2026-11-23: create a new one in the Infisical UI (Access control, Machine identities) and update <code>.env</code>, then <code>docker compose up -d notification-service</code>.</p></div>
+</section>
+<section>
+<h2 id="go-real">Switch to real SMS, email and push safely</h2>
+<div class="callout warn"><span class="label">Before you start</span><p>Real SMS costs money and real email reaches real inboxes. Twilio to Ethiopia (+251) failed with error 21612 from the US sender, so a local route or another channel is still needed for Ethiopian numbers. Firebase push needs an Adera Firebase project that does not exist yet. Do this one channel at a time, with the allowlist on.</p></div>
+<h3 id="checklist">Checklist</h3>
+<ol>
+<li><strong>Secrets are in Infisical</strong> (<code>dev</code> or the environment you run, folder <code>/notification</code>): the four <code>TWILIO_*</code> for SMS, the three <code>RESEND_*</code> for email, <code>PARTNER_SIGNING_KEY_ID</code> and <code>PARTNER_SIGNING_PRIVATE_KEY_B64</code> (required with any real provider), and for push <code>FIREBASE_SERVICE_ACCOUNT_B64</code>. Names only: <a href="#infisical-secrets">Infisical guide</a>.</li>
+<li><strong>Allowlist first.</strong> In <code>.env</code> set <code>NOTIFY_LIVE_ALLOWLIST=</code> to your own phone number (E.164) and email, comma separated. With the allowlist, nobody else can receive anything, including by mistake.</li>
+<li><strong>Turn dev endpoints off:</strong> <code>NOTIFY_DEV_ENDPOINTS=false</code>. The service refuses to start otherwise (they would expose one-time codes). Also <code>PARTNER_ALLOW_PRIVATE_CALLBACKS=false</code> (also refused at start with a real provider).</li>
+<li><strong>Switch one channel:</strong> <code>SMS_PROVIDER=twilio</code> (or <code>EMAIL_PROVIDER=resend</code>). Optionally <code>FCM_PROVIDER=firebase</code> when the Firebase key exists.</li>
+<li><strong>Apply and verify the mode:</strong>
+<pre><code>docker compose up -d notification-service
+docker compose logs --since 1m notification-service | grep -E "NOTIFICATION MODE|PARTNER PLATFORM|Infisical"</code></pre>
+Expect <code>sms=twilio (REAL, costs money)</code> and <code>Loaded 9 secret(s) from Infisical</code>, <code>allowlist=N recipient(s)</code>, <code>devEndpoints=false</code>. If the service exits, the log says which guard fired.</li>
+<li><strong>First send to yourself:</strong> sign in with your own allowlisted number through <a href="08e-kratos-flows.html">the login flow</a>. Check the message arrives and the code works. A number not on the list is recorded as <code>SKIPPED</code> / <code>not_allowlisted</code> in <code>send_log</code> and nothing is sent.</li>
+<li><strong>Look at the record:</strong>
+<pre><code>docker compose exec -T postgres psql -U adera_admin -d notification -c \
+  "SELECT channel, recipient_masked, provider, status, error_code, created_at FROM send_log ORDER BY created_at DESC LIMIT 5"</code></pre></li>
+<li><strong>Partner path:</strong> repeat with a partner message to a user whose phone is on the allowlist (on the dev deployment the providers are console SMS and Mailpit, so nothing real is sent; use a DEV key there and the PROD key on the prod deployment). Staff can watch the attempt log: <a href="08b-staff-api.html#ep-staff-get-notification-notifications-id">GET /notification/notifications/{id}</a>.</li>
+<li><strong>Open up:</strong> only after the above, empty <code>NOTIFY_LIVE_ALLOWLIST</code> and <code>docker compose up -d notification-service</code> again.</li>
+<li><strong>Roll back at any time:</strong> set <code>SMS_PROVIDER=console</code> / <code>EMAIL_PROVIDER=mailpit</code>, <code>NOTIFY_DEV_ENDPOINTS=true</code>, then <code>docker compose up -d notification-service</code>.</li>
+</ol>
+<h3 id="what-each-provider-needs">What each provider needs</h3>
+<div class="table-wrap"><div class="table-wrap"><table>
+<thead><tr><th>Channel</th><th>Provider</th><th>Needs</th><th>Known issue</th></tr></thead>
+<tbody>
+<tr><td>SMS</td><td>Twilio</td><td>A messaging service sid or a phone number, the account sid and auth token</td><td>US sender to Ethiopia fails (21612); US numbers deliver. Real SMS costs money per message and segment.</td></tr>
+<tr><td>Email</td><td>Resend</td><td>API key, a verified sender address and name</td><td>Currently the borrowed GoBellMe account and sender <code>bookings@gobellme.com</code>; change in Infisical when an Adera domain is verified.</td></tr>
+<tr><td>Push</td><td>Firebase Cloud Messaging</td><td>A service account JSON, base64-encoded, in <code>FIREBASE_SERVICE_ACCOUNT_B64</code>; devices must register tokens (<code>PUT /api/v1/me/devices</code>)</td><td>Code exists but has not been run against Firebase. Do not use the old ride_flow Firebase file.</td></tr>
+</tbody></table></div></div>
+<p>The deployment-to-a-server checklist (HTTPS, public URLs, real client IP, backups) is in <a href="02-setup.html#production-checklist">Setup</a>.</p>
+</section>
+<div class="pager"><a class="prev" href="08f-operational.html"><small>Previous</small>8f. Operational endpoints</a><a class="next" href="10-reference.html"><small>Next</small>10. Reference</a></div>
+<p class="footer">Adera backend documentation &middot; last verified 2026-10-25 &middot; <a href="../index.html">contents</a></p>
+</main>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

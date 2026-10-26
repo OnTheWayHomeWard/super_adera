@@ -1,0 +1,389 @@
+name: adera
+
+services:
+  # Step 1 — Postgres: one server, one database + role per service.
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      KRATOS_DB_PASSWORD: ${KRATOS_DB_PASSWORD}
+      USER_DB_PASSWORD: ${USER_DB_PASSWORD}
+      NOTIFICATION_DB_PASSWORD: ${NOTIFICATION_DB_PASSWORD}
+      INFISICAL_DB_PASSWORD: ${INFISICAL_DB_PASSWORD}
+      REGISTRY_DB_PASSWORD: ${REGISTRY_DB_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./infra/postgres/init-databases.sh:/docker-entrypoint-initdb.d/init-databases.sh:ro
+    ports:
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # Step 2 — Redis: rate limits, OTP cooldowns. One container, one ACL user per client.
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    entrypoint: ["/usr/local/bin/redis-entrypoint.sh"]
+    environment:
+      REDIS_ADMIN_PASSWORD: ${REDIS_ADMIN_PASSWORD}
+      INFISICAL_REDIS_PASSWORD: ${INFISICAL_REDIS_PASSWORD}
+      APISIX_REDIS_PASSWORD: ${APISIX_REDIS_PASSWORD}
+    volumes:
+      - redis_data:/data
+      - ./infra/redis/entrypoint.sh:/usr/local/bin/redis-entrypoint.sh:ro
+      - ./infra/redis/redis.conf:/etc/redis/redis.conf:ro
+    ports:
+      - "127.0.0.1:6379:6379"
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli --no-auth-warning --user admin --pass \"$$REDIS_ADMIN_PASSWORD\" ping | grep -q PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # Step 3 — RabbitMQ: events between services. Vhost "adera", one user per service.
+  rabbitmq:
+    image: rabbitmq:4-management-alpine
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_ADMIN_USER}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_ADMIN_PASSWORD}
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    ports:
+      - "127.0.0.1:5672:5672"     # AMQP
+      - "127.0.0.1:15672:15672"   # management UI
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  # One-shot: creates the vhost, users and permissions, then exits.
+  rabbitmq-setup:
+    image: curlimages/curl:8.10.1
+    restart: "no"
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      RABBITMQ_ADMIN_USER: ${RABBITMQ_ADMIN_USER}
+      RABBITMQ_ADMIN_PASSWORD: ${RABBITMQ_ADMIN_PASSWORD}
+      USER_SVC_RABBIT_PASSWORD: ${USER_SVC_RABBIT_PASSWORD}
+      NOTIFICATION_SVC_RABBIT_PASSWORD: ${NOTIFICATION_SVC_RABBIT_PASSWORD}
+    volumes:
+      - ./infra/rabbitmq/setup.sh:/setup.sh:ro
+    entrypoint: ["sh", "/setup.sh"]
+
+  # Step 4 — Mailpit: dev-only fake SMTP server with a web inbox. Nothing leaves this machine.
+  mailpit:
+    image: axllent/mailpit:v1.21
+    restart: unless-stopped
+    environment:
+      MP_MAX_MESSAGES: 500
+      MP_DATABASE: /data/mailpit.db
+    volumes:
+      - mailpit_data:/data
+    ports:
+      - "127.0.0.1:1025:1025"   # SMTP
+      - "127.0.0.1:8025:8025"   # web UI + API
+    healthcheck:
+      test: ["CMD", "/mailpit", "readyz"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+
+  # Step 5 — Infisical (self-hosted): secrets for every other service.
+  # Uses the shared Postgres (database "infisical") and Redis (user "infisical").
+  infisical:
+    image: infisical/infisical:v0.167.2
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      ENCRYPTION_KEY: ${INFISICAL_ENCRYPTION_KEY}
+      AUTH_SECRET: ${INFISICAL_AUTH_SECRET}
+      DB_CONNECTION_URI: postgresql://infisical:${INFISICAL_DB_PASSWORD}@postgres:5432/infisical
+      REDIS_URL: redis://infisical:${INFISICAL_REDIS_PASSWORD}@redis:6379
+      SITE_URL: http://localhost:8080
+      TELEMETRY_ENABLED: "false"
+      # Dev mail goes to Mailpit (http://localhost:8025). Switch to a real SMTP in prod.
+      SMTP_HOST: mailpit
+      SMTP_PORT: "1025"
+      SMTP_FROM_ADDRESS: no-reply@adera.local
+      SMTP_FROM_NAME: Adera Infisical
+      SMTP_SECURE: "false"
+      SMTP_IGNORE_TLS: "true"
+    ports:
+      - "127.0.0.1:8080:8080"
+
+  # Step 6 — Ory Kratos: identity, login (email/phone one-time code), sessions, logout.
+  kratos-migrate:
+    image: oryd/kratos:v26.2.0
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DSN: postgres://kratos:${KRATOS_DB_PASSWORD}@postgres:5432/kratos?sslmode=disable
+    volumes:
+      - ./infra/kratos:/etc/config/kratos:ro
+    command: migrate sql up -e --yes -c /etc/config/kratos/kratos.yml
+
+  kratos:
+    image: oryd/kratos:v26.2.0
+    restart: unless-stopped
+    depends_on:
+      kratos-migrate:
+        condition: service_completed_successfully
+      notification-service:
+        condition: service_started
+    environment:
+      DSN: postgres://kratos:${KRATOS_DB_PASSWORD}@postgres:5432/kratos?sslmode=disable
+      SECRETS_COOKIE: ${KRATOS_SECRETS_COOKIE}
+      SECRETS_CIPHER: ${KRATOS_SECRETS_CIPHER}
+    volumes:
+      - ./infra/kratos:/etc/config/kratos:ro
+    command: serve -c /etc/config/kratos/kratos.yml --watch-courier
+    ports:
+      - "127.0.0.1:4433:4433"   # public API
+      - "127.0.0.1:4434:4434"   # admin API (local only; never expose)
+
+  # Notification service (Spring Boot, ours). Kratos hands it every SMS/email; it decides dev vs real delivery.
+  notification-service:
+    build: ./services/notification-service
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mailpit:
+        condition: service_started
+    environment:
+      DB_URL: jdbc:postgresql://postgres:5432/notification
+      DB_USER: notif_svc
+      DB_PASSWORD: ${NOTIFICATION_DB_PASSWORD}
+      SMTP_HOST: mailpit
+      SMTP_PORT: "1025"
+      # Delivery mode. Defaults are the safe dev ones: nothing real is sent unless .env says so.
+      SMS_PROVIDER: ${SMS_PROVIDER:-console}          # console | twilio
+      EMAIL_PROVIDER: ${EMAIL_PROVIDER:-mailpit}      # mailpit | resend
+      NOTIFY_DEV_ENDPOINTS: ${NOTIFY_DEV_ENDPOINTS:-true}   # must be false when a real provider is on
+      ADERA_ENV: ${ADERA_ENV:-dev}                          # dev | prod: the ONE environment this deployment is (same value as registry-service)
+      NOTIFY_LIVE_ALLOWLIST: ${NOTIFY_LIVE_ALLOWLIST:-}
+      # Partner platform
+      GATEWAY_SECRET: ${USER_GATEWAY_SECRET}
+      INTERNAL_API_SECRET: ${INTERNAL_API_SECRET}
+      REGISTRY_URL: http://registry-service:8080
+      USER_SERVICE_URL: http://user-service:8080
+      FCM_PROVIDER: ${FCM_PROVIDER:-fake}                  # fake | firebase (needs FIREBASE_SERVICE_ACCOUNT_B64 in Infisical)
+      PARTNER_ALLOW_PRIVATE_CALLBACKS: ${PARTNER_ALLOW_PRIVATE_CALLBACKS:-false}   # dev e2e only
+      OTEL_TRACES_ENDPOINT: http://otel-collector:4318/v1/traces
+      # API keys (Twilio, Resend, partner signing key) are loaded from Infisical at start
+      INFISICAL_DOMAIN: http://infisical:8080
+      INFISICAL_PROJECT_ID: ${INFISICAL_PROJECT_ID}
+      INFISICAL_TOKEN: ${INFISICAL_TOKEN}
+      INFISICAL_ENV: dev
+      INFISICAL_PATH: /notification
+    ports:
+      - "127.0.0.1:8085:8080"   # dev: GET /dev/messages shows the codes; localhost only
+
+  # User service (Spring Boot, ours): profile, location, avatar (files in RustFS), devices + FCM tokens, Kratos link.
+  user-service:
+    build: ./services/user-service
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rustfs:
+        condition: service_started
+      kratos:
+        condition: service_started
+    environment:
+      DB_URL: jdbc:postgresql://postgres:5432/users
+      DB_USER: users_svc
+      DB_PASSWORD: ${USER_DB_PASSWORD}
+      KRATOS_PUBLIC_URL: http://kratos:4433
+      KRATOS_ADMIN_URL: http://kratos:4434
+      REGISTRY_URL: http://registry-service:8080   # staff actions on users are written to the central audit log there
+      STORAGE_ENDPOINT: http://rustfs:9000
+      # The address phones/browsers use for signed image links (the signature covers the host). Dev: localhost.
+      STORAGE_PUBLIC_ENDPOINT: ${STORAGE_PUBLIC_ENDPOINT:-http://127.0.0.1:9000}
+      STORAGE_ACCESS_KEY: ${RUSTFS_ACCESS_KEY}
+      STORAGE_SECRET_KEY: ${RUSTFS_SECRET_KEY}
+      USER_GATEWAY_SECRET: ${USER_GATEWAY_SECRET}
+      INTERNAL_API_SECRET: ${INTERNAL_API_SECRET}
+      ALIAS_HMAC_SECRET: ${ALIAS_HMAC_SECRET}
+      OTEL_TRACES_ENDPOINT: http://otel-collector:4318/v1/traces
+    ports:
+      - "127.0.0.1:8086:8080"   # dev only; the app goes through the gateway
+
+  # Registry service (Spring Boot, ours): mini apps, permissions, partner keys, staff roles, reviews, audit.
+  registry-service:
+    build: ./services/registry-service
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rustfs:
+        condition: service_started
+      kratos:
+        condition: service_started
+    environment:
+      DB_URL: jdbc:postgresql://postgres:5432/registry
+      DB_USER: registry_svc
+      DB_PASSWORD: ${REGISTRY_DB_PASSWORD}
+      GATEWAY_SECRET: ${USER_GATEWAY_SECRET}
+      INTERNAL_API_SECRET: ${INTERNAL_API_SECRET}
+      BOOTSTRAP_SUPER_ADMIN_EMAIL: ${BOOTSTRAP_SUPER_ADMIN_EMAIL:-}
+      ADERA_ENV: ${ADERA_ENV:-dev}   # dev | prod: the ONE environment this deployment is (same value as notification-service)
+      ADMIN_REQUIRE_AAL2: ${ADMIN_REQUIRE_AAL2:-true}
+      KRATOS_PUBLIC_URL: http://kratos:4433
+      KRATOS_ADMIN_URL: http://kratos:4434
+      STORAGE_ENDPOINT: http://rustfs:9000
+      STORAGE_PUBLIC_ENDPOINT: ${STORAGE_PUBLIC_ENDPOINT:-http://127.0.0.1:9000}
+      STORAGE_ACCESS_KEY: ${RUSTFS_ACCESS_KEY}
+      STORAGE_SECRET_KEY: ${RUSTFS_SECRET_KEY}
+      OTEL_TRACES_ENDPOINT: http://otel-collector:4318/v1/traces
+    ports:
+      - "127.0.0.1:8087:8080"   # dev only; staff and users go through the gateway
+
+  # Backoffice (React + Ant Design, ours): the staff dashboard. Static files in nginx, no published port: the gateway
+  # serves it at http://127.0.0.1:9080/backoffice/ (same origin as the admin API, so no CORS).
+  backoffice:
+    build: ./backoffice
+    restart: unless-stopped
+    environment:
+      # Dev hints (for example "the email code is in Mailpit") follow the dev switch; set BACKOFFICE_DEV_HINTS=false in production.
+      BACKOFFICE_DEV_HINTS: ${BACKOFFICE_DEV_HINTS:-${NOTIFY_DEV_ENDPOINTS:-true}}
+      # Links shown on the System page (addresses as the staff member's browser reaches them). Not secrets.
+      BACKOFFICE_MAILPIT_URL: ${BACKOFFICE_MAILPIT_URL:-http://127.0.0.1:8025}
+      BACKOFFICE_GRAFANA_URL: ${BACKOFFICE_GRAFANA_URL:-http://127.0.0.1:3001}
+      BACKOFFICE_PROMETHEUS_URL: ${BACKOFFICE_PROMETHEUS_URL:-http://127.0.0.1:9090}
+      BACKOFFICE_INFISICAL_URL: ${BACKOFFICE_INFISICAL_URL:-http://127.0.0.1:8080}
+      BACKOFFICE_RABBITMQ_URL: ${BACKOFFICE_RABBITMQ_URL:-http://127.0.0.1:15672}
+      BACKOFFICE_RUSTFS_CONSOLE_URL: ${BACKOFFICE_RUSTFS_CONSOLE_URL:-http://127.0.0.1:9001}
+
+  # RustFS: S3-compatible object storage (user avatars now, other files later). Files are referenced by id from our DB.
+  rustfs:
+    image: rustfs/rustfs:1.0.3
+    restart: unless-stopped
+    environment:
+      RUSTFS_VOLUMES: /data
+      RUSTFS_ADDRESS: 0.0.0.0:9000
+      RUSTFS_CONSOLE_ADDRESS: 0.0.0.0:9001
+      RUSTFS_CONSOLE_ENABLE: "true"
+      RUSTFS_ACCESS_KEY: ${RUSTFS_ACCESS_KEY}
+      RUSTFS_SECRET_KEY: ${RUSTFS_SECRET_KEY}
+    volumes:
+      - rustfs_data:/data
+    ports:
+      - "127.0.0.1:9000:9000"   # S3 API
+      - "127.0.0.1:9001:9001"   # web console
+
+  # Step 7 — APISIX gateway (standalone mode): the single front door for the app.
+  apisix:
+    image: apache/apisix:3.19.0-debian
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+      kratos:
+        condition: service_started
+    environment:
+      APISIX_REDIS_PASSWORD: ${APISIX_REDIS_PASSWORD}
+      USER_GATEWAY_SECRET: ${USER_GATEWAY_SECRET}
+    volumes:
+      - ./infra/apisix/config.yaml:/usr/local/apisix/conf/config.yaml:ro
+      - ./infra/apisix/apisix.yaml:/usr/local/apisix/conf/apisix.yaml:ro
+    ports:
+      - "127.0.0.1:9080:9080"
+
+  # Step 8 — Prometheus (collects metrics) + Grafana (draws them). Loki and tracing come later.
+  prometheus:
+    image: prom/prometheus:v3.15.1
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=15d
+    volumes:
+      - ./infra/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "127.0.0.1:9090:9090"
+
+  grafana:
+    image: grafana/grafana-oss:13.0.2
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./infra/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./infra/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "127.0.0.1:3001:3000"
+
+  # Step 8b — logs: Alloy reads every container's logs, Loki stores them.
+  loki:
+    image: grafana/loki:3.7.9
+    restart: unless-stopped
+    command: -config.file=/etc/loki/loki.yml
+    volumes:
+      - ./infra/loki/loki.yml:/etc/loki/loki.yml:ro
+      - loki_data:/loki
+
+  alloy:
+    image: grafana/alloy:v1.21.2
+    restart: unless-stopped
+    depends_on:
+      - loki
+    command: run --server.http.listen-addr=0.0.0.0:12345 --storage.path=/var/lib/alloy/data /etc/alloy/config.alloy
+    volumes:
+      - ./infra/alloy/config.alloy:/etc/alloy/config.alloy:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro   # lets Alloy list containers and read their logs
+      - alloy_data:/var/lib/alloy/data
+
+  # Step 8c — tracing: services send OTLP to the collector, which forwards traces to Tempo.
+  tempo:
+    image: grafana/tempo:2.10.10
+    restart: unless-stopped
+    command: -config.file=/etc/tempo/tempo.yml
+    volumes:
+      - ./infra/tempo/tempo.yml:/etc/tempo/tempo.yml:ro
+      - tempo_data:/var/tempo
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.163.2
+    restart: unless-stopped
+    depends_on:
+      - tempo
+    command: --config=/etc/otelcol/config.yaml
+    volumes:
+      - ./infra/otel-collector/config.yaml:/etc/otelcol/config.yaml:ro
+    ports:
+      - "127.0.0.1:4317:4317"   # OTLP grpc (for services running on the host/IDE)
+      - "127.0.0.1:4318:4318"   # OTLP http
+
+volumes:
+  postgres_data:
+  redis_data:
+  rabbitmq_data:
+  mailpit_data:
+  prometheus_data:
+  grafana_data:
+  loki_data:
+  alloy_data:
+  tempo_data:
+  rustfs_data:

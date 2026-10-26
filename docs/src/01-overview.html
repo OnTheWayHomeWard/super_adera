@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>1. Overview | Adera docs</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+<button id="menu-btn" type="button" aria-label="Toggle menu">Menu</button>
+<a class="brand" href="../index.html">Adera docs</a>
+<span class="spacer"></span>
+<a href="../index.html">Contents</a>
+<button id="theme-btn" type="button" aria-label="Toggle light or dark theme">Theme</button>
+</header>
+<div class="layout">
+<nav class="sidebar" aria-label="Sections">
+<ul><li><a href="../index.html" class="">Home / contents</a></li></ul>
+<h4>Sections</h4><ul>
+<li><a href="01-overview.html" class=current>1. Overview</a>
+<ul><li><a href="#what-is-adera">What Adera is</a></li><li><a href="#status">Built and not built yet</a></li><li><a href="#architecture">Architecture</a></li><li><a href="#tools-vs-code">What is a tool and what is our code</a></li></ul>
+</li>
+<li><a href="02-setup.html">2. Setup and running</a>
+</li>
+<li><a href="03-tools.html">3. Tools</a>
+</li>
+<li><a href="04-services.html">4. Services</a>
+</li>
+<li><a href="05-communication.html">5. How it communicates</a>
+</li>
+<li><a href="06-security.html">6. Security model</a>
+</li>
+<li><a href="07-data.html">7. Data</a>
+</li>
+<li><a href="08-endpoints.html">8. Endpoint reference</a>
+</li>
+<li><a href="09-guides.html">9. Guides</a>
+</li>
+<li><a href="10-reference.html">10. Reference</a>
+</li>
+<li><a href="11-backoffice.html">11. Backoffice (staff dashboard)</a>
+</li>
+<li><a href="12-backoffice-guide.html">12. Backoffice guide (staff manual)</a>
+</li>
+<li><a href="13-sample-data.html">13. Sample data (test scenarios)</a>
+</li>
+</ul>
+<h4>Endpoints</h4><ul>
+<li><a href="08a-user-api.html">8a. End-user API</a>
+</li>
+<li><a href="08b-staff-api.html">8b. Staff / dashboard API</a>
+</li>
+<li><a href="08c-partner-api.html">8c. Partner API</a>
+</li>
+<li><a href="08d-internal-api.html">8d. Internal API</a>
+</li>
+<li><a href="08e-kratos-flows.html">8e. Kratos flows</a>
+</li>
+<li><a href="08f-operational.html">8f. Operational endpoints</a>
+</li>
+</ul>
+</nav>
+<main>
+<h1>Overview</h1>
+<p class="lead">Adera is the backend of a community super app: people sign in with a phone number or email, and third-party "mini apps" can reach them through Adera in a controlled, consent-based way. This page says what exists today, what does not, and how the pieces fit.</p>
+
+<section>
+<h2 id="what-is-adera">What Adera is</h2>
+<p>The Adera app (a Flutter mobile app, not part of this repository) talks to one backend through one front door, the API gateway on port 9080. The backend does three jobs today:</p>
+<ol>
+  <li><strong>Identity and login.</strong> Email-or-phone login with a one-time code, no passwords, 30-day sessions. This is done by Ory Kratos, an off-the-shelf identity server. We wrote only the pieces around it: the SMS/email delivery (<code>notification-service</code>) and the profile that Kratos does not hold (<code>user-service</code>).</li>
+  <li><strong>The user's own data.</strong> Profile, optional location, free-form <code>extra</code> JSON, avatar picture, and the phone's push (FCM) tokens: <code>user-service</code>.</li>
+  <li><strong>The mini-app platform.</strong> Staff register a mini app, grant it capabilities (what it may ask for), set limits, register the partner's public key and approve message templates (<code>registry-service</code> plus an admin API in <code>notification-service</code>). The partner's server then sends notifications to users with signed requests; Adera delivers them by SMS, email, or in-app inbox plus push, and reports the result by a signed callback.</li>
+</ol>
+<div class="callout why"><span class="label">Principle</span>
+<p><strong>Use proven open-source tools; write code only where the product logic is ours.</strong> Login, sessions, TOTP, rate limiting, secrets, metrics, logs and traces are all tools we configure, not code we wrote. Our three Java services contain only what is specific to Adera: the profile record, pseudonymous per-app ids, the mini-app registry and its rules, partner request signing, template approval, quotas, retries and callbacks. Where a tool did not fit, we say so on the <a href="03-tools.html">tools page</a>.</p></div>
+<p>Documentation map: <a href="02-setup.html">how to run it</a>, <a href="03-tools.html">the tools</a>, <a href="04-services.html">our services</a>, <a href="05-communication.html">how requests travel</a>, <a href="06-security.html">security</a>, <a href="07-data.html">the data</a>, <a href="08-endpoints.html">every endpoint</a>, <a href="09-guides.html">step-by-step guides</a> and <a href="10-reference.html">reference tables</a>.</p>
+</section>
+
+<section>
+<h2 id="status">Built and not built yet</h2>
+<div class="table-wrap"><div class="table-wrap"><table>
+<thead><tr><th>Area</th><th>State</th><th>Notes</th></tr></thead>
+<tbody>
+<tr><td>Local platform: Postgres, Redis, RabbitMQ, Mailpit, Infisical, Kratos, APISIX, RustFS, Prometheus, Grafana, Loki, Alloy, Tempo, OTel Collector</td><td><span class="badge built">built</span></td><td>One <code>docker-compose.yml</code>, all host ports on <code>127.0.0.1</code>. RabbitMQ is installed and configured but no service publishes or consumes yet.</td></tr>
+<tr><td>Login with email/phone one-time code, sessions, logout</td><td><span class="badge built">built</span></td><td>Kratos + our courier. Logout needs our <code>POST /api/v1/me/logout</code> because Kratos has no native-app logout hook.</td></tr>
+<tr><td>notification-service: Kratos courier to SMS/email, dev and real providers</td><td><span class="badge built">built</span></td><td>Real Twilio/Resend providers are implemented and unit-tested against mocked HTTP but <strong>no real SMS or email has been sent through the final code path</strong> (see <a href="02-setup.html#delivery-modes">delivery modes</a>). An earlier real email did arrive; SMS to Ethiopia (+251) failed from the US Twilio sender (error 21612).</td></tr>
+<tr><td>user-service: profile, location, extra, avatar, devices, gateway verify, Kratos webhook, pseudonymous ids, per-app mute</td><td><span class="badge built">built</span></td><td></td></tr>
+<tr><td>registry-service: apps, capabilities, limits, allowed IPs, partner keys, staff roles, reviews and reports, audit, public catalog</td><td><span class="badge built">built</span></td><td>Staff need an email code plus an authenticator app (aal2).</td></tr>
+<tr><td>Partner notification API, templates, workers, retries, callbacks, quotas, inbox</td><td><span class="badge built">built</span></td><td>Verified end to end by <code>tests/e2e/partner.py</code>.</td></tr>
+<tr><td>Push notifications through Firebase (FCM)</td><td><span class="badge partial">partial</span></td><td><code>FCM_PROVIDER=fake</code> by default. The Firebase provider class exists but needs a Firebase service account for Adera (<code>FIREBASE_SERVICE_ACCOUNT_B64</code> in Infisical) and has not been run against Firebase.</td></tr>
+<tr><td>Staff dashboard UI (React/Refine)</td><td><span class="badge built">built</span></td><td>The backoffice at <code>/backoffice/</code> on top of the dashboard <em>API</em> (<code>/admin/api/v1</code>); see <a href="11-backoffice.html">11</a> and the operator's manual <a href="12-backoffice-guide.html">12</a>.</td></tr>
+<tr><td>Frontend bridge and per-user consent for mini apps</td><td><span class="badge notyet">not built</span></td><td>There is no public endpoint that gives a user their per-app pseudonymous id: today it is minted through an internal endpoint only.</td></tr>
+<tr><td>Payments</td><td><span class="badge notyet">not built</span></td><td>Only the per-app payment <em>settings</em> are stored.</td></tr>
+<tr><td>RabbitMQ events (<code>user.created</code>, <code>device.registered</code>, ...)</td><td><span class="badge notyet">not built</span></td><td>Broker, vhost and users exist.</td></tr>
+<tr><td>"Continue with phone or email" endpoint (anti-enumeration), account linking, account deletion</td><td><span class="badge notyet">not built</span></td><td>See <a href="10-reference.html#not-built">the not-built list</a>.</td></tr>
+<tr><td>Production deployment (HTTPS, public URLs, backups, real client IP)</td><td><span class="badge notyet">deferred</span></td><td>Checklist in <a href="02-setup.html#production-checklist">Setup</a>.</td></tr>
+</tbody></table></div></div>
+</section>
+
+<section>
+<h2 id="architecture">Architecture</h2>
+<p>Everything the apps call goes through the gateway. Behind it, three Java services (blue) hold our product logic; the rest are tools. The numbered request paths are drawn one by one in <a href="05-communication.html">How everything communicates</a>.</p>
+
+<svg class="diagram" viewBox="0 0 960 640" role="img" aria-label="Adera architecture: clients, API gateway, Kratos, three services, data stores, providers and observability">
+<title>Adera architecture</title>
+<defs><marker id="ah-arch" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z"/></marker></defs>
+
+<!-- clients -->
+<rect class="box client" x="30" y="16" width="170" height="52" rx="8"/>
+<text class="title" x="115" y="38" text-anchor="middle">Adera mobile app</text><text class="muted" x="115" y="55" text-anchor="middle">Flutter (not in this repo)</text>
+<rect class="box client" x="230" y="16" width="170" height="52" rx="8"/>
+<text class="title" x="315" y="38" text-anchor="middle">Staff dashboard</text><text class="muted" x="315" y="55" text-anchor="middle">UI at /backoffice/</text>
+<rect class="box client" x="430" y="16" width="150" height="52" rx="8"/>
+<text class="title" x="505" y="38" text-anchor="middle">Partner server</text><text class="muted" x="505" y="55" text-anchor="middle">a mini app's backend</text>
+
+<!-- gateway -->
+<rect class="box tool" x="30" y="108" width="550" height="52" rx="8"/>
+<text class="title" x="305" y="130" text-anchor="middle">APISIX gateway :9080</text>
+<text class="muted" x="305" y="148" text-anchor="middle">rate limits, forward-auth, header overwrite, CORS, request id, traces</text>
+<path class="edge" d="M115 68 L115 106" marker-end="url(#ah-arch)"/>
+<path class="edge" d="M315 68 L315 106" marker-end="url(#ah-arch)"/>
+<path class="edge" d="M505 68 L505 106" marker-end="url(#ah-arch)"/>
+
+<!-- kratos -->
+<rect class="box tool" x="700" y="108" width="230" height="52" rx="8"/>
+<text class="title" x="815" y="130" text-anchor="middle">Ory Kratos :4433</text>
+<text class="muted" x="815" y="148" text-anchor="middle">identity, one-time code login, sessions</text>
+<path class="edge" d="M580 134 L698 134" marker-end="url(#ah-arch)"/>
+<text class="muted" x="640" y="126" text-anchor="middle">/kratos/*</text>
+
+<!-- services -->
+<rect class="box ours" x="30" y="214" width="170" height="64" rx="8"/>
+<text class="title" x="115" y="238" text-anchor="middle">user-service</text><text class="muted" x="115" y="256" text-anchor="middle">profile, devices, aliases</text><text class="muted" x="115" y="270" text-anchor="middle">Java 21 / Spring Boot</text>
+<rect class="box ours" x="230" y="214" width="170" height="64" rx="8"/>
+<text class="title" x="315" y="238" text-anchor="middle">registry-service</text><text class="muted" x="315" y="256" text-anchor="middle">apps, keys, staff, audit</text><text class="muted" x="315" y="270" text-anchor="middle">Java 21 / Spring Boot</text>
+<rect class="box ours" x="430" y="214" width="150" height="64" rx="8"/>
+<text class="title" x="505" y="238" text-anchor="middle">notification-svc</text><text class="muted" x="505" y="256" text-anchor="middle">courier, partner API,</text><text class="muted" x="505" y="270" text-anchor="middle">workers, inbox</text>
+<path class="edge" d="M115 160 L115 212" marker-end="url(#ah-arch)"/>
+<path class="edge" d="M315 160 L315 212" marker-end="url(#ah-arch)"/>
+<path class="edge" d="M505 160 L505 212" marker-end="url(#ah-arch)"/>
+
+<!-- kratos -> notification courier -->
+<path class="edge hot" d="M740 160 L740 188 L545 188 L545 212" marker-end="url(#ah-arch)"/>
+<text class="muted" x="660" y="182" text-anchor="middle">SMS / email courier</text>
+
+<!-- providers -->
+<rect class="box ext" x="700" y="214" width="230" height="64" rx="8"/>
+<text class="title" x="815" y="238" text-anchor="middle">Delivery providers</text><text class="muted" x="815" y="256" text-anchor="middle">Twilio (SMS), Resend (email),</text><text class="muted" x="815" y="270" text-anchor="middle">Firebase FCM (push); dev: console, Mailpit</text>
+<path class="edge" d="M580 246 L698 246" marker-end="url(#ah-arch)"/>
+
+<!-- infisical -->
+<rect class="box tool" x="700" y="304" width="230" height="52" rx="8"/>
+<text class="title" x="815" y="326" text-anchor="middle">Infisical :8080</text><text class="muted" x="815" y="344" text-anchor="middle">API keys, loaded at service start</text>
+<path class="edge dash" d="M580 266 L640 266 L640 330 L698 330" marker-end="url(#ah-arch)"/>
+
+<!-- data row -->
+<rect class="box store" x="30" y="396" width="150" height="52" rx="8"/>
+<text class="title" x="105" y="418" text-anchor="middle">RustFS :9000</text><text class="muted" x="105" y="436" text-anchor="middle">avatars, app logos</text>
+<rect class="box store" x="210" y="396" width="330" height="52" rx="8"/>
+<text class="title" x="375" y="418" text-anchor="middle">Postgres :5432</text><text class="muted" x="375" y="436" text-anchor="middle">databases: kratos, users, registry, notification, infisical</text>
+<rect class="box store" x="570" y="396" width="150" height="52" rx="8"/>
+<text class="title" x="645" y="418" text-anchor="middle">Redis :6379</text><text class="muted" x="645" y="436" text-anchor="middle">gateway rate-limit counters</text>
+<rect class="box store" x="750" y="396" width="180" height="52" rx="8" stroke-dasharray="5 4"/>
+<text class="title" x="840" y="418" text-anchor="middle">RabbitMQ :5672</text><text class="muted" x="840" y="436" text-anchor="middle">ready, not used yet</text>
+
+<path class="edge" d="M80 278 L80 394" marker-end="url(#ah-arch)"/>
+<path class="edge" d="M160 278 L260 394" marker-end="url(#ah-arch)"/>
+<path class="edge" d="M315 278 L330 394" marker-end="url(#ah-arch)"/>
+<path class="edge" d="M505 278 L460 394" marker-end="url(#ah-arch)"/>
+<path class="edge dash" d="M590 160 L600 394" marker-end="url(#ah-arch)"/>
+<text class="muted" x="620" y="300" text-anchor="start">limit-count</text>
+
+<!-- observability -->
+<rect class="zone" x="30" y="478" width="900" height="144" rx="10"/>
+<text class="title" x="46" y="500">Observability (all tools, no code of ours)</text>
+<rect class="box tool" x="46" y="516" width="160" height="50" rx="8"/><text class="title" x="126" y="537" text-anchor="middle">Alloy</text><text class="muted" x="126" y="554" text-anchor="middle">reads container logs</text>
+<rect class="box tool" x="226" y="516" width="130" height="50" rx="8"/><text class="title" x="291" y="537" text-anchor="middle">Loki</text><text class="muted" x="291" y="554" text-anchor="middle">log storage 7d</text>
+<rect class="box tool" x="396" y="516" width="170" height="50" rx="8"/><text class="title" x="481" y="537" text-anchor="middle">OTel Collector</text><text class="muted" x="481" y="554" text-anchor="middle">:4318 receives OTLP</text>
+<rect class="box tool" x="586" y="516" width="120" height="50" rx="8"/><text class="title" x="646" y="537" text-anchor="middle">Tempo</text><text class="muted" x="646" y="554" text-anchor="middle">traces 3d</text>
+<rect class="box tool" x="726" y="516" width="190" height="50" rx="8"/><text class="title" x="821" y="537" text-anchor="middle">Prometheus</text><text class="muted" x="821" y="554" text-anchor="middle">scrapes every 15 s, 15d</text>
+<path class="edge" d="M206 541 L224 541" marker-end="url(#ah-arch)"/>
+<path class="edge" d="M566 541 L584 541" marker-end="url(#ah-arch)"/>
+<rect class="box client" x="396" y="580" width="320" height="34" rx="8"/><text class="title" x="556" y="602" text-anchor="middle">Grafana :3001 (dashboards, Loki, Tempo)</text>
+<text class="muted" x="46" y="605">Services and gateway send traces to the collector; containers log to stdout.</text>
+</svg>
+<p><strong>Legend.</strong> Blue boxes are our code. Grey boxes are off-the-shelf tools. Green boxes are data stores. Amber is outside providers. Light blue are callers. Dashed arrows are secondary or unused paths. Not drawn, to stay readable: the Kratos registration webhook to <code>user-service</code>, the service-to-service calls (<code>notification-service</code> to <code>registry-service</code> and <code>user-service</code>), and <code>registry-service</code> writing logos to RustFS. All are in <a href="05-communication.html">section 5</a>.</p>
+</section>
+
+<section>
+<h2 id="tools-vs-code">What is a tool and what is our code</h2>
+<div class="table-wrap"><div class="table-wrap"><table>
+<thead><tr><th>Need</th><th>Tool used</th><th>Our code is only</th></tr></thead>
+<tbody>
+<tr><td>Login with one-time codes, sessions, TOTP</td><td>Ory Kratos</td><td>The identity schema (two traits), delivery of its messages, webhook receiver, the "who is this session" translator for the gateway</td></tr>
+<tr><td>Front door, rate limits, request ids, CORS</td><td>APISIX (standalone)</td><td>Route file <code>infra/apisix/apisix.yaml</code></td></tr>
+<tr><td>Secrets</td><td>Infisical + <code>.env</code></td><td>A start-up loader that reads API keys from Infisical</td></tr>
+<tr><td>Files</td><td>RustFS (S3 API)</td><td>Image re-encoding and signed-URL handling</td></tr>
+<tr><td>Metrics, logs, traces</td><td>Prometheus, Grafana, Loki, Alloy, Tempo, OTel Collector</td><td>Nothing (Spring actuator and the OTel exporter are configuration)</td></tr>
+<tr><td>SMS / email providers</td><td>Twilio, Resend; Mailpit locally</td><td>Thin HTTP adapters and the dev/live safety rules</td></tr>
+<tr><td>Product logic</td><td>-</td><td>Profile record, pseudonymous ids, mini-app registry, capability rules, partner signing (ADERA-SIG-1), SSRF guard, templates, quotas, retries, callbacks, inbox, audit</td></tr>
+</tbody></table></div></div>
+</section>
+
+<div class="pager"><a class="prev" href="../index.html"><small>Previous</small>Home / contents</a><a class="next" href="02-setup.html"><small>Next</small>2. Setup and running</a></div>
+<p class="footer">Adera backend documentation &middot; last verified 2026-10-25 &middot; <a href="../index.html">contents</a></p>
+</main>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

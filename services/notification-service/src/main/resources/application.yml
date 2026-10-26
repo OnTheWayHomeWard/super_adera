@@ -1,0 +1,85 @@
+spring:
+  application:
+    name: notification-service
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/notification}
+    username: ${DB_USER:notif_svc}
+    password: ${DB_PASSWORD:}
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+  mail:
+    host: ${SMTP_HOST:localhost}
+    port: ${SMTP_PORT:1025}
+
+server:
+  port: 8080
+
+management:
+  health:
+    mail:
+      enabled: false   # SMTP is only used by the dev (Mailpit) provider; a down inbox must not mark the service DOWN
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  tracing:
+    sampling:
+      probability: ${TRACING_SAMPLE_RATE:1.0}   # dev: trace everything; lower in production
+  otlp:
+    metrics:
+      export:
+        enabled: false   # metrics are scraped by Prometheus (/actuator/prometheus); only traces go to the OTel collector
+  opentelemetry:
+    tracing:
+      export:
+        otlp:
+          endpoint: ${OTEL_TRACES_ENDPOINT:http://localhost:4318/v1/traces}
+
+adera:
+  notification:
+    # Which delivery implementation to use. Safe defaults: nothing real is ever sent unless you ask for it.
+    sms-provider: ${SMS_PROVIDER:console}        # console | twilio
+    email-provider: ${EMAIL_PROVIDER:mailpit}    # mailpit | resend
+    # Dev-only endpoint that returns recently "sent" messages (so tests can read OTP codes).
+    # The service refuses to start if this is on while a real provider is selected.
+    dev-endpoints: ${NOTIFY_DEV_ENDPOINTS:false}
+    # Live-mode safety net: if non-empty, real providers only deliver to these recipients (comma separated).
+    live-allowlist: ${NOTIFY_LIVE_ALLOWLIST:}
+    limits:
+      sms-per-hour: ${LIMIT_SMS_PER_HOUR:5}
+      sms-per-day: ${LIMIT_SMS_PER_DAY:10}
+      email-per-hour: ${LIMIT_EMAIL_PER_HOUR:10}
+      email-per-day: ${LIMIT_EMAIL_PER_DAY:20}
+    twilio:
+      account-sid: ${TWILIO_ACCOUNT_SID:}
+      auth-token: ${TWILIO_AUTH_TOKEN:}
+      messaging-service-sid: ${TWILIO_MESSAGING_SERVICE_SID:}
+      phone-number: ${TWILIO_PHONE_NUMBER:}
+    resend:
+      api-key: ${RESEND_API_KEY:}
+      from-email: ${RESEND_FROM_EMAIL:}
+      from-name: ${RESEND_FROM_NAME:Adera}
+    mailpit:
+      from-email: ${MAILPIT_FROM_EMAIL:no-reply@adera.local}
+      from-name: ${MAILPIT_FROM_NAME:Adera}
+  partner:
+    # Partner platform: mini-app backends send notifications through a signed API (/v1/**).
+    # The one environment this deployment is: dev | prod. Partner keys of the other environment are refused (wrong_environment).
+    environment: ${ADERA_ENV:dev}
+    workers-enabled: ${PARTNER_WORKERS_ENABLED:true}
+    gateway-secret: ${GATEWAY_SECRET:}           # the gateway adds it to what it forwards (users, staff, partners)
+    internal-secret: ${INTERNAL_API_SECRET:}     # we send it to registry-service and user-service
+    registry-url: ${REGISTRY_URL:http://localhost:8087}
+    user-service-url: ${USER_SERVICE_URL:http://localhost:8086}
+    # Our key for signing responses and callbacks; partners verify with the public key at /.well-known/jwks.json.
+    signing-key-id: ${PARTNER_SIGNING_KEY_ID:}
+    signing-private-key-b64: ${PARTNER_SIGNING_PRIVATE_KEY_B64:}
+    max-skew-minutes: ${PARTNER_MAX_SKEW_MINUTES:5}
+    # Callback targets must be public https addresses. Only for local testing, allow http and private addresses.
+    # The service refuses to start with this on while a real provider is enabled.
+    allow-private-callbacks: ${PARTNER_ALLOW_PRIVATE_CALLBACKS:false}
+    fcm-provider: ${FCM_PROVIDER:fake}           # fake | firebase
+    firebase-service-account-b64: ${FIREBASE_SERVICE_ACCOUNT_B64:}
+    firebase-credentials-path: ${FIREBASE_CREDENTIALS_PATH:}

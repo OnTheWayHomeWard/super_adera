@@ -1,0 +1,558 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>3. Tools | Adera docs</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+<button id="menu-btn" type="button" aria-label="Toggle menu">Menu</button>
+<a class="brand" href="../index.html">Adera docs</a>
+<span class="spacer"></span>
+<a href="../index.html">Contents</a>
+<button id="theme-btn" type="button" aria-label="Toggle light or dark theme">Theme</button>
+</header>
+<div class="layout">
+<nav class="sidebar" aria-label="Sections">
+<ul><li><a href="../index.html" class="">Home / contents</a></li></ul>
+<h4>Sections</h4><ul>
+<li><a href="01-overview.html">1. Overview</a>
+</li>
+<li><a href="02-setup.html">2. Setup and running</a>
+</li>
+<li><a href="03-tools.html" class=current>3. Tools</a>
+<ul><li><a href="#postgres">Postgres</a></li><li><a href="#redis">Redis</a></li><li><a href="#rabbitmq">RabbitMQ</a></li><li><a href="#mailpit">Mailpit</a></li><li><a href="#infisical">Infisical</a></li><li><a href="#kratos">Ory Kratos</a></li><li><a href="#apisix">APISIX</a></li><li><a href="#rustfs">RustFS</a></li><li><a href="#observability">Prometheus, Grafana, Loki, Alloy, Tempo, OTel Collector</a></li><li><a href="#did-not-fit">Where a tool did not fit and we wrote code</a></li></ul>
+</li>
+<li><a href="04-services.html">4. Services</a>
+</li>
+<li><a href="05-communication.html">5. How it communicates</a>
+</li>
+<li><a href="06-security.html">6. Security model</a>
+</li>
+<li><a href="07-data.html">7. Data</a>
+</li>
+<li><a href="08-endpoints.html">8. Endpoint reference</a>
+</li>
+<li><a href="09-guides.html">9. Guides</a>
+</li>
+<li><a href="10-reference.html">10. Reference</a>
+</li>
+<li><a href="11-backoffice.html">11. Backoffice (staff dashboard)</a>
+</li>
+<li><a href="12-backoffice-guide.html">12. Backoffice guide (staff manual)</a>
+</li>
+<li><a href="13-sample-data.html">13. Sample data (test scenarios)</a>
+</li>
+</ul>
+<h4>Endpoints</h4><ul>
+<li><a href="08a-user-api.html">8a. End-user API</a>
+</li>
+<li><a href="08b-staff-api.html">8b. Staff / dashboard API</a>
+</li>
+<li><a href="08c-partner-api.html">8c. Partner API</a>
+</li>
+<li><a href="08d-internal-api.html">8d. Internal API</a>
+</li>
+<li><a href="08e-kratos-flows.html">8e. Kratos flows</a>
+</li>
+<li><a href="08f-operational.html">8f. Operational endpoints</a>
+</li>
+</ul>
+</nav>
+<main>
+<h1>Tools</h1>
+<p class="lead">Every off-the-shelf tool in the stack: why we picked it, what it does for us, how it is configured in this repository, how to operate it, and where it did not fit and we wrote code instead.</p>
+
+<div class="callout why"><span class="label">Principle</span>
+<p>Use proven open-source tools wherever they exist; write code only for product logic (profiles, mini-app registry, partner notifications). Each section below ends with an honest "what we use" list. The summary table at the end (<a href="#did-not-fit">where a tool did not fit</a>) lists every place where we had to write our own code around a tool.</p></div>
+
+<p>All containers are defined in <code>docker-compose.yml</code>; all host ports are bound to <code>127.0.0.1</code> only. Versions below were read from the running stack on 2026-10-25 (<code>docker compose ps</code>). Config files are bind-mounted read-only from <code>infra/</code>; they must be world-readable (644/755) because containers run as other users (see <a href="02-setup.html#troubleshooting">troubleshooting</a>).</p>
+
+<div class="table-wrap"><div class="table-wrap"><table>
+<thead><tr><th>Tool</th><th>Version</th><th>Host port</th><th>Section</th></tr></thead>
+<tbody>
+<tr><td>Postgres</td><td><code>postgres:16-alpine</code></td><td>5432</td><td><a href="#postgres">Postgres</a></td></tr>
+<tr><td>Redis</td><td><code>redis:7-alpine</code></td><td>6379</td><td><a href="#redis">Redis</a></td></tr>
+<tr><td>RabbitMQ</td><td><code>rabbitmq:4-management-alpine</code></td><td>5672, 15672</td><td><a href="#rabbitmq">RabbitMQ</a></td></tr>
+<tr><td>Mailpit</td><td><code>axllent/mailpit:v1.21</code> (running 1.21.8)</td><td>1025, 8025</td><td><a href="#mailpit">Mailpit</a></td></tr>
+<tr><td>Infisical</td><td><code>infisical/infisical:v0.167.2</code></td><td>8080</td><td><a href="#infisical">Infisical</a></td></tr>
+<tr><td>Ory Kratos</td><td><code>oryd/kratos:v26.2.0</code></td><td>4433, 4434</td><td><a href="#kratos">Kratos</a></td></tr>
+<tr><td>APISIX</td><td><code>apache/apisix:3.19.0-debian</code></td><td>9080</td><td><a href="#apisix">APISIX</a></td></tr>
+<tr><td>RustFS</td><td><code>rustfs/rustfs:1.0.3</code></td><td>9000, 9001</td><td><a href="#rustfs">RustFS</a></td></tr>
+<tr><td>Prometheus</td><td><code>prom/prometheus:v3.15.1</code></td><td>9090</td><td><a href="#prometheus">Prometheus</a></td></tr>
+<tr><td>Grafana</td><td><code>grafana/grafana-oss:13.0.2</code></td><td>3001 (container 3000)</td><td><a href="#grafana">Grafana</a></td></tr>
+<tr><td>Loki</td><td><code>grafana/loki:3.7.9</code></td><td>none</td><td><a href="#loki">Loki</a></td></tr>
+<tr><td>Alloy</td><td><code>grafana/alloy:v1.21.2</code></td><td>none</td><td><a href="#alloy">Alloy</a></td></tr>
+<tr><td>Tempo</td><td><code>grafana/tempo:2.10.10</code></td><td>none</td><td><a href="#tempo">Tempo</a></td></tr>
+<tr><td>OTel Collector</td><td><code>otel/opentelemetry-collector-contrib:0.163.2</code></td><td>4317, 4318</td><td><a href="#otel-collector">OTel Collector</a></td></tr>
+</tbody></table></div></div>
+
+<!-- ============================================================ POSTGRES -->
+<h2 id="postgres">Postgres</h2>
+<p><span class="badge built">built</span> one server, five databases.</p>
+
+<h3 id="postgres-why">Why</h3>
+<p>All durable state is relational (identities, profiles, templates, notifications, staff, audit), and three of our services need transactions, unique constraints and <code>jsonb</code> (user <code>extra</code>, audit details). One mature server is cheaper to run and back up than one database per service container. Isolation is kept at the database/login level instead: no service can read another's data.</p>
+
+<h3 id="postgres-config">How it is configured here</h3>
+<ul>
+<li><code>docker-compose.yml</code> service <code>postgres</code>: image, volume <code>postgres_data</code>, healthcheck <code>pg_isready</code>, passwords passed as env variables from <code>.env</code>.</li>
+<li><code>infra/postgres/init-databases.sh</code> is mounted into <code>/docker-entrypoint-initdb.d/</code>. For each service it runs <code>CREATE ROLE ... LOGIN</code>, <code>CREATE DATABASE ... OWNER ...</code> and <code>REVOKE ALL ON DATABASE ... FROM PUBLIC</code>.</li>
+</ul>
+<div class="table-wrap"><div class="table-wrap"><table>
+<thead><tr><th>Database</th><th>Login</th><th>Used by</th><th>Schema managed by</th></tr></thead>
+<tbody>
+<tr><td><code>kratos</code></td><td><code>kratos</code></td><td>Ory Kratos</td><td>Kratos (<code>kratos-migrate</code> one-shot container)</td></tr>
+<tr><td><code>users</code></td><td><code>users_svc</code></td><td>user-service</td><td>Flyway, <code>V1__users_and_devices.sql</code>, <code>V2__aliases_and_preferences.sql</code></td></tr>
+<tr><td><code>notification</code></td><td><code>notif_svc</code></td><td>notification-service</td><td>Flyway, <code>V1__send_log.sql</code>, <code>V2__partner_platform.sql</code></td></tr>
+<tr><td><code>registry</code></td><td><code>registry_svc</code></td><td>registry-service</td><td>Flyway, <code>V1__registry.sql</code></td></tr>
+<tr><td><code>infisical</code></td><td><code>infisical</code></td><td>Infisical</td><td>Infisical (its own migrations)</td></tr>
+</tbody></table></div></div>
+<p>The admin login (<code>POSTGRES_USER</code> in <code>.env</code>, currently <code>adera_admin</code>) is only for operators; services never use it.</p>
+<div class="callout warn"><span class="label">Gotcha</span>
+<p>The init script runs <strong>only on the first start of an empty data volume</strong>. A database added to the script later (the <code>registry</code> entry was added after the first four) is not created on an existing volume. The script is idempotent only in the "empty volume" sense, so on an existing machine create the role and database by hand with the same three statements, using the matching <code>*_DB_PASSWORD</code> from <code>.env</code>.</p></div>
+
+<h3 id="postgres-operate">How to operate it</h3>
+<pre><code># interactive shell as the admin login, in one database
+docker compose exec postgres psql -U adera_admin -d users
+
+# one-off read-only query (this is how the data page examples were captured)
+docker compose exec -T postgres psql -U adera_admin -d notification -c "select count(*) from send_log"
+
+# list databases and logins
+docker compose exec -T postgres psql -U adera_admin -d postgres -Atc "select datname from pg_database where not datistemplate"
+docker compose exec -T postgres psql -U adera_admin -d postgres -Atc "select rolname from pg_roles where rolcanlogin"
+
+# backup one database (production: schedule this and copy it off the machine)
+docker compose exec -T postgres pg_dump -U adera_admin -d users | gzip &gt; users-$(date +%F).sql.gz</code></pre>
+<p>Verified on the running stack: databases <code>kratos, users, notification, infisical, registry</code>; logins <code>kratos, users_svc, notif_svc, infisical, registry_svc</code> plus the admin.</p>
+
+<h3 id="postgres-use">What we use from it</h3>
+<ul>
+<li>Plain SQL tables, <code>jsonb</code>, unique constraints and <code>INSERT ... ON CONFLICT</code> (race-safe profile creation).</li>
+<li>Per-recipient OTP rate limiting is done in Postgres too: <code>notification-service</code> counts rows of <code>send_log</code> per recipient hash (limits: SMS 5/hour and 10/day, email 10/hour and 20/day by default). It does <em>not</em> use Redis for this.</li>
+<li>Table-by-table documentation: <a href="07-data.html">Data</a>.</li>
+</ul>
+<p>Not done yet: Postgres exporter for metrics, automated backups (see <a href="10-reference.html#not-built">not built yet</a>).</p>
+
+<!-- ============================================================ REDIS -->
+<h2 id="redis">Redis</h2>
+<p><span class="badge built">built</span> used by the gateway and by Infisical. Our Java services do not use it.</p>
+
+<h3 id="redis-why">Why</h3>
+<p>The gateway needs counters shared between gateway instances for rate limiting, and Infisical needs a Redis for its job queues (BullMQ) and cron locks. Redis is the standard choice for both. Redis 7 gives us ACL users, which lets one container serve several clients with separate credentials.</p>
+
+<h3 id="redis-config">How it is configured here</h3>
+<ul>
+<li><code>infra/redis/entrypoint.sh</code> builds the ACL file at container start from environment variables, so no password is committed or baked into an image, then execs <code>redis-server</code>.</li>
+<li><code>infra/redis/redis.conf</code>: <code>maxmemory 256mb</code>, <code>maxmemory-policy noeviction</code>, <code>appendonly yes</code>, <code>appendfsync everysec</code>, <code>protected-mode yes</code>.</li>
+</ul>
+<p>The resulting ACL (real, from <code>ACL LIST</code> with password hashes removed):</p>
+<pre class="out"><code>user admin on #&lt;hash masked&gt; ~* &amp;* +@all
+user apisix on #&lt;hash masked&gt; ~plugin-limit-count:* resetchannels +@all -@admin -@dangerous
+user default off resetchannels -@all
+user infisical on #&lt;hash masked&gt; ~* &amp;* +@all -@admin</code></pre>
+<div class="table-wrap"><div class="table-wrap"><table>
+<thead><tr><th>ACL user</th><th>Who uses it</th><th>Rights</th><th>Why</th></tr></thead>
+<tbody>
+<tr><td><code>default</code></td><td>nobody</td><td>disabled (<code>off</code>)</td><td>Redis' built-in user has no password by default; leaving it on would make the instance open to any container.</td></tr>
+<tr><td><code>admin</code></td><td>operators, healthcheck</td><td>everything</td><td>Operations and the compose healthcheck.</td></tr>
+<tr><td><code>apisix</code></td><td>APISIX <code>limit-count</code> plugin</td><td>only keys matching <code>plugin-limit-count:*</code>; no admin or dangerous commands</td><td>If the gateway is ever compromised it cannot read Infisical's queues.</td></tr>
+<tr><td><code>infisical</code></td><td>Infisical</td><td>all keys, no admin commands</td><td>Infisical's BullMQ key names were not verified, so it is not prefix-restricted (a known loose end).</td></tr>
+</tbody></table></div></div>
+
+<div class="callout why"><span class="label">Why noeviction</span>
+<p>With an eviction policy Redis silently deletes keys when memory is full. For us that would mean lost Infisical background jobs or reset rate-limit counters, with no error anywhere. With <code>noeviction</code>, a full Redis refuses new writes with an error that shows up in logs. The cost is that memory must be watched; today it uses about 3 MB of 256 MB. The comment in <code>redis.conf</code> notes that our own keys carry TTLs; in practice the only keys we create are the gateway counters, which expire with their time window.</p></div>
+<div class="callout warn"><span class="label">Gotcha</span><p>The Redis ACL file format does not allow comment lines, which is why the explanation sits in the shell script rather than in the generated file.</p></div>
+
+<h3 id="redis-operate">How to operate it</h3>
+<pre><code>set -a; . ./.env; set +a      # loads the passwords into your shell (do not echo them)
+R="docker compose exec -T redis redis-cli --no-auth-warning --user admin --pass $REDIS_ADMIN_PASSWORD"
+
+$R ping
+$R ACL LIST                                   # shows hashes, not passwords
+$R CONFIG GET maxmemory-policy                # noeviction
+$R info memory | grep -E "used_memory_human|maxmemory_human"
+$R --scan --pattern 'plugin-limit-count:*'    # gateway rate-limit counters (exist only while a window is active)
+$R dbsize</code></pre>
+<p>Only scan by pattern; never print values from the Infisical (<code>bull:*</code>, <code>{cron}:*</code>) keys. To reset a client's rate limit during testing, delete that client's counter key (<code>DEL</code> on the exact key found by the scan).</p>
+
+<h3 id="redis-use">What we use from it</h3>
+<ul>
+<li>APISIX <code>limit-count</code> with <code>policy: redis</code>: counters under <code>plugin-limit-count:*</code>, shared and persistent across gateway restarts.</li>
+<li>Infisical's queue and cron state.</li>
+<li>Verified in the poms: none of the three Java services depends on Redis.</li>
+</ul>
+
+<!-- ============================================================ RABBITMQ -->
+<h2 id="rabbitmq">RabbitMQ</h2>
+<p><span class="badge partial">set up, not yet used</span></p>
+
+<h3 id="rabbitmq-why">Why</h3>
+<p>Planned for events between services (for example <code>user.created</code>, <code>device.registered</code>, push fan-out). Chosen over NATS or Kafka for first-class Spring support and enough scale for our size (SETUP.md section 3).</p>
+<div class="callout warn"><span class="label">Honest status</span>
+<p>No service publishes or consumes messages today: none of the three poms has an AMQP dependency and the broker has zero queues in vhost <code>adera</code> (checked via the management API). The partner notification queue is implemented in Postgres tables with background workers inside <code>notification-service</code>, not in RabbitMQ. The broker is running, scraped by Prometheus and shown on the Grafana overview ("RabbitMQ messages waiting", currently 0), so that it is ready when the first event is added.</p></div>
+
+<h3 id="rabbitmq-config">How it is configured here</h3>
+<ul>
+<li><code>docker-compose.yml</code>: <code>rabbitmq</code> (management image, default admin user from <code>RABBITMQ_ADMIN_USER</code>/<code>RABBITMQ_ADMIN_PASSWORD</code>, volume <code>rabbitmq_data</code>) and the one-shot <code>rabbitmq-setup</code> (a <code>curlimages/curl</code> container that runs <code>infra/rabbitmq/setup.sh</code> and exits).</li>
+<li><code>infra/rabbitmq/setup.sh</code> is idempotent (HTTP <code>PUT</code>s): vhost <code>adera</code>, users <code>user_svc</code> and <code>notification_svc</code> (passwords <code>USER_SVC_RABBIT_PASSWORD</code>, <code>NOTIFICATION_SVC_RABBIT_PASSWORD</code>), and permissions <code>configure/write/read = ".*"</code> on that vhost.</li>
+</ul>
+<p>Verified: vhosts <code>/</code> and <code>adera</code>; users <code>adera_admin</code> (tag <code>administrator</code>), <code>user_svc</code> and <code>notification_svc</code> (no tags, so they cannot use the management UI, AMQP only). Permissions are wide on purpose for now: narrow them to per-service name prefixes once the topology exists. RabbitMQ 4 only allows durable queues (Spring's default).</p>
+
+<h3 id="rabbitmq-operate">How to operate it</h3>
+<pre><code># UI: http://localhost:15672  (user = RABBITMQ_ADMIN_USER from .env)
+set -a; . ./.env; set +a
+curl -s -u "$RABBITMQ_ADMIN_USER:$RABBITMQ_ADMIN_PASSWORD" http://127.0.0.1:15672/api/vhosts
+curl -s -u "$RABBITMQ_ADMIN_USER:$RABBITMQ_ADMIN_PASSWORD" http://127.0.0.1:15672/api/queues/adera
+docker compose exec rabbitmq rabbitmq-diagnostics -q ping
+docker compose run --rm rabbitmq-setup     # re-run the idempotent setup after changing a password in .env</code></pre>
+<p>Metrics come from the built-in Prometheus endpoint <code>rabbitmq:15692</code> (job <code>rabbitmq</code>).</p>
+
+<h3 id="rabbitmq-use">What we use from it</h3>
+<p>Currently only the broker, vhost, users and metrics. Planned events are listed in <a href="10-reference.html#not-built">not built yet</a>.</p>
+
+<!-- ============================================================ MAILPIT -->
+<h2 id="mailpit">Mailpit</h2>
+<p><span class="badge built">built</span> development only.</p>
+
+<h3 id="mailpit-why">Why</h3>
+<p>We need to read the one-time codes and notification emails without sending real mail. Mailpit is a fake SMTP server with a web inbox and an HTTP API; it is one small container and everything stays on the machine. It is not needed in production.</p>
+
+<h3 id="mailpit-config">How it is configured here</h3>
+<ul>
+<li><code>docker-compose.yml</code> service <code>mailpit</code>: <code>MP_MAX_MESSAGES=500</code> (oldest are dropped), <code>MP_DATABASE=/data/mailpit.db</code> on volume <code>mailpit_data</code> (messages survive restarts), healthcheck <code>/mailpit readyz</code>, SMTP 1025, UI and API 8025.</li>
+<li>notification-service sends to it over SMTP (<code>SMTP_HOST=mailpit</code>, <code>SMTP_PORT=1025</code>) when <code>EMAIL_PROVIDER=mailpit</code> (class <code>MailpitEmailProvider</code>).</li>
+<li>Infisical also uses it for its own mail (invites, password reset) via <code>SMTP_HOST=mailpit</code>, sender <code>no-reply@adera.local</code>.</li>
+</ul>
+
+<h3 id="mailpit-operate">How to operate it</h3>
+<pre><code>open http://localhost:8025                         # inbox UI
+curl -s http://127.0.0.1:8025/api/v1/info          # version and message count
+curl -s "http://127.0.0.1:8025/api/v1/messages?limit=5"
+curl -s -X DELETE http://127.0.0.1:8025/api/v1/messages     # empty the inbox</code></pre>
+<p>Tip: for one-time codes you do not need to open the inbox for phone logins at all; SMS in dev mode goes to the console and <code>GET http://127.0.0.1:8085/dev/messages</code> returns recent codes (see <a href="08f-operational.html">operational endpoints</a>).</p>
+
+<h3 id="mailpit-use">What we use from it</h3>
+<p>SMTP sink plus read API for tests and humans. Switching to real email is <code>EMAIL_PROVIDER=resend</code>; see <a href="02-setup.html#delivery-modes">delivery modes</a>.</p>
+
+<!-- ============================================================ INFISICAL -->
+<h2 id="infisical">Infisical</h2>
+<p><span class="badge built">built</span> self-hosted secrets manager, used for API keys only.</p>
+
+<h3 id="infisical-why">Why</h3>
+<p>Third-party API keys (Twilio, Resend, our partner response-signing key, later Firebase) should have an audit trail, environments (<code>dev</code>, <code>prod</code>), rotation, and should not sit in git or a world-readable file. Infisical is open-source, self-hostable and has a CLI and an HTTP API.</p>
+
+<h3 id="infisical-config">How it is configured here</h3>
+<ul>
+<li><code>docker-compose.yml</code> service <code>infisical</code> (pinned to <code>v0.167.2</code>; the moving <code>latest-postgres</code> tag was ten months stale and incompatible with the current CLI). It uses the shared Postgres (database <code>infisical</code>) and Redis (ACL user <code>infisical</code>). <code>SITE_URL</code> is <code>http://localhost:8080</code> (must change for a real server); telemetry is off; SMTP goes to Mailpit.</li>
+<li>Its own bootstrap keys <code>INFISICAL_ENCRYPTION_KEY</code> and <code>INFISICAL_AUTH_SECRET</code> live in <code>.env</code>. <strong>Losing the encryption key makes every stored secret unreadable</strong>; keep an off-machine copy.</li>
+<li>Project <code>Adera</code>, environments <code>dev</code> and <code>prod</code> (prod is empty), folders <code>/infra</code>, <code>/kratos</code>, <code>/gateway</code>, <code>/notification</code>, <code>/user</code>.</li>
+<li>Machine identity <code>adera-local-dev</code> (Token Auth) provides <code>INFISICAL_TOKEN</code>; it expires <strong>2026-11-23</strong>. Use Universal Auth beyond local dev.</li>
+</ul>
+<p>Secret <em>names</em> currently in <code>dev</code> / <code>/notification</code> (read through the API; values are never shown here):</p>
+<pre class="out"><code>PARTNER_SIGNING_KEY_ID
+PARTNER_SIGNING_PRIVATE_KEY_B64
+RESEND_API_KEY
+RESEND_FROM_EMAIL
+RESEND_FROM_NAME
+TWILIO_ACCOUNT_SID
+TWILIO_AUTH_TOKEN
+TWILIO_MESSAGING_SERVICE_SID
+TWILIO_PHONE_NUMBER</code></pre>
+<p>Still to add: <code>FIREBASE_SERVICE_ACCOUNT_B64</code> under <code>/notification</code> (needed for <code>FCM_PROVIDER=firebase</code>).</p>
+
+<div class="callout warn"><span class="label">Where Infisical did not fit</span>
+<p>The usual way is to wrap the process (<code>infisical run -- docker compose up</code>) or inject secrets into containers. The owner did not want every <code>docker compose</code> command wrapped, so container secrets stay in <code>.env</code>, and <strong>we wrote a loader in the service</strong>: <code>InfisicalEnvironmentPostProcessor</code> (notification-service, registered in <code>META-INF/spring.factories</code>) calls <code>GET /api/v4/secrets?projectId=...&amp;environment=...&amp;secretPath=...</code> with the machine token before the Spring context exists and adds the result as the <em>lowest-priority</em> property source (a real environment variable always wins). It only activates when <code>INFISICAL_TOKEN</code>, <code>INFISICAL_PROJECT_ID</code> and <code>INFISICAL_DOMAIN</code> are set, logs only a count and never a value, and a failure is a warning, not a crash (a dev-mode service does not need the keys; a real provider without its keys fails fast). Only notification-service uses it today. It pins <code>HttpClient</code> to HTTP/1.1 because Java's default h2c upgrade over plain HTTP gets a 400 from Infisical.</p></div>
+
+<h3 id="infisical-operate">How to operate it</h3>
+<pre><code># UI: http://localhost:8080  (first-time sign-up creates the admin; invite mail goes to Mailpit)
+set -a; . ./.env; set +a
+# list names only (never paste values into chat or docs)
+infisical secrets --env=dev --path=/notification --projectId "$INFISICAL_PROJECT_ID" --domain "$INFISICAL_DOMAIN"
+infisical secrets set RESEND_FROM_NAME="Adera" --env=dev --path=/notification --projectId "$INFISICAL_PROJECT_ID" --domain "$INFISICAL_DOMAIN"
+infisical secrets delete OLD_NAME --type shared --env=dev --path=/notification ...   # needs --type shared
+# a secret change reaches the service at its next start:
+docker compose up -d --force-recreate notification-service</code></pre>
+<p>Step-by-step add/rotate guides are in <a href="09-guides.html">Guides</a>. The CLI reads <code>INFISICAL_TOKEN</code> from the environment.</p>
+
+<h3 id="infisical-use">What we use from it</h3>
+<ul>
+<li>Secret storage and environments, the CLI/UI for editing, the <code>/api/v4/secrets</code> read endpoint from our loader.</li>
+<li>Not used: dynamic secrets, injection agents, Kubernetes operator, Universal Auth (planned).</li>
+</ul>
+
+<!-- ============================================================ KRATOS -->
+<h2 id="kratos">Ory Kratos</h2>
+<p><span class="badge built">built</span> identity, one-time-code login, sessions, authenticator-app (TOTP) second factor.</p>
+
+<h3 id="kratos-why">Why</h3>
+<p>Login, sessions and second factor are security-critical and easy to get wrong. Kratos is headless (no UI we must theme), API-first (native mobile flows return JSON and a <code>session_token</code>) and supports passwordless login by one-time code over email and SMS. Chosen over Keycloak and SuperTokens for those reasons (SETUP.md section 3).</p>
+
+<h3 id="kratos-config">How it is configured here</h3>
+<p>Files: <code>infra/kratos/kratos.yml</code>, <code>infra/kratos/identity.schema.json</code>; compose services <code>kratos-migrate</code> (one-shot: <code>migrate sql up -e --yes</code>) and <code>kratos</code> (<code>serve --watch-courier</code>). Secrets <code>DSN</code>, <code>SECRETS_COOKIE</code>, <code>SECRETS_CIPHER</code> come from environment, never from the file.</p>
+<div class="table-wrap"><div class="table-wrap"><table>
+<thead><tr><th>Setting</th><th>Value here</th><th>Why</th></tr></thead>
+<tbody>
+<tr><td><code>serve.public.base_url</code></td><td><code>http://127.0.0.1:9080/kratos/</code> (the gateway)</td><td>Flow action URLs in responses lead back through the gateway, never to the internal address. Must change for a real domain.</td></tr>
+<tr><td><code>serve.admin.base_url</code></td><td><code>http://kratos:4434/</code></td><td>Internal only. The gateway answers 403 for <code>/kratos/admin/*</code>.</td></tr>
+<tr><td>identity schema</td><td>traits <code>email</code> and <code>phone_number</code>, each a code-login identifier (<code>via: email</code> / <code>via: sms</code>); <code>anyOf</code> at least one; <code>additionalProperties: false</code></td><td>Passwordless; no profile data in Kratos, that lives in user-service.</td></tr>
+<tr><td><code>methods.password</code></td><td>disabled</td><td>No passwords exist anywhere.</td></tr>
+<tr><td><code>methods.code</code></td><td>enabled, <code>passwordless_enabled</code>, <code>lifespan: 5m</code></td><td>One-time code valid 5 minutes.</td></tr>
+<tr><td><code>methods.totp</code></td><td>enabled, issuer <code>Adera</code></td><td>Second step for dashboard staff only; customers never enrol one.</td></tr>
+<tr><td>registration flow</td><td>lifespan 10m; hooks <code>web_hook</code> then <code>session</code></td><td>Create our profile, then issue a session so the app gets a <code>session_token</code> directly after sign-up.</td></tr>
+<tr><td>login flow</td><td>lifespan 10m</td><td></td></tr>
+<tr><td><code>settings.privileged_session_max_age</code></td><td>15m</td><td>Re-authentication window for sensitive changes such as enrolling TOTP.</td></tr>
+<tr><td><code>session.lifespan</code></td><td>720h (30 days)</td><td>Long-lived mobile sessions.</td></tr>
+<tr><td><code>ui_url</code>, <code>allowed_return_urls</code></td><td><code>http://localhost:3000/...</code></td><td>Browser flows are not used by the app; placeholders for the future dashboard.</td></tr>
+<tr><td>tracing</td><td>otel, service <code>kratos</code>, OTLP to <code>otel-collector:4318</code></td><td>Traces in Tempo.</td></tr>
+</tbody></table></div></div>
+
+<h4>The registration web hook</h4>
+<p><code>registration.after.code.hooks[0]</code> posts to <code>http://user-service:8080/internal/kratos/after-registration</code> with <code>response.ignore: true</code>, which makes it non-blocking: a slow or down user-service can never block a sign-up. The body is a base64-encoded Jsonnet template in the YAML; decoded it is:</p>
+<pre><code>function(ctx) { identityId: ctx.identity.id, email: std.get(ctx.identity.traits, 'email', null), phone: std.get(ctx.identity.traits, 'phone_number', null) }</code></pre>
+<p>So user-service receives <code>{"identityId":"&lt;uuid&gt;","email":"..."|null,"phone":"..."|null}</code> and creates the profile row whose id <em>is</em> the Kratos identity id. The hook must come before <code>session</code> in the list.</p>
+
+<h4>The courier (how codes leave Kratos)</h4>
+<p><code>courier.delivery_strategy: http</code> sends every message Kratos wants to deliver to <strong>our notification-service</strong>, which decides how to deliver it. Three request configs, all <code>POST</code> with base64 Jsonnet bodies. Decoded:</p>
+<div class="table-wrap"><div class="table-wrap"><table>
+<thead><tr><th>Channel</th><th>URL</th><th>Decoded body template</th></tr></thead>
+<tbody>
+<tr><td>email (default)</td><td><code>http://notification-service:8080/internal/kratos/email</code></td><td><code>{ recipient: ctx.recipient, subject: ctx.subject, body: ctx.body, htmlBody: std.get(ctx,'html_body',null), templateType: std.get(ctx,'template_type',null) }</code></td></tr>
+<tr><td>sms (<code>channels[0]</code>)</td><td><code>http://notification-service:8080/internal/kratos/sms</code></td><td><code>{ to: ctx.recipient, body: ctx.body, templateType: std.get(ctx,'template_type',null) }</code></td></tr>
+</tbody></table></div></div>
+<p>Kratos retries a message when our endpoint answers non-2xx; notification-service therefore returns 502 for real delivery failures (so Kratos retries) and 200 for rate-limited or skipped messages (so Kratos does not retry them). <code>kratos</code> is started with <code>--watch-courier</code> so queued messages are sent by the same process.</p>
+
+<h3 id="kratos-operate">How to operate it</h3>
+<pre><code>docker compose exec kratos kratos version                      # v26.2.0
+curl -s http://127.0.0.1:4434/admin/health/ready                 # {"status":"ok"} (admin port, localhost only)
+# list identities (admin API; ids are the user ids)
+curl -s "http://127.0.0.1:4434/admin/identities?page_size=5" | python3 -m json.tool
+# apply migrations manually
+docker compose run --rm kratos-migrate
+docker compose logs -f kratos</code></pre>
+<p>Client-facing flows are documented in <a href="08e-kratos-flows.html">Kratos flows</a>; the API spec is <code>docs/kratos-openapi-v26.2.0.json</code>. Prometheus scrapes <code>kratos:4434/admin/metrics/prometheus</code>. After editing <code>kratos.yml</code> run <code>docker compose restart kratos</code>.</p>
+<p>Lessons: use <code>migrate sql up -e --yes</code> in Kratos 26; add <code>hook: session</code> under <code>registration.after.code</code> or sign-up returns no <code>session_token</code>.</p>
+
+<h3 id="kratos-use">What we use from it</h3>
+<ul>
+<li>Identities and traits, code login (register/login/verify), sessions and <code>whoami</code>, session list/revoke, TOTP enrol and aal2 upgrade, the admin API (used by user-service as a safety net to create a missing profile, and by logout).</li>
+</ul>
+<div class="callout warn"><span class="label">Where Kratos did not fit, so we wrote code</span>
+<ul>
+<li><strong>Native-app logout hook:</strong> Kratos has no hook that runs on API logout, so a device's push token could stay behind. We wrote <code>POST /api/v1/me/logout</code> (<code>LogoutController</code> in user-service): it optionally removes the device, then calls Kratos to revoke the session.</li>
+<li><strong>Message delivery:</strong> Kratos' built-in SMS/SMTP options do not cover Twilio or Resend with our safety rules, so the whole courier is replaced by an HTTP receiver (<code>KratosCourierController</code> in notification-service) that adds per-recipient limits, a live-mode allowlist and a send log.</li>
+<li><strong>Account enumeration:</strong> at login Kratos answers "account does not exist" for unknown identifiers but "code sent" for known ones. Not yet fixed; the plan is a single "continue" endpoint in our backend (see <a href="06-security.html">security</a>).</li>
+<li><strong>Phone and email are separate identities:</strong> linking a second identifier is a feature we still have to build.</li>
+<li><strong>Staff roles</strong> are not in Kratos: it only proves who the person is (and aal2); roles live in registry-service.</li>
+</ul></div>
+
+<!-- ============================================================ APISIX -->
+<h2 id="apisix">APISIX</h2>
+<p><span class="badge built">built</span> the single front door (port 9080), standalone mode.</p>
+
+<h3 id="apisix-why">Why</h3>
+<p>Rate limits, CORS, request ids, "is this a valid session?" and tracing are the same for every service, so they belong in one place, not in each Spring app. Chosen over Kong because standalone mode keeps all configuration in git as a YAML file (no etcd, no database).</p>
+
+<h3 id="apisix-config">How it is configured here</h3>
+<ul>
+<li><code>infra/apisix/config.yaml</code>: <code>deployment.role: data_plane</code> with <code>config_provider: yaml</code> (no admin API, no etcd), listen port 9080, and the <strong>plugin allow-list</strong>: <code>request-id, cors, prometheus, opentelemetry, limit-count, forward-auth, proxy-rewrite, mocking</code>. This list <em>replaces</em> APISIX's defaults. Prometheus metrics are exported on container port 9091.</li>
+<li><code>infra/apisix/apisix.yaml</code>: four upstreams (<code>kratos-public</code>, <code>user-service</code>, <code>registry-service</code>, <code>notification-service</code>), the <code>opentelemetry</code> exporter settings in <code>plugin_metadata</code>, one global rule (request-id, prometheus, opentelemetry with <code>always_on</code> sampling, CORS for <code>http://localhost:3000</code>) and the routes below.</li>
+<li>Secrets reach the file through <code>${{ENV_VAR}}</code> substitution (<code>APISIX_REDIS_PASSWORD</code>, <code>USER_GATEWAY_SECRET</code>); the variables are passed in the compose <code>environment</code> block of <code>apisix</code>.</li>
+</ul>
+<div class="table-wrap"><div class="table-wrap"><table>
+<thead><tr><th>Route id</th><th>Match (priority)</th><th>Upstream</th><th>Plugins</th><th>Limit per 60 s per IP</th></tr></thead>
+<tbody>
+<tr><td><code>kratos-admin-blocked</code></td><td><code>/kratos/admin/*</code> (100)</td><td>none</td><td><code>mocking</code>: 403 <code>{"error":"forbidden"}</code></td><td>-</td></tr>
+<tr><td><code>kratos-self-service-submit</code></td><td><code>POST /kratos/self-service/*</code> (20)</td><td>kratos-public</td><td>proxy-rewrite (strip <code>/kratos</code>), limit-count</td><td>10 (first line of SMS-cost protection)</td></tr>
+<tr><td><code>kratos-public</code></td><td><code>/kratos/*</code> (10)</td><td>kratos-public</td><td>proxy-rewrite, limit-count</td><td>120</td></tr>
+<tr><td><code>me-avatar</code></td><td><code>/api/v1/me/avatar</code> (30)</td><td>user-service</td><td>forward-auth (user-service), proxy-rewrite (sets <code>X-Gateway-Secret</code>), limit-count</td><td>20</td></tr>
+<tr><td><code>me</code></td><td><code>/api/v1/me</code>, <code>/api/v1/me/*</code> (20)</td><td>user-service</td><td>same</td><td>300</td></tr>
+<tr><td><code>me-notifications</code></td><td><code>/api/v1/me/notifications</code>, <code>.../*</code> (30)</td><td>notification-service</td><td>forward-auth (user-service), proxy-rewrite, limit-count</td><td>300</td></tr>
+<tr><td><code>apps-catalog</code></td><td><code>/api/v1/apps</code>, <code>/api/v1/apps/*</code> (20)</td><td>registry-service</td><td>forward-auth (user-service), proxy-rewrite, limit-count</td><td>300</td></tr>
+<tr><td><code>admin-api</code></td><td><code>/admin/api/v1</code>, <code>.../*</code> (20)</td><td>registry-service</td><td>forward-auth (registry-service <code>/internal/staff/verify</code>), proxy-rewrite (<code>X-Gateway-Secret</code>, <code>X-Client-IP</code>), limit-count</td><td>300</td></tr>
+<tr><td><code>admin-notification</code></td><td><code>/admin/api/v1/notification/*</code> (30)</td><td>notification-service</td><td>forward-auth (registry-service), proxy-rewrite, limit-count</td><td>300</td></tr>
+<tr><td><code>partner-api</code></td><td><code>/v1/*</code> (20)</td><td>notification-service</td><td>proxy-rewrite (<code>X-Gateway-Secret</code>, <code>X-Client-IP</code>), limit-count. <em>No forward-auth</em>: the service checks the request signature.</td><td>600</td></tr>
+<tr><td><code>partner-jwks</code></td><td><code>/.well-known/jwks.json</code> (20)</td><td>notification-service</td><td>proxy-rewrite, limit-count</td><td>120</td></tr>
+</tbody></table></div></div>
+<p>Higher priority wins: that is how <code>/api/v1/me/avatar</code> gets its stricter limit and how <code>/api/v1/me/notifications</code> and <code>/admin/api/v1/notification/*</code> are sent to notification-service instead of the broader <code>me</code> and <code>admin-api</code> routes. Counters live in Redis (<code>policy: redis</code>); over the limit the gateway answers 429.</p>
+
+<h4>What forward-auth does</h4>
+<p>Before forwarding, APISIX calls the verify URL with the client's <code>Authorization</code> (and <code>Cookie</code> for user routes) plus <code>X-Gateway-Secret</code>. If that returns 2xx, APISIX copies the <code>upstream_headers</code> (<code>X-User-Id</code>; or <code>X-Staff-Id</code> and <code>X-Staff-Role</code>) onto the forwarded request, <strong>overwriting any value the client sent</strong>; otherwise the verify response is returned to the client. <code>status_on_error: 503</code> means that if the verify service itself is unreachable the client gets 503, not a misleading 401. Full trust model: <a href="05-communication.html#trust-model">communication</a>.</p>
+
+<h3 id="apisix-operate">How to operate it</h3>
+<ul>
+<li><strong>Route changes in <code>apisix.yaml</code> hot-reload within about a second.</strong> Check with <code>docker compose logs --tail=20 apisix</code>. A syntax error is logged and the old config stays.</li>
+<li><strong>Changes to <code>config.yaml</code></strong> (plugin list, ports) need <code>docker compose restart apisix</code>.</li>
+<li><strong>A new <code>${{VAR}}</code></strong> must exist inside the container: add it to the compose <code>environment</code> block and run <code>docker compose up -d apisix</code> (<code>restart</code> does not re-read compose environment).</li>
+<li>Metrics: <code>apisix_http_status</code>, <code>apisix_http_latency_bucket</code> via Prometheus job <code>apisix</code>; the route id appears as a label because of <code>prefer_name</code>.</li>
+<li>Quick smoke test (this one is allowed anywhere): <code>curl -i http://127.0.0.1:9080/kratos/admin/identities</code> must return 403.</li>
+</ul>
+
+<h3 id="apisix-use">What we use from it</h3>
+<p>Routing, the five plugins we use for traffic (<code>limit-count</code>, <code>forward-auth</code>, <code>proxy-rewrite</code>, <code>cors</code>, <code>request-id</code>), <code>mocking</code> for the blocked admin path, <code>prometheus</code> and <code>opentelemetry</code> for observability.</p>
+<div class="callout warn"><span class="label">Lessons and limits</span>
+<ul>
+<li>An unknown plugin in a global rule drops the <strong>whole</strong> rule silently (request-id, CORS and metrics vanish together). Always add the plugin to <code>config.yaml</code> first.</li>
+<li>Avoid YAML anchors and aliases in <code>apisix.yaml</code> (its parser does not handle them), which is why the Redis settings are repeated in every route.</li>
+<li>Per-IP limits use <code>remote_addr</code>: locally all clients share the Docker bridge IP, and behind a real proxy they would all share the proxy's IP until the real client IP is configured (deployment checklist item 4).</li>
+<li>CORS allows only <code>http://localhost:3000</code> and the headers <code>Authorization, Content-Type, X-Request-Id</code>; the dashboard origin must be added for production.</li>
+</ul></div>
+
+<!-- ============================================================ RUSTFS -->
+<h2 id="rustfs">RustFS</h2>
+<p><span class="badge built">built</span> S3-compatible object storage for files.</p>
+
+<h3 id="rustfs-why">Why</h3>
+<p>Files (avatars, mini-app logos, later more) should not live in Postgres or on a service's local disk. An S3-compatible store lets us use the standard AWS SDK now and move to any S3 provider later by changing an endpoint. Our database stores only the file's id; the object key is derived from it. (SETUP.md records the choice but not the alternatives considered.)</p>
+
+<h3 id="rustfs-config">How it is configured here</h3>
+<ul>
+<li><code>docker-compose.yml</code> service <code>rustfs</code>: data on volume <code>rustfs_data</code>, S3 API on 9000, web console on 9001, access/secret keys from <code>.env</code> (<code>RUSTFS_ACCESS_KEY</code>, <code>RUSTFS_SECRET_KEY</code>).</li>
+<li>Bucket <code>adera-media</code>. There is no setup container: <code>S3AvatarStorage</code> (user-service) and <code>S3ObjectStorage</code> (registry-service) check the bucket at startup and create it if missing.</li>
+<li>user-service and registry-service read <code>STORAGE_ENDPOINT</code> (<code>http://rustfs:9000</code>, internal), <code>STORAGE_PUBLIC_ENDPOINT</code> (default <code>http://127.0.0.1:9000</code>, the address phones use for signed links, because the host is part of the signature), and <code>STORAGE_BUCKET</code> (default <code>adera-media</code>).</li>
+</ul>
+<p>Keys currently in the bucket (real; the two objects are registry test logos):</p>
+<pre class="out"><code>python3 -I tests/e2e/s3tool.py list
+2 objects
+  apps/&lt;app-uuid&gt;/logo/&lt;image-uuid&gt;.png
+  apps/&lt;app-uuid&gt;/logo/&lt;image-uuid&gt;.png</code></pre>
+<p>Layout: <code>avatars/{user id}/{image id}.jpg</code> (user-service), <code>apps/{app id}/logo/{image id}.png</code> (registry-service). More on <a href="07-data.html#rustfs-bucket">the data page</a>.</p>
+
+<h3 id="rustfs-operate">How to operate it</h3>
+<pre><code>set -a; . ./.env; set +a                      # s3tool needs RUSTFS_ACCESS_KEY / RUSTFS_SECRET_KEY
+python3 -I tests/e2e/s3tool.py list              # all objects
+python3 -I tests/e2e/s3tool.py list avatars/     # by prefix
+python3 -I tests/e2e/s3tool.py delete &lt;key&gt;      # delete (only for cleaning test data)
+# web console: http://localhost:9001 (log in with the access/secret key from .env)</code></pre>
+<p><code>s3tool.py</code> is a dependency-free SigV4 client (path-style, region <code>us-east-1</code>).</p>
+
+<h3 id="rustfs-use">What we use from it</h3>
+<p>PUT/GET/DELETE object, list, head/create bucket, and presigned GET URLs (60-minute avatar links). A request without a valid signature gets 403, which the e2e test verifies.</p>
+<div class="callout warn"><span class="label">Notes and open items</span>
+<ul>
+<li>With the AWS SDK v2 use path-style access, <code>requestChecksumCalculation(WHEN_REQUIRED)</code>, and presign against the <em>public</em> endpoint.</li>
+<li>Both services currently use RustFS's <strong>admin</strong> keys; create a bucket-scoped key before production.</li>
+<li>Production must expose only the S3 API (not the console) over HTTPS for phones, or proxy image reads through the gateway.</li>
+</ul></div>
+
+<!-- ============================================================ OBSERVABILITY -->
+<h2 id="observability">Prometheus, Grafana, Loki, Alloy, Tempo, OTel Collector</h2>
+<p><span class="badge built">built</span> metrics, logs and traces in one Grafana.</p>
+
+<p>Why a full stack: the system is several containers calling each other; "why didn't it arrive?" needs one place to see the request, its logs and its timings. All six tools are the standard open-source set and need no code from us beyond switching exporters on in Spring and APISIX.</p>
+
+<svg class="diagram" viewBox="0 0 860 300" role="img" aria-label="Observability data flow">
+<title>Observability data flow</title>
+<defs><marker id="ah-obs" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z"/></marker></defs>
+<rect class="box client" x="20" y="20" width="170" height="50" rx="8"/><text class="title" x="105" y="42" text-anchor="middle">All containers</text><text class="muted" x="105" y="58" text-anchor="middle">stdout / stderr logs</text>
+<rect class="box tool" x="250" y="20" width="130" height="50" rx="8"/><text class="title" x="315" y="50" text-anchor="middle">Alloy</text>
+<rect class="box store" x="450" y="20" width="130" height="50" rx="8"/><text class="title" x="515" y="50" text-anchor="middle">Loki</text>
+<path class="edge" d="M190 45H250" marker-end="url(#ah-obs)"/><path class="edge" d="M380 45H450" marker-end="url(#ah-obs)"/>
+<rect class="box ours" x="20" y="130" width="170" height="60" rx="8"/><text class="title" x="105" y="155" text-anchor="middle">Our 3 services</text><text class="muted" x="105" y="172" text-anchor="middle">traces (OTLP http)</text>
+<rect class="box tool" x="20" y="215" width="170" height="60" rx="8"/><text class="title" x="105" y="240" text-anchor="middle">APISIX, Kratos</text><text class="muted" x="105" y="257" text-anchor="middle">traces (OTLP http)</text>
+<rect class="box tool" x="250" y="170" width="130" height="60" rx="8"/><text class="title" x="315" y="195" text-anchor="middle">OTel Collector</text><text class="muted" x="315" y="212" text-anchor="middle">:4317 / :4318</text>
+<rect class="box store" x="450" y="170" width="130" height="60" rx="8"/><text class="title" x="515" y="205" text-anchor="middle">Tempo</text>
+<path class="edge" d="M190 160L250 190" marker-end="url(#ah-obs)"/><path class="edge" d="M190 245L250 210" marker-end="url(#ah-obs)"/><path class="edge" d="M380 200H450" marker-end="url(#ah-obs)"/>
+<rect class="box store" x="450" y="95" width="130" height="50" rx="8"/><text class="title" x="515" y="125" text-anchor="middle">Prometheus</text>
+<path class="edge dash" d="M190 150L450 125" marker-end="url(#ah-obs)"/><text class="muted" x="300" y="128" text-anchor="middle">scrape /actuator/prometheus</text>
+<rect class="box tool" x="680" y="95" width="160" height="80" rx="8"/><text class="title" x="760" y="130" text-anchor="middle">Grafana :3001</text><text class="muted" x="760" y="148" text-anchor="middle">dashboards, Explore</text>
+<path class="edge hot" d="M580 45L680 105" marker-end="url(#ah-obs)"/><path class="edge hot" d="M580 120H680" marker-end="url(#ah-obs)"/><path class="edge hot" d="M580 200L680 165" marker-end="url(#ah-obs)"/>
+<text class="muted" x="640" y="270" text-anchor="middle">Grafana queries Loki, Prometheus and Tempo (provisioned data sources)</text>
+</svg>
+
+<h3 id="prometheus">Prometheus</h3>
+<ul>
+<li><strong>Why:</strong> the standard pull-based metrics store; every tool we run already exposes Prometheus metrics.</li>
+<li><strong>Config:</strong> <code>infra/prometheus/prometheus.yml</code>, 15 s scrape interval, 15-day retention (<code>--storage.tsdb.retention.time=15d</code> in compose), volume <code>prometheus_data</code>. Jobs: <code>prometheus</code>, <code>apisix</code> (<code>apisix:9091/apisix/prometheus/metrics</code>), <code>kratos</code> (<code>kratos:4434/admin/metrics/prometheus</code>), <code>rabbitmq</code> (<code>:15692</code>), <code>otel-collector</code> (<code>:8888</code> and <code>:8889</code>), <code>loki</code>, <code>tempo</code>, <code>alloy</code>, and our three services at <code>/actuator/prometheus</code>.</li>
+<li><strong>Operate:</strong> UI http://localhost:9090. Verified on 2026-10-25: every job reports <code>up</code> (12 targets, since <code>otel-collector</code> has two).
+<pre><code>curl -s http://127.0.0.1:9090/api/v1/targets | python3 -c 'import json,sys;[print(t["labels"]["job"],t["health"]) for t in json.load(sys.stdin)["data"]["activeTargets"]]'
+curl -s "http://127.0.0.1:9090/api/v1/query?query=sum(rate(apisix_http_status%5B1m%5D))"</code></pre></li>
+<li><strong>Use:</strong> gateway rate/status/latency, JVM and HTTP metrics of the Java services, RabbitMQ queue depth. Note: the services export <em>metrics</em> by being scraped, not via OTLP; the collector's metrics pipeline (exposed on <code>:8889</code>) currently carries nothing because only traces are sent to it (<code>OTEL_TRACES_ENDPOINT</code>).</li>
+<li><strong>Not done:</strong> Postgres/Redis exporters, alert rules.</li>
+</ul>
+
+<h3 id="grafana">Grafana</h3>
+<ul>
+<li><strong>Why:</strong> one UI for metrics, logs and traces, with jumps between them (trace to logs).</li>
+<li><strong>Config:</strong> compose service <code>grafana</code> (admin user <code>admin</code>, password <code>GRAFANA_ADMIN_PASSWORD</code>, sign-up disabled, analytics off), host port <strong>3001</strong>. Everything is provisioned from files so a fresh start is identical: <code>infra/grafana/provisioning/datasources/{prometheus,loki,tempo}.yml</code> (uids <code>prometheus</code> (default), <code>loki</code>, <code>tempo</code>; Tempo is configured with <code>tracesToLogsV2</code> to Loki with a +/- 1 minute window), <code>provisioning/dashboards/dashboards.yml</code> (folder <code>Adera</code>, path <code>/var/lib/grafana/dashboards</code>) and <code>infra/grafana/dashboards/adera-overview.json</code>.</li>
+<li><strong>The "Adera overview" dashboard</strong> (uid <code>adera-overview</code>) has six panels:
+<div class="table-wrap"><div class="table-wrap"><table>
+<thead><tr><th>Panel</th><th>Type</th><th>Query</th></tr></thead>
+<tbody>
+<tr><td>Services up (1 = yes)</td><td>stat</td><td><code>up</code></td></tr>
+<tr><td>Gateway requests per second, by status code</td><td>time series</td><td><code>sum by (code) (rate(apisix_http_status[1m]))</code></td></tr>
+<tr><td>Gateway p95 latency (ms)</td><td>time series</td><td><code>histogram_quantile(0.95, sum by (le) (rate(apisix_http_latency_bucket{type="request"}[5m])))</code></td></tr>
+<tr><td>Rate-limited requests (429) in the last hour</td><td>stat</td><td><code>sum(increase(apisix_http_status{code="429"}[1h])) or vector(0)</code></td></tr>
+<tr><td>RabbitMQ messages waiting</td><td>stat</td><td><code>sum(rabbitmq_queue_messages) or vector(0)</code></td></tr>
+<tr><td>Recent errors in any container</td><td>logs (Loki)</td><td><code>{service=~".+"} |~ "(?i)(error|fatal|panic|exception)"</code></td></tr>
+</tbody></table></div></div></li>
+<li><strong>Operate:</strong> open http://localhost:3001, Dashboards, folder <strong>Adera</strong>; or Explore and pick a data source. Verified: data sources Loki, Prometheus, Tempo exist and the dashboard is provisioned. Dashboards are read-only from the file (<code>:ro</code> mount): edit the JSON in git, not in the UI.</li>
+</ul>
+
+<h3 id="loki">Loki</h3>
+<ul>
+<li><strong>Why:</strong> cheap log storage that indexes only labels, queried from the same Grafana.</li>
+<li><strong>Config:</strong> <code>infra/loki/loki.yml</code>: single node, filesystem storage (volume <code>loki_data</code>), TSDB schema v13, retention <strong>168 h (7 days)</strong> enforced by the compactor, <code>ingestion_rate_mb: 16</code> and burst 32 (the default 4 rate-limits the first-start backlog), no auth (internal network only, no host port).</li>
+<li><strong>Operate:</strong> Grafana, Explore, data source <strong>Loki</strong>. Labels set by Alloy: <code>container</code> and <code>service</code> (the compose service name).
+<pre><code>{service="notification-service"}
+{service="kratos"} |= "error"
+{service=~"user-service|registry-service"} |~ "(?i)exception"</code></pre></li>
+<li><strong>Use:</strong> all application and tool logs. Services log OTP/recipient data masked, never codes (see the send-log tests).</li>
+</ul>
+
+<h3 id="alloy">Alloy</h3>
+<ul>
+<li><strong>Why:</strong> the log shipper; chosen over Promtail because Promtail is being retired.</li>
+<li><strong>Config:</strong> <code>infra/alloy/config.alloy</code>: <code>discovery.docker</code> lists containers through the Docker socket, <code>discovery.relabel</code> maps the container name to label <code>container</code> and the compose service label to <code>service</code>, <code>loki.source.docker</code> tails them, <code>loki.write</code> pushes to <code>http://loki:3100/loki/api/v1/push</code>. Volume <code>alloy_data</code> remembers read positions.</li>
+<li><strong>Security note:</strong> it mounts <code>/var/run/docker.sock</code> read-only; that still lets it see every container, and is on the production review list.</li>
+<li><strong>Operate:</strong> it has no UI we publish; its own metrics are scraped (job <code>alloy</code>). If logs are missing in Loki, check <code>docker compose logs alloy</code>.</li>
+</ul>
+
+<h3 id="tempo">Tempo</h3>
+<ul>
+<li><strong>Why:</strong> trace storage that works with the Collector and Grafana without extra indexing infrastructure.</li>
+<li><strong>Config:</strong> <code>infra/tempo/tempo.yml</code>: OTLP receivers (grpc 4317, http 4318, inside the container), single node, local disk (volume <code>tempo_data</code>), block retention <strong>72 h (3 days)</strong>. Gotchas: <code>ingester.lifecycler.min_ready_duration: 0s</code> and an in-memory ring, otherwise <code>/ready</code> stays 503 on a single node.</li>
+<li><strong>Operate:</strong> Grafana, Explore, data source <strong>Tempo</strong> (TraceQL):
+<pre><code>{ resource.service.name = "apisix" } &amp;&amp; { resource.service.name = "kratos" }   # gateway to Kratos requests
+{ resource.service.name = "notification-service" }</code></pre></li>
+<li><strong>Use:</strong> request traces from APISIX, Kratos, and the three Java services. Sampling is <code>always_on</code> at the gateway and <code>TRACING_SAMPLE_RATE</code> (default 1.0) in Spring: revisit both for production.</li>
+</ul>
+
+<h3 id="otel-collector">OpenTelemetry Collector</h3>
+<ul>
+<li><strong>Why:</strong> one stable endpoint for every sender, so services never need to know about Tempo; backends can change without touching services.</li>
+<li><strong>Config:</strong> <code>infra/otel-collector/config.yaml</code>: OTLP receiver (grpc 4317, http 4318, published on localhost for services run from an IDE), <code>batch</code> processor, traces pipeline to <code>tempo:4317</code> (insecure, internal), metrics pipeline exposed for Prometheus on <code>:8889</code>, collector's own metrics on <code>:8888</code>.</li>
+<li><strong>Senders:</strong> APISIX (exporter address in <code>plugin_metadata</code> of <code>apisix.yaml</code>, <em>not</em> <code>config.yaml</code>), Kratos (<code>tracing.providers.otlp</code> in <code>kratos.yml</code>), Java services via <code>OTEL_TRACES_ENDPOINT=http://otel-collector:4318/v1/traces</code> (<code>management.opentelemetry.tracing.export.otlp.endpoint</code>).</li>
+<li><strong>Operate:</strong> <code>docker compose logs otel-collector</code>; health of its own pipeline is in Prometheus job <code>otel-collector</code>.</li>
+</ul>
+<p>How a request shows up across all three signals is described in <a href="05-communication.html">communication</a>; reading them step by step is in <a href="09-guides.html">Guides</a>.</p>
+
+<!-- ============================================================ SUMMARY -->
+<h2 id="did-not-fit">Where a tool did not fit and we wrote code</h2>
+<div class="table-wrap"><div class="table-wrap"><table>
+<thead><tr><th>Tool</th><th>Gap</th><th>What we wrote</th><th>Where</th></tr></thead>
+<tbody>
+<tr><td>Kratos</td><td>No hook on native-app logout; push token would remain</td><td><code>POST /api/v1/me/logout</code> removes the device token and revokes the session</td><td><code>LogoutController</code>, user-service</td></tr>
+<tr><td>Kratos</td><td>Built-in courier cannot apply our limits, allowlist, Twilio/Resend, send log</td><td>HTTP courier receiver and provider abstraction</td><td><code>KratosCourierController</code>, <code>NotificationDispatcher</code>, notification-service</td></tr>
+<tr><td>Kratos</td><td>Profile data and staff roles do not belong in identity traits</td><td>profile in <code>users</code> DB, staff roles in <code>registry</code> DB; Kratos id reused as the key</td><td>user-service, registry-service</td></tr>
+<tr><td>Kratos</td><td>Account enumeration at login; no identifier linking</td><td>nothing yet (planned "continue" endpoint, account linking)</td><td>-</td></tr>
+<tr><td>APISIX</td><td>No built-in "ask Kratos" session check with our headers</td><td><code>/internal/auth/verify</code> and <code>/internal/staff/verify</code> used through <code>forward-auth</code></td><td><code>VerifyController</code> (user), <code>StaffVerifyController</code> (registry)</td></tr>
+<tr><td>APISIX</td><td>Partner signature check cannot be done by a stock plugin</td><td><code>PartnerAuthFilter</code> and <code>ResponseSigningFilter</code> verify/sign ADERA-SIG-1 in the service</td><td>notification-service</td></tr>
+<tr><td>Infisical</td><td>User declined wrapping compose with <code>infisical run</code>; no injection into containers</td><td>startup loader reading <code>/api/v4/secrets</code></td><td><code>InfisicalEnvironmentPostProcessor</code>, notification-service</td></tr>
+<tr><td>Redis</td><td>APISIX limits are per IP only; OTP cost needs per-recipient limits</td><td>per-recipient limits counted in Postgres <code>send_log</code>, not Redis</td><td><code>NotificationDispatcher</code></td></tr>
+<tr><td>Redis ACL</td><td>Infisical's key names unknown, so its user is not prefix-restricted</td><td>nothing (open item)</td><td><code>infra/redis/entrypoint.sh</code></td></tr>
+<tr><td>RabbitMQ</td><td>Not used yet: partner queue is Postgres plus in-process workers</td><td>delivery workers and retry policy in code</td><td><code>DeliveryWorker</code>, <code>CallbackWorker</code>, <code>RetryPolicy</code></td></tr>
+<tr><td>RustFS / S3</td><td>Presigned URLs depend on the host; no bucket bootstrap</td><td>public-endpoint presigning, bucket auto-create, image re-encoding</td><td><code>S3AvatarStorage</code>, <code>S3ObjectStorage</code>, image processors</td></tr>
+<tr><td>Grafana stack</td><td>Spring services export metrics by scraping only</td><td>none; traces go through the collector, metrics via <code>/actuator/prometheus</code></td><td>service <code>application.yml</code></td></tr>
+</tbody></table></div></div>
+
+<div class="pager"><a class="prev" href="02-setup.html"><small>Previous</small>2. Setup and running</a><a class="next" href="04-services.html"><small>Next</small>4. Services</a></div>
+<p class="footer">Adera backend documentation &middot; last verified 2026-10-25 &middot; <a href="../index.html">contents</a></p>
+</main>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

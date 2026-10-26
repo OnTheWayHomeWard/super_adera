@@ -1,0 +1,23 @@
+# secrets
+!.env.example
+docs/*.env
+docs/*credentials*
+*.pem
+*service-account*.json
+
+# local data
+infra/**/data/
+*.log
+
+# tooling
+node_modules/
+build/
+.gradle/
+.idea/
+.vscode/
+infra/backups/
+tests/e2e/.staff-totp-*.json
+
+# seed_scenarios.py: its state (ids) and partner private keys
+tests/e2e/.seed-scenarios-state.json*
+tests/e2e/.seed-keys/

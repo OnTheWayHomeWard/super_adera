@@ -1,0 +1,27 @@
+# APISIX in standalone (file-driven) mode: no etcd, no admin API.
+# Routes live in apisix.yaml and hot-reload within ~1 second of a change.
+deployment:
+  role: data_plane
+  role_data_plane:
+    config_provider: yaml
+
+apisix:
+  node_listen: 9080
+
+# This list REPLACES APISIX's defaults: only the plugins named here exist.
+# To use a new plugin in apisix.yaml, add it here first (and restart apisix).
+plugins:
+  - request-id
+  - cors
+  - prometheus
+  - opentelemetry
+  - limit-count
+  - forward-auth
+  - proxy-rewrite
+  - mocking
+
+plugin_attr:
+  prometheus:
+    export_addr:
+      ip: 0.0.0.0
+      port: 9091

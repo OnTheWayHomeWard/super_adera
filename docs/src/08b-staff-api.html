@@ -1,0 +1,1991 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>8b. Staff / dashboard API | Adera docs</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+<button id="menu-btn" type="button" aria-label="Toggle menu">Menu</button>
+<a class="brand" href="../index.html">Adera docs</a>
+<span class="spacer"></span>
+<a href="../index.html">Contents</a>
+<button id="theme-btn" type="button" aria-label="Toggle light or dark theme">Theme</button>
+</header>
+<div class="layout">
+<nav class="sidebar" aria-label="Sections">
+<ul><li><a href="../index.html" class="">Home / contents</a></li></ul>
+<h4>Sections</h4><ul>
+<li><a href="01-overview.html">1. Overview</a>
+</li>
+<li><a href="02-setup.html">2. Setup and running</a>
+</li>
+<li><a href="03-tools.html">3. Tools</a>
+</li>
+<li><a href="04-services.html">4. Services</a>
+</li>
+<li><a href="05-communication.html">5. How it communicates</a>
+</li>
+<li><a href="06-security.html">6. Security model</a>
+</li>
+<li><a href="07-data.html">7. Data</a>
+</li>
+<li><a href="08-endpoints.html">8. Endpoint reference</a>
+</li>
+<li><a href="09-guides.html">9. Guides</a>
+</li>
+<li><a href="10-reference.html">10. Reference</a>
+</li>
+<li><a href="11-backoffice.html">11. Backoffice (staff dashboard)</a>
+</li>
+<li><a href="12-backoffice-guide.html">12. Backoffice guide (staff manual)</a>
+</li>
+<li><a href="13-sample-data.html">13. Sample data (test scenarios)</a>
+</li>
+</ul>
+<h4>Endpoints</h4><ul>
+<li><a href="08a-user-api.html">8a. End-user API</a>
+</li>
+<li><a href="08b-staff-api.html" class=current>8b. Staff / dashboard API</a>
+<ul><li><a href="#how-it-works">How staff calls work</a></li><li><a href="#me">Who am I</a></li><li><a href="#apps">Mini apps</a></li><li><a href="#config">Capabilities, payment settings, limits, addresses</a></li><li><a href="#keys">Partner keys</a></li><li><a href="#moderation">Reviews and reports</a></li><li><a href="#audit-staff">Audit log and staff accounts</a></li><li><a href="#dashboard-users">Dashboard counts and users</a></li><li><a href="#templates">Notification templates</a></li><li><a href="#delivery-log">Delivery log and usage</a></li></ul>
+</li>
+<li><a href="08c-partner-api.html">8c. Partner API</a>
+</li>
+<li><a href="08d-internal-api.html">8d. Internal API</a>
+</li>
+<li><a href="08e-kratos-flows.html">8e. Kratos flows</a>
+</li>
+<li><a href="08f-operational.html">8f. Operational endpoints</a>
+</li>
+</ul>
+</nav>
+<main>
+<h1>8b. Staff / dashboard admin API</h1>
+<p class="lead">Everything the staff dashboard calls: mini-app management, capabilities, limits, allowed server addresses, partner keys, reviews and reports, audit, staff accounts, notification templates and the delivery log. 38 endpoints, captured live (the six added for the backoffice are in <a href="#dashboard-users">Dashboard counts and registered users</a>; filters were added to the audit log, notification list and reports).</p>
+
+<section>
+<h2 id="how-it-works">How staff calls work</h2>
+<ul>
+<li><strong>Base URL:</strong> <code>$BASE</code> = <code>http://127.0.0.1:9080</code> in development. All paths start with <code>/admin/api/v1</code>.</li>
+<li><strong>Who:</strong> an active staff member with an <strong>aal2</strong> Kratos session: the emailed one-time code <em>and</em> an authenticator-app code. Get the token with <a href="09-guides.html#staff-login">the staff login guide</a> and the <a href="08e-kratos-flows.html">Kratos flows</a>. Send it as <code>Authorization: Bearer $TOKEN</code>.</li>
+<li><strong>What the gateway does:</strong> forward-auth to registry-service <code>/internal/staff/verify</code>, then it sets <code>X-Staff-Id</code> and <code>X-Staff-Role</code> and forwards. Clients never send those headers (a client-sent value is overwritten). See <a href="05-communication.html#staff-request">the staff request path</a>.</li>
+<li><strong>Roles:</strong> <code>VIEWER</code> reads; <code>ADMIN</code> changes things; <code>SUPER_ADMIN</code> manages staff and revives killed apps. The role is read from the live Kratos session on every call, so a role change applies at once with no new login. A too-low role gets <code>403 insufficient_role</code>.</li>
+<li><strong>Routing:</strong> <code>/admin/api/v1/notification/*</code> is served by notification-service (route <code>admin-notification</code>); everything else under <code>/admin/api/v1</code> by registry-service (route <code>admin-api</code>). Both use the same staff check and the same 300 per minute limit.</li>
+<li><strong>Bodies are JSON</strong> (<code>Content-Type: application/json</code>) except the logo upload (multipart). <strong>Unknown fields are rejected</strong> with <code>400 validation_failed</code> on every write, so a typo never silently does nothing. Absent field = unchanged, <code>null</code> = clear (where the field is optional).</li>
+<li><strong>Every change is audited</strong> (actor, role, IP, target) and can be read at <a href="#ep-staff-get-audit">GET /audit</a>.</li>
+<li><strong>Error shape:</strong> <code>{"error":"&lt;code&gt;"}</code>, plus <code>"fields":{"&lt;field&gt;":"&lt;message&gt;"}</code> for validation (every problem is reported at once) or details such as <code>missing</code>. Notification-service endpoints use the same shape.</li>
+</ul>
+<p>The examples assume:</p>
+<pre><code>BASE=http://127.0.0.1:9080
+TOKEN=...   # aal2 staff session token (never commit or share it)
+APP=...     # a mini app id (UUID)</code></pre>
+<h3 id="common-errors">Errors every staff endpoint can return</h3>
+<div class="table-wrap"><table><thead><tr><th>Status</th><th><code>error</code></th><th>When it happens</th></tr></thead><tbody><tr><td>401</td><td><code>unauthorized</code></td><td>No <code>Authorization</code> header, or an invalid, expired or revoked session token. Returned by the gateway's forward-auth (from registry-service).</td></tr><tr><td>403</td><td><code>mfa_required</code></td><td>The session is only aal1 (emailed code only), or Kratos refuses it because an authenticator app is enrolled but not used in this session. Do the authenticator step.</td></tr><tr><td>403</td><td><code>not_staff</code></td><td>A valid session, but the person is not an ACTIVE staff member (customers get this).</td></tr><tr><td>429</td><td>(gateway body)</td><td>More than 300 requests in 60 s from this IP.</td></tr><tr><td>503</td><td><code>identity_service_unavailable</code></td><td>Kratos could not be reached (the gateway answers 503 if the verify call itself fails).</td></tr></tbody></table></div>
+<p>Real examples:</p>
+<pre class="out nocopy"><code>No token:
+HTTP 401  {"error": "unauthorized"}</code></pre>
+<pre class="out nocopy"><code>Token from the emailed code only (aal1):
+HTTP 403  {"error": "mfa_required"}</code></pre>
+<pre class="out nocopy"><code>A VIEWER trying to change something:
+request body: {"slug": "nope", "name": {"en": "Nope"}}
+HTTP 403  {"error": "insufficient_role"}</code></pre>
+</section>
+
+<section><h2 id="me">Who am I</h2>
+<details class="endpoint" id="ep-staff-get-me"><summary><span class="method m-get">GET</span><span class="path">/admin/api/v1/me</span><span class="sum">Who am I, as the dashboard sees me</span></summary><div class="body">
+<dl class="meta"><dt>Audience</dt><dd>Adera staff (the dashboard)</dd><dt>Client path</dt><dd><code>/admin/api/v1/me</code> through the gateway</dd><dt>Internal path</dt><dd>same path on registry-service :8080 (the gateway does not rewrite it)</dd><dt>Auth</dt><dd><code>Authorization: Bearer $TOKEN</code>, a Kratos session token of an <strong>aal2</strong> staff session. The gateway checks it and adds <code>X-Staff-Id</code>, <code>X-Staff-Role</code>, <code>X-Gateway-Secret</code>. Minimum role: <strong>VIEWER</strong>.</dd><dt>Rate limit</dt><dd>300 per 60 s per client IP (gateway route <code>admin-api</code>)</dd><dt>Implemented in</dt><dd><code>services/registry-service/src/main/java/app/adera/registry/auth/../staff/StaffController.java</code></dd></dl>
+<h4>Purpose</h4><p>Returns the staff member's id (the Kratos identity id) and role. The dashboard calls this after login to show who is signed in and to decide which buttons to show. It is also the cheapest way to test that a token is aal2.</p>
+<h4>Request parameters</h4><p>None.</p>
+<h4>Example request</h4><pre><code>curl -sS -i -X GET "$BASE/admin/api/v1/me" \
+  -H "Authorization: Bearer $TOKEN"</code></pre>
+<h4>Example response</h4><pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+X-Request-Id: 8c52977b-a694-4dc3-b716-014dd2a5c1f6
+
+{
+  "id": "0b648e27-181c-4650-87d7-441a5f07fb00",
+  "role": "SUPER_ADMIN"
+}</code></pre>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th><code>error</code></th><th>When it happens</th></tr></thead><tbody><tr><td>200</td><td>-</td><td>OK, any active staff role.</td></tr><tr><td>401</td><td><code>unauthorized</code></td><td>No <code>Authorization</code> header, or an invalid, expired or revoked session token. Returned by the gateway's forward-auth (from registry-service).</td></tr><tr><td>403</td><td><code>mfa_required</code></td><td>The session is only aal1 (emailed code only), or Kratos refuses it because an authenticator app is enrolled but not used in this session. Do the authenticator step.</td></tr><tr><td>403</td><td><code>not_staff</code></td><td>A valid session, but the person is not an ACTIVE staff member (customers get this).</td></tr></tbody></table></div>
+<h4>Real error responses</h4><pre class="out nocopy"><code>Without a token:
+HTTP 401  {"error": "unauthorized"}</code></pre>
+<pre class="out nocopy"><code>aal1 token:
+HTTP 403  {"error": "mfa_required"}</code></pre>
+<pre class="out nocopy"><code>After the staff member was disabled (a valid session is no longer enough):
+HTTP 401  {"error": "unauthorized"}</code></pre>
+<h4>How to use it</h4><ul><li>Call it once after login and cache the role in the dashboard; every call re-checks it anyway.</li><li><code>mfa_required</code> here means: send the user to the authenticator-app step, then retry.</li></ul>
+</div></details>
+<details class="endpoint" id="ep-staff-get-system"><summary><span class="method m-get">GET</span><span class="path">/admin/api/v1/system</span><span class="sum">Which environment is this deployment (DEV or PROD)?</span></summary><div class="body">
+<dl class="meta"><dt>Audience</dt><dd>Adera staff (the dashboard)</dd><dt>Client path</dt><dd><code>/admin/api/v1/system</code> through the gateway</dd><dt>Internal path</dt><dd>same path on registry-service :8080 (the gateway does not rewrite it)</dd><dt>Auth</dt><dd><code>Authorization: Bearer $TOKEN</code>, a Kratos session token of an <strong>aal2</strong> staff session. The gateway checks it and adds <code>X-Staff-Id</code>, <code>X-Staff-Role</code>, <code>X-Gateway-Secret</code>. Minimum role: <strong>VIEWER</strong>.</dd><dt>Rate limit</dt><dd>300 per 60 s per client IP (gateway route <code>admin-api</code>)</dd><dt>Implemented in</dt><dd><code>services/registry-service/src/main/java/app/adera/registry/dashboard/SystemController.java</code></dd></dl>
+<h4>Purpose</h4><p>Returns the environment this deployment runs, from the <code>ADERA_ENV</code> setting. A deployment is exactly one environment; staff can store allowed addresses and keys for both DEV and PROD, but only the one reported here is active. The dashboard uses it to mark the active environment on the Environments and Keys tabs and as the default of the Usage tab. Routed by the existing <code>admin-api</code> wildcard route, so the gateway needed no change.</p>
+<h4>Request parameters</h4><p>None.</p>
+<h4>Example request</h4><pre><code>curl -sS -i -X GET "$BASE/admin/api/v1/system" \
+  -H "Authorization: Bearer $TOKEN"</code></pre>
+<h4>Example response</h4><pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+
+{
+  "environment": "DEV"
+}</code></pre><p class="masked">Illustrative: added with the DEV/PROD change; the value is <code>PROD</code> on a prod deployment.</p>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th><code>error</code></th><th>When it happens</th></tr></thead><tbody><tr><td>200</td><td>-</td><td>OK, any active staff role.</td></tr><tr><td>401</td><td><code>unauthorized</code></td><td>No or invalid session token (from the gateway's forward-auth).</td></tr><tr><td>403</td><td><code>mfa_required</code> / <code>not_staff</code></td><td>Same rules as <code>/me</code>.</td></tr></tbody></table></div>
+</div></details>
+</section>
+<section><h2 id="apps">Mini apps</h2>
+<details class="endpoint" id="ep-staff-get-apps"><summary><span class="method m-get">GET</span><span class="path">/admin/api/v1/apps</span><span class="sum">List mini apps</span></summary><div class="body">
+<dl class="meta"><dt>Audience</dt><dd>Adera staff (the dashboard)</dd><dt>Client path</dt><dd><code>/admin/api/v1/apps</code> through the gateway</dd><dt>Internal path</dt><dd>same path on registry-service :8080 (the gateway does not rewrite it)</dd><dt>Auth</dt><dd><code>Authorization: Bearer $TOKEN</code>, a Kratos session token of an <strong>aal2</strong> staff session. The gateway checks it and adds <code>X-Staff-Id</code>, <code>X-Staff-Role</code>, <code>X-Gateway-Secret</code>. Minimum role: <strong>VIEWER</strong>.</dd><dt>Rate limit</dt><dd>300 per 60 s per client IP (gateway route <code>admin-api</code>)</dd><dt>Implemented in</dt><dd><code>services/registry-service/src/main/java/app/adera/registry/app/AppAdminController.java</code></dd></dl>
+<h4>Purpose</h4><p>Lists apps ordered by <code>priority</code> then slug (at most 200 when unfiltered). The admin view includes internal fields (<code>status</code>, <code>allowedOrigins</code>, <code>extra</code>, <code>logoImageId</code>) that the public catalog hides.</p>
+<h4>Request parameters</h4><div class="table-wrap"><table><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why it exists</th></tr></thead><tbody><tr><td>status</td><td>query</td><td>string</td><td>no</td><td><code>DRAFT</code>, <code>LIVE</code>, <code>PAUSED</code> or <code>KILLED</code> (case-insensitive). Other values: 400.</td><td>Filter the dashboard list.</td></tr></tbody></table></div>
+<h4>Example request</h4><pre><code>curl -sS -i -X GET "$BASE/admin/api/v1/apps?status=DRAFT" \
+  -H "Authorization: Bearer $TOKEN"</code></pre>
+<h4>Example response</h4><pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+X-Request-Id: 13c305af-b72f-43de-b791-11e0acb8d332
+
+[
+  {
+    "id": "41548c1e-b03e-412a-bbbe-1e46343505b9",
+    "slug": "demo-fixit-f841",
+    "name": {
+      "am": "ዴሞ ፊክስኢት",
+      "en": "Demo FixIt"
+    },
+    "description": {
+      "en": "Find a technician near you."
+    },
+    "logoImageId": null,
+    "logoUrl": null,
+    "brandColor": "#0F9D58",
+    "categories": [
+      "home",
+      "services"
+    ],
+    "markets": [
+      "ET"
+    ],
+    "publisher": {
+      "name": "FixIt Demo PLC",
+      "legalName": null,
+      "supportEmail": "support@example.com",
+      "supportPhone": null,
+      "website": "https://fixit.example.com"
+    },
+    "entryUrl": "https://app.fixit.example.com/",
+    "allowedOrigins": [
+      "https://app.fixit.example.com"
+    ],
+    "status": "DRAFT",
+    "priority": 10,
+    "ratingAvg": 0.0,
+    "ratingCount": 0,
+    "extra": {
+      "tier": "pilot"
+    },
+    "createdAt": "2026-10-25T06:06:07.072443Z",
+    "updatedAt": "2026-10-25T06:06:07.072443Z"
+  }
+]</code></pre>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th><code>error</code></th><th>When it happens</th></tr></thead><tbody><tr><td>200</td><td>-</td><td>OK (an empty list if nothing matches).</td></tr><tr><td>400</td><td><code>validation_failed</code></td><td><code>status</code> is not one of the four values (<code>fields.status</code>).</td></tr><tr><td>401</td><td><code>unauthorized</code></td><td>No <code>Authorization</code> header, or an invalid, expired or revoked session token. Returned by the gateway's forward-auth (from registry-service).</td></tr><tr><td>403</td><td><code>mfa_required</code></td><td>The session is only aal1 (emailed code only), or Kratos refuses it because an authenticator app is enrolled but not used in this session. Do the authenticator step.</td></tr><tr><td>403</td><td><code>not_staff</code></td><td>A valid session, but the person is not an ACTIVE staff member (customers get this).</td></tr></tbody></table></div>
+<h4>Real error responses</h4><pre class="out nocopy"><code>Bad filter:
+HTTP 400  {"error": "validation_failed", "fields": {"status": "must be DRAFT, LIVE, PAUSED or KILLED"}}</code></pre>
+<h4>How to use it</h4><ul><li><code>logoUrl</code> is a signed link valid for 60 minutes (<code>STORAGE_PRESIGN_MINUTES</code>); fetch a fresh list rather than storing it.</li><li><code>ratingAvg</code> and <code>ratingCount</code> count only VISIBLE reviews.</li></ul>
+</div></details>
+<details class="endpoint" id="ep-staff-post-apps"><summary><span class="method m-post">POST</span><span class="path">/admin/api/v1/apps</span><span class="sum">Create a mini app (as DRAFT)</span></summary><div class="body">
+<dl class="meta"><dt>Audience</dt><dd>Adera staff (the dashboard)</dd><dt>Client path</dt><dd><code>/admin/api/v1/apps</code> through the gateway</dd><dt>Internal path</dt><dd>same path on registry-service :8080 (the gateway does not rewrite it)</dd><dt>Auth</dt><dd><code>Authorization: Bearer $TOKEN</code>, a Kratos session token of an <strong>aal2</strong> staff session. The gateway checks it and adds <code>X-Staff-Id</code>, <code>X-Staff-Role</code>, <code>X-Gateway-Secret</code>. Minimum role: <strong>ADMIN</strong>.</dd><dt>Rate limit</dt><dd>300 per 60 s per client IP (gateway route <code>admin-api</code>)</dd><dt>Implemented in</dt><dd><code>services/registry-service/src/main/java/app/adera/registry/app/AppAdminController.java, AppPatch.java, AppService.java</code></dd></dl>
+<h4>Purpose</h4><p>Creates the app in status <code>DRAFT</code> with empty allowed-address lists for DEV and PROD (so nobody can call until an admin adds addresses). The slug is permanent. Next steps: logo, capabilities, limits, addresses, key, templates, then LIVE: see <a href="09-guides.html#register-app">the registration guide</a>.</p>
+<h4>Request parameters</h4><div class="table-wrap"><table><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why it exists</th></tr></thead><tbody><tr><td>slug</td><td>body</td><td>string</td><td>create only</td><td>2-40 chars, lowercase letters, digits and dashes, not starting or ending with a dash. Permanent: any later change is refused.</td><td>Stable id used in links; chosen once.</td></tr><tr><td>name</td><td>body</td><td>object</td><td>create: yes</td><td>Map of language to text (<code>en</code>, <code>am</code>, <code>om</code>), each up to 100 chars; <code>en</code> is mandatory.</td><td>Shown in the app in the user's language, English as the fallback.</td></tr><tr><td>description</td><td>body</td><td>object</td><td>no</td><td>Same shape, each text up to 1000 chars.</td><td>Store-style description.</td></tr><tr><td>brandColor</td><td>body</td><td>string or null</td><td>no</td><td><code>#RRGGBB</code> (stored upper case).</td><td>Colour of the app tile.</td></tr><tr><td>categories</td><td>body</td><td>string list</td><td>no</td><td>Up to 10; each lowercase word matching <code>^[a-z][a-z0-9_-]{1,30}$</code>.</td><td>Catalog filters.</td></tr><tr><td>markets</td><td>body</td><td>string list</td><td>no</td><td>Non-empty list from <code>ET</code>, <code>US</code>. Default on create: <code>["ET"]</code>.</td><td>Which markets may see the app (<code>?market=</code> on the user catalog).</td></tr><tr><td>publisherName, publisherLegalName</td><td>body</td><td>string or null</td><td>no</td><td>Up to 150 / 200 chars.</td><td>Who is behind the app (shown to users).</td></tr><tr><td>supportEmail</td><td>body</td><td>string or null</td><td>needed for LIVE</td><td>Valid email; trimmed and lower-cased.</td><td>Users and staff need a contact; required before going LIVE.</td></tr><tr><td>supportPhone</td><td>body</td><td>string or null</td><td>no</td><td>Up to 30 chars.</td><td>Optional contact.</td></tr><tr><td>website</td><td>body</td><td>string or null</td><td>no</td><td><code>https://</code> URL, up to 500 chars, no spaces.</td><td>Publisher site.</td></tr><tr><td>entryUrl</td><td>body</td><td>string or null</td><td>no</td><td><code>https://</code> URL (or <code>http://localhost</code> / <code>http://127.0.0.1</code> for development), up to 500 chars.</td><td>Where the mini app is served; used by the frontend bridge later.</td></tr><tr><td>allowedOrigins</td><td>body</td><td>string list</td><td>no</td><td>Up to 10 origins like <code>https://app.example.com</code> (scheme, host, optional port, no path).</td><td>Browser origins allowed to talk to the bridge (stored, not enforced yet).</td></tr><tr><td>priority</td><td>body</td><td>integer</td><td>no</td><td>0 to 100000; lower is shown first. Default 100.</td><td>Ordering in the catalog.</td></tr><tr><td>extra</td><td>body</td><td>object</td><td>no</td><td>JSON object up to 16384 bytes. On update it is merged key by key; a <code>null</code> value removes a key.</td><td>Room for fields we did not plan, without a migration.</td></tr></tbody></table></div>
+<h4>Example request</h4><pre><code>curl -sS -i -X POST "$BASE/admin/api/v1/apps" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"slug": "demo-fixit-f841", "name": {"en": "Demo FixIt", "am": "ዴሞ ፊክስኢት"}, "description": {"en": "Find a technician near you."}, "brandColor": "#0F9D58", "categories": ["home", "services"], "markets": ["ET"], "publisherName": "FixIt Demo PLC", "supportEmail": "support@example.com", "website": "https://fixit.example.com", "entryUrl": "https://app.fixit.example.com/", "allowedOrigins": ["https://app.fixit.example.com"], "priority": 10, "extra": {"tier": "pilot"}}'</code></pre>
+<h4>Example response</h4><pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+X-Request-Id: 37c535f1-a821-4072-bb20-8494c5728f13
+
+{
+  "id": "41548c1e-b03e-412a-bbbe-1e46343505b9",
+  "slug": "demo-fixit-f841",
+  "name": {
+    "en": "Demo FixIt",
+    "am": "ዴሞ ፊክስኢት"
+  },
+  "description": {
+    "en": "Find a technician near you."
+  },
+  "logoImageId": null,
+  "logoUrl": null,
+  "brandColor": "#0F9D58",
+  "categories": [
+    "home",
+    "services"
+  ],
+  "markets": [
+    "ET"
+  ],
+  "publisher": {
+    "name": "FixIt Demo PLC",
+    "legalName": null,
+    "supportEmail": "support@example.com",
+    "supportPhone": null,
+    "website": "https://fixit.example.com"
+  },
+  "entryUrl": "https://app.fixit.example.com/",
+  "allowedOrigins": [
+    "https://app.fixit.example.com"
+  ],
+  "status": "DRAFT",
+  "priority": 10,
+  "ratingAvg": 0,
+  "ratingCount": 0,
+  "extra": {
+    "tier": "pilot"
+  },
+  "createdAt": "2026-10-25T06:06:07.072443003Z",
+  "updatedAt": "2026-10-25T06:06:07.072443003Z"
+}</code></pre>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th><code>error</code></th><th>When it happens</th></tr></thead><tbody><tr><td>200</td><td>-</td><td>Created (this API answers 200, not 201). The body is the admin view of the app.</td></tr><tr><td>400</td><td><code>validation_failed</code></td><td>Missing or malformed slug, no English name, unknown field, or any value outside the limits above (<code>fields</code> lists each).</td></tr><tr><td>403</td><td><code>insufficient_role</code></td><td>Role is VIEWER.</td></tr><tr><td>409</td><td><code>slug_taken</code></td><td>An app with this slug exists.</td></tr><tr><td>401</td><td><code>unauthorized</code></td><td>No <code>Authorization</code> header, or an invalid, expired or revoked session token. Returned by the gateway's forward-auth (from registry-service).</td></tr><tr><td>403</td><td><code>mfa_required</code></td><td>The session is only aal1 (emailed code only), or Kratos refuses it because an authenticator app is enrolled but not used in this session. Do the authenticator step.</td></tr><tr><td>403</td><td><code>not_staff</code></td><td>A valid session, but the person is not an ACTIVE staff member (customers get this).</td></tr></tbody></table></div>
+<h4>Real error responses</h4><pre class="out nocopy"><code>Empty body:
+request body: {}
+HTTP 400  {"error": "validation_failed", "fields": {"slug": "required: 2-40 chars, lowercase letters, digits and dashes (e.g. adera-fix)", "name": "required (at least an English name)"}}</code></pre>
+<pre class="out nocopy"><code>Several problems at once:
+request body: {"slug": "Bad Slug!", "name": {"en": "X"}, "colour": "red"}
+HTTP 400  {"error": "validation_failed", "fields": {"colour": "unknown field", "slug": "required: 2-40 chars, lowercase letters, digits and dashes (e.g. adera-fix)"}}</code></pre>
+<pre class="out nocopy"><code>Duplicate slug:
+request body: {"slug": "demo-fixit-f841", "name": {"en": "Again"}}
+HTTP 409  {"error": "slug_taken"}</code></pre>
+<h4>How to use it</h4><ul><li>Keep the returned <code>id</code>: every other call uses it.</li><li>Create is not idempotent: sending it twice gives <code>slug_taken</code>.</li></ul>
+</div></details>
+<details class="endpoint" id="ep-staff-get-apps-id"><summary><span class="method m-get">GET</span><span class="path">/admin/api/v1/apps/{appId}</span><span class="sum">One app with all its configuration</span></summary><div class="body">
+<dl class="meta"><dt>Audience</dt><dd>Adera staff (the dashboard)</dd><dt>Client path</dt><dd><code>/admin/api/v1/apps/{appId}</code> through the gateway</dd><dt>Internal path</dt><dd>same path on registry-service :8080 (the gateway does not rewrite it)</dd><dt>Auth</dt><dd><code>Authorization: Bearer $TOKEN</code>, a Kratos session token of an <strong>aal2</strong> staff session. The gateway checks it and adds <code>X-Staff-Id</code>, <code>X-Staff-Role</code>, <code>X-Gateway-Secret</code>. Minimum role: <strong>VIEWER</strong>.</dd><dt>Rate limit</dt><dd>300 per 60 s per client IP (gateway route <code>admin-api</code>)</dd><dt>Implemented in</dt><dd><code>services/registry-service/src/main/java/app/adera/registry/app/AppService.java (detail)</code></dd></dl>
+<h4>Purpose</h4><p>The complete picture of an app in one call: the app itself, every capability row, payment settings, notification limits, both environments with their allowed addresses, and all keys (public metadata only, never key material).</p>
+<h4>Request parameters</h4><div class="table-wrap"><table><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why it exists</th></tr></thead><tbody><tr><td>appId</td><td>path</td><td>UUID</td><td>yes</td><td>An existing app id.</td><td>Identifies the app.</td></tr></tbody></table></div>
+<h4>Example request</h4><pre><code>curl -sS -i -X GET "$BASE/admin/api/v1/apps/$APP" \
+  -H "Authorization: Bearer $TOKEN"</code></pre>
+<h4>Example response</h4><pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+X-Request-Id: 5aed5998-43ac-4e6e-88f2-816c265ed65a
+
+{
+  "app": {
+    "id": "41548c1e-b03e-412a-bbbe-1e46343505b9",
+    "slug": "demo-fixit-f841",
+    "name": {
+      "am": "ዴሞ ፊክስኢት",
+      "en": "Demo FixIt"
+    },
+    "description": {
+      "am": "ቴክኒሻን ያግኙ",
+      "en": "Find a trusted technician near you."
+    },
+    "logoImageId": "48d4ac5a-64e5-4d2d-b91d-32d38a5625ba",
+    "logoUrl": "http://127.0.0.1:9000/adera-media/apps/41548c1e-b03e-412a-bbbe-1e46343505b9/logo/48d4ac5a-64e5-4d2d-b91d-32d38a5625ba.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&amp;X-Amz-Credential=&lt;masked&gt;&amp;X-Amz-Date=&lt;masked&gt;&amp;X-Amz-Expires=3600&amp;X-Amz-SignedHeaders=host&amp;X-Amz-Signature=&lt;masked&gt;",
+    "brandColor": "#0F9D58",
+    "categories": [
+      "home",
+      "services"
+    ],
+    "markets": [
+      "ET"
+    ],
+    "publisher": {
+      "name": "FixIt Demo PLC",
+      "legalName": null,
+      "supportEmail": "support@example.com",
+      "supportPhone": null,
+      "website": "https://fixit.example.com"
+    },
+    "entryUrl": "https://app.fixit.example.com/",
+    "allowedOrigins": [
+      "https://app.fixit.example.com"
+    ],
+    "status": "LIVE",
+    "priority": 20,
+    "ratingAvg": 4.0,
+    "ratingCount": 1,
+    "extra": {
+      "tier": "pilot",
+      "region": "addis"
+    },
+    "createdAt": "2026-10-25T06:06:07.072443Z",
+    "updatedAt": "2026-10-25T06:07:59.713097Z"
+  },
+  "capabilities": [
+    {
+      "capability": "location.fine",
+      "state": "DENIED",
+      "reason": {},
+      "updatedAt": "2026-10-25T06:06:09.288142Z"
+    },
+    {
+      "capability": "notify.email",
+      "state": "GRANTED",
+      "reason": {},
+      "updatedAt": "2026-10-25T06:07:43.407121Z"
+    },
+    {
+      "capability": "notify.inapp",
+      "state": "GRANTED",
+      "reason": {},
+      "updatedAt": "2026-10-25T06:06:08.909384Z"
+    },
+    {
+      "capability": "notify.sms",
+      "state": "GRANTED",
+      "reason": {},
+      "updatedAt": "2026-10-25T06:07:43.309330Z"
+    },
+    {
+      "capability": "user.full_name",
+      "state": "GRANTED",
+      "reason": {
+        "am": "ቴክኒሻኖች እርስዎን እንዲያውቁ",
+        "en": "To show technicians who you are"
+      },
+      "updatedAt": "2026-10-25T06:06:09.076096Z"
+    }
+  ],
+  "payment": {
+    "allowedCurrencies": [
+      "ETB"
+    ],
+    "allowHold": false,
+    "minAmountMinor": 1000,
+    "maxAmountMinor": 5000000
+  },
+  "notificationLimits": [
+    {
+      "channel": "EMAIL",
+      "maxPerUserPerDay": 5,
+      "maxPerDay": null,
+      "maxDistinctUsersPerDay": 0,
+      "maxTotal": null
+    },
+    {
+      "channel": "IN_APP",
+      "maxPerUserPerDay": 20,
+      "maxPerDay": 10000,
+      "maxDistinctUsersPerDay": 10000,
+      "maxTotal": null
+    },
+    {
+      "channel": "SMS",
+      "maxPerUserPerDay": 2,
+      "maxPerDay": 100,
+      "maxDistinctUsersPerDay": 100,
+      "maxTotal": 1000
+    }
+  ],
+  "environments": [
+    {
+      "environment": "DEV",
+      "allowedCidrs": [
+        "127.0.0.1/32",
+        "172.16.0.0/12",
+        "192.168.0.0/16",
+        "10.0.0.0/8"
+      ]
+    },
+    {
+      "environment": "PROD",
+      "allowedCidrs": [
+        "127.0.0.1/32",
+        "172.16.0.0/12",
+        "192.168.0.0/16",
+        "10.0.0.0/8"
+      ]
+    }
+  ],
+  "keys": [
+    {
+      "keyId": "ak_dev_c1ac6a64c03dba0e61e245a9",
+      "environment": "DEV",
+      "algorithm": "RS256",
+      "fingerprint": "fe3a9d4646ab673ff6bf0e4d8e80ad07a3164abd07829f7bcafac5a558615c1b",
+      "label": "fill 3",
+      "status": "ACTIVE",
+      "expiresAt": null,
+      "createdAt": "2026-10-25T06:06:21.271143Z",
+      "revokedAt": null
+    },
+    {
+      "keyId": "ak_dev_69d83b522ee14b43de30961f",
+      "environment": "DEV",
+      "algorithm": "RS256",
+      "fingerprint": "fe3a9d4646ab673ff6bf0e4d8e80ad07a3164abd07829f7bcafac5a558615c1b",
+      "label": "fill 2",
+      "status": "ACTIVE",
+      "expiresAt": null,
+      "createdAt": "2026-10-25T06:06:21.197031Z",
+      "revokedAt": null
+    },
+    {
+      "keyId": "ak_dev_b5a5edafdde5860671cc188a",
+      "environment": "DEV",
+      "algorithm": "RS256",
+      "fingerprint": "fe3a9d4646ab673ff6bf0e4d8e80ad07a3164abd07829f7bcafac5a558615c1b",
+      "label": "fill 1",
+      "status": "ACTIVE",
+      "expiresAt": null,
+      "createdAt": "2026-10-25T06:06:21.125918Z",
+      "revokedAt": null
+    },
+    {
+      "keyId": "ak_dev_c03b8db166efb69bc09f66cf",
+      "environment": "DEV",
+      "algorithm": "RS256",
+      "fingerprint": "fe3a9d4646ab673ff6bf0e4d8e80ad07a3164abd07829f7bcafac5a558615c1b",
+      "label": "fill 0",
+      "status": "ACTIVE",
+      "expiresAt": null,
+      "createdAt": "2026-10-25T06:06:21.054853Z",
+      "revokedAt": null
+    },
+    {
+      "keyId": "ak_dev_8acbea3d0147049a72ed8464",
+      "environment": "DEV",
+      "algorithm": "RS256",
+      "fingerprint": "9a42581c081f3ee783e6f11ad7681c4d2c7d138fe70b01e29f8a1fb6eee51d1f",
+      "label": "generated dev key",
+      "status": "REVOKED",
+      "expiresAt": null,
+      "createdAt": "2026-10-25T06:06:20.760665Z",
+      "revokedAt": "2026-10-25T06:06:20.938855Z"
+    },
+    {
+      "keyId": "ak_dev_bf6323335f4d013bd838b3a6",
+      "environment": "DEV",
+      "algorithm": "RS256",
+      "fingerprint": "fe3a9d4646ab673ff6bf0e4d8e80ad07a3164abd07829f7bcafac5a558615c1b",
+      "label": "dev",
+      "status": "ACTIVE",
+      "expiresAt": "2027-12-31T00:00:00Z",
+      "createdAt": "2026-10-25T06:06:10.554483Z",
+      "revokedAt": null
+    },
+    {
+      "keyId": "ak_prod_963c74c95700a968a25fb72a",
+      "environment": "PROD",
+      "algorithm": "RS256",
+      "fingerprint": "fe3a9d4646ab673ff6bf0e4d8e80ad07a3164abd07829f7bcafac5a558615c1b",
+      "label": "production server",
+      "status": "REVOKED",
+      "expiresAt": null,
+      "createdAt": "2026-10-25T06:06:10.429433Z",
+      "revokedAt": "2026-10-25T06:07:59.790629Z"
+    }
+  ]
+}</code></pre>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th><code>error</code></th><th>When it happens</th></tr></thead><tbody><tr><td>200</td><td>-</td><td>OK.</td></tr><tr><td>400</td><td><code>invalid_request</code></td><td><code>appId</code> is not a UUID.</td></tr><tr><td>404</td><td><code>not_found</code></td><td>No such app.</td></tr><tr><td>401</td><td><code>unauthorized</code></td><td>No <code>Authorization</code> header, or an invalid, expired or revoked session token. Returned by the gateway's forward-auth (from registry-service).</td></tr><tr><td>403</td><td><code>mfa_required</code></td><td>The session is only aal1 (emailed code only), or Kratos refuses it because an authenticator app is enrolled but not used in this session. Do the authenticator step.</td></tr><tr><td>403</td><td><code>not_staff</code></td><td>A valid session, but the person is not an ACTIVE staff member (customers get this).</td></tr></tbody></table></div>
+<h4>Real error responses</h4><pre class="out nocopy"><code>Unknown app:
+HTTP 404  {"error": "not_found"}</code></pre>
+<pre class="out nocopy"><code>Not a UUID:
+HTTP 400  {"error": "invalid_request"}</code></pre>
+<h4>How to use it</h4><ul><li>The shape is <code>{app, capabilities[], payment, notificationLimits[], environments[], keys[]}</code>. <code>payment</code> is <code>null</code> until payment settings are saved.</li><li>This is the screen model for an app detail page in the dashboard.</li></ul>
+</div></details>
+<details class="endpoint" id="ep-staff-patch-apps-id"><summary><span class="method m-patch">PATCH</span><span class="path">/admin/api/v1/apps/{appId}</span><span class="sum">Change app details (partial update)</span></summary><div class="body">
+<dl class="meta"><dt>Audience</dt><dd>Adera staff (the dashboard)</dd><dt>Client path</dt><dd><code>/admin/api/v1/apps/{appId}</code> through the gateway</dd><dt>Internal path</dt><dd>same path on registry-service :8080 (the gateway does not rewrite it)</dd><dt>Auth</dt><dd><code>Authorization: Bearer $TOKEN</code>, a Kratos session token of an <strong>aal2</strong> staff session. The gateway checks it and adds <code>X-Staff-Id</code>, <code>X-Staff-Role</code>, <code>X-Gateway-Secret</code>. Minimum role: <strong>ADMIN</strong>.</dd><dt>Rate limit</dt><dd>300 per 60 s per client IP (gateway route <code>admin-api</code>)</dd><dt>Implemented in</dt><dd><code>services/registry-service/src/main/java/app/adera/registry/app/AppAdminController.java, AppPatch.java</code></dd></dl>
+<h4>Purpose</h4><p>Partial update: only the fields you send change. The slug can never change. <code>extra</code> is merged key by key (a <code>null</code> value deletes a key). Status is changed with its own endpoint so that going live is a deliberate act.</p>
+<h4>Request parameters</h4><div class="table-wrap"><table><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why it exists</th></tr></thead><tbody><tr><td>appId</td><td>path</td><td>UUID</td><td>yes</td><td>Existing app.</td><td>Identifies the app.</td></tr><tr><td>name</td><td>body</td><td>object</td><td>create: yes</td><td>Map of language to text (<code>en</code>, <code>am</code>, <code>om</code>), each up to 100 chars; <code>en</code> is mandatory.</td><td>Shown in the app in the user's language, English as the fallback.</td></tr><tr><td>description</td><td>body</td><td>object</td><td>no</td><td>Same shape, each text up to 1000 chars.</td><td>Store-style description.</td></tr><tr><td>brandColor</td><td>body</td><td>string or null</td><td>no</td><td><code>#RRGGBB</code> (stored upper case).</td><td>Colour of the app tile.</td></tr><tr><td>categories</td><td>body</td><td>string list</td><td>no</td><td>Up to 10; each lowercase word matching <code>^[a-z][a-z0-9_-]{1,30}$</code>.</td><td>Catalog filters.</td></tr><tr><td>markets</td><td>body</td><td>string list</td><td>no</td><td>Non-empty list from <code>ET</code>, <code>US</code>. Default on create: <code>["ET"]</code>.</td><td>Which markets may see the app (<code>?market=</code> on the user catalog).</td></tr><tr><td>publisherName, publisherLegalName</td><td>body</td><td>string or null</td><td>no</td><td>Up to 150 / 200 chars.</td><td>Who is behind the app (shown to users).</td></tr><tr><td>supportEmail</td><td>body</td><td>string or null</td><td>needed for LIVE</td><td>Valid email; trimmed and lower-cased.</td><td>Users and staff need a contact; required before going LIVE.</td></tr><tr><td>supportPhone</td><td>body</td><td>string or null</td><td>no</td><td>Up to 30 chars.</td><td>Optional contact.</td></tr><tr><td>website</td><td>body</td><td>string or null</td><td>no</td><td><code>https://</code> URL, up to 500 chars, no spaces.</td><td>Publisher site.</td></tr><tr><td>entryUrl</td><td>body</td><td>string or null</td><td>no</td><td><code>https://</code> URL (or <code>http://localhost</code> / <code>http://127.0.0.1</code> for development), up to 500 chars.</td><td>Where the mini app is served; used by the frontend bridge later.</td></tr><tr><td>allowedOrigins</td><td>body</td><td>string list</td><td>no</td><td>Up to 10 origins like <code>https://app.example.com</code> (scheme, host, optional port, no path).</td><td>Browser origins allowed to talk to the bridge (stored, not enforced yet).</td></tr><tr><td>priority</td><td>body</td><td>integer</td><td>no</td><td>0 to 100000; lower is shown first. Default 100.</td><td>Ordering in the catalog.</td></tr><tr><td>extra</td><td>body</td><td>object</td><td>no</td><td>JSON object up to 16384 bytes. On update it is merged key by key; a <code>null</code> value removes a key.</td><td>Room for fields we did not plan, without a migration.</td></tr></tbody></table></div>
+<h4>Example request</h4><pre><code>curl -sS -i -X PATCH "$BASE/admin/api/v1/apps/$APP" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"description": {"en": "Find a trusted technician near you.", "am": "ቴክኒሻን ያግኙ"}, "priority": 20, "extra": {"tier": "pilot", "region": "addis"}}'</code></pre>
+<h4>Example response</h4><pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+X-Request-Id: a4b687a5-93d5-4f45-96ee-e340671e9a86
+
+{
+  "id": "41548c1e-b03e-412a-bbbe-1e46343505b9",
+  "slug": "demo-fixit-f841",
+  "name": {
+    "am": "ዴሞ ፊክስኢት",
+    "en": "Demo FixIt"
+  },
+  "description": {
+    "en": "Find a trusted technician near you.",
+    "am": "ቴክኒሻን ያግኙ"
+  },
+  "logoImageId": null,
+  "logoUrl": null,
+  "brandColor": "#0F9D58",
+  "categories": [
+    "home",
+    "services"
+  ],
+  "markets": [
+    "ET"
+  ],
+  "publisher": {
+    "name": "FixIt Demo PLC",
+    "legalName": null,
+    "supportEmail": "support@example.com",
+    "supportPhone": null,
+    "website": "https://fixit.example.com"
+  },
+  "entryUrl": "https://app.fixit.example.com/",
+  "allowedOrigins": [
+    "https://app.fixit.example.com"
+  ],
+  "status": "DRAFT",
+  "priority": 20,
+  "ratingAvg": 0.0,
+  "ratingCount": 0,
+  "extra": {
+    "tier": "pilot",
+    "region": "addis"
+  },
+  "createdAt": "2026-10-25T06:06:07.072443Z",
+  "updatedAt": "2026-10-25T06:06:07.553579539Z"
+}</code></pre>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th><code>error</code></th><th>When it happens</th></tr></thead><tbody><tr><td>200</td><td>-</td><td>OK, the updated app.</td></tr><tr><td>400</td><td><code>validation_failed</code></td><td>Unknown field, <code>slug</code> sent (<code>the slug is permanent</code>), or an invalid value.</td></tr><tr><td>400</td><td><code>invalid_request</code></td><td><code>appId</code> not a UUID or body not JSON.</td></tr><tr><td>403</td><td><code>insufficient_role</code></td><td>VIEWER.</td></tr><tr><td>404</td><td><code>not_found</code></td><td>No such app.</td></tr><tr><td>401</td><td><code>unauthorized</code></td><td>No <code>Authorization</code> header, or an invalid, expired or revoked session token. Returned by the gateway's forward-auth (from registry-service).</td></tr><tr><td>403</td><td><code>mfa_required</code></td><td>The session is only aal1 (emailed code only), or Kratos refuses it because an authenticator app is enrolled but not used in this session. Do the authenticator step.</td></tr><tr><td>403</td><td><code>not_staff</code></td><td>A valid session, but the person is not an ACTIVE staff member (customers get this).</td></tr></tbody></table></div>
+<h4>Real error responses</h4><pre class="out nocopy"><code>Trying to change the slug:
+request body: {"slug": "other"}
+HTTP 400  {"error": "validation_failed", "fields": {"slug": "the slug is permanent and cannot be changed"}}</code></pre>
+<pre class="out nocopy"><code>Invalid values:
+request body: {"brandColor": "green", "markets": ["XX"], "entryUrl": "http://example.com"}
+HTTP 400  {"error": "validation_failed", "fields": {"brandColor": "must look like #0F9D58", "markets": "must be a non-empty list of ET, US", "entryUrl": "must be an https:// URL"}}</code></pre>
+<h4>How to use it</h4><ul><li>Send only what changed. An empty object <code>{}</code> is accepted and changes nothing except <code>updatedAt</code>.</li><li>Use the dedicated endpoints below for status, logo, capabilities, limits, addresses and keys.</li></ul>
+</div></details>
+<details class="endpoint" id="ep-staff-post-apps-id-status"><summary><span class="method m-post">POST</span><span class="path">/admin/api/v1/apps/{appId}/status</span><span class="sum">Change app status (go LIVE, pause, kill)</span></summary><div class="body">
+<dl class="meta"><dt>Audience</dt><dd>Adera staff (the dashboard)</dd><dt>Client path</dt><dd><code>/admin/api/v1/apps/{appId}/status</code> through the gateway</dd><dt>Internal path</dt><dd>same path on registry-service :8080 (the gateway does not rewrite it)</dd><dt>Auth</dt><dd><code>Authorization: Bearer $TOKEN</code>, a Kratos session token of an <strong>aal2</strong> staff session. The gateway checks it and adds <code>X-Staff-Id</code>, <code>X-Staff-Role</code>, <code>X-Gateway-Secret</code>. Minimum role: <strong>ADMIN</strong>.</dd><dt>Rate limit</dt><dd>300 per 60 s per client IP (gateway route <code>admin-api</code>)</dd><dt>Implemented in</dt><dd><code>services/registry-service/src/main/java/app/adera/registry/app/AppService.java (setStatus)</code></dd></dl>
+<h4>Purpose</h4><p>Moves an app between <code>DRAFT</code>, <code>LIVE</code>, <code>PAUSED</code> and <code>KILLED</code>.</p>
+<ul><li><code>LIVE</code> needs a logo and a support email (else <code>409 not_ready_for_live</code>).</li>
+<li>Only a <code>SUPER_ADMIN</code> may move an app <em>out of</em> <code>KILLED</code> (<code>403 only_super_admin_can_revive_killed_app</code>). KILLED is the emergency stop.</li>
+<li>On a PROD deployment the app must be LIVE; on a DEV deployment any app that is not KILLED works (the environment is the deployment's <code>ADERA_ENV</code>, not a property of the status). Partner services notice a status change within about 15 seconds (their cache).</li>
+<li>Only LIVE apps appear in the user catalog and accept reviews and reports.</li></ul>
+<h4>Request parameters</h4><div class="table-wrap"><table><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why it exists</th></tr></thead><tbody><tr><td>appId</td><td>path</td><td>UUID</td><td>yes</td><td>Existing app.</td><td>Identifies the app.</td></tr><tr><td>status</td><td>body</td><td>string</td><td>yes</td><td><code>DRAFT</code>, <code>LIVE</code>, <code>PAUSED</code>, <code>KILLED</code> (case-insensitive).</td><td>The target state.</td></tr></tbody></table></div>
+<h4>Example request</h4><pre><code>curl -sS -i -X POST "$BASE/admin/api/v1/apps/$APP/status" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"status": "LIVE"}'</code></pre>
+<h4>Example response</h4><pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+X-Request-Id: d5740ec2-6c93-477b-93c0-339240af5c57
+
+{
+  "id": "41548c1e-b03e-412a-bbbe-1e46343505b9",
+  "slug": "demo-fixit-f841",
+  "name": {
+    "am": "ዴሞ ፊክስኢት",
+    "en": "Demo FixIt"
+  },
+  "description": {
+    "am": "ቴክኒሻን ያግኙ",
+    "en": "Find a trusted technician near you."
+  },
+  "logoImageId": "48d4ac5a-64e5-4d2d-b91d-32d38a5625ba",
+  "logoUrl": "http://127.0.0.1:9000/adera-media/apps/41548c1e-b03e-412a-bbbe-1e46343505b9/logo/48d4ac5a-64e5-4d2d-b91d-32d38a5625ba.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&amp;X-Amz-Credential=&lt;masked&gt;&amp;X-Amz-Date=&lt;masked&gt;&amp;X-Amz-Expires=3600&amp;X-Amz-SignedHeaders=host&amp;X-Amz-Signature=&lt;masked&gt;",
+  "brandColor": "#0F9D58",
+  "categories": [
+    "home",
+    "services"
+  ],
+  "markets": [
+    "ET"
+  ],
+  "publisher": {
+    "name": "FixIt Demo PLC",
+    "legalName": null,
+    "supportEmail": "support@example.com",
+    "supportPhone": null,
+    "website": "https://fixit.example.com"
+  },
+  "entryUrl": "https://app.fixit.example.com/",
+  "allowedOrigins": [
+    "https://app.fixit.example.com"
+  ],
+  "status": "LIVE",
+  "priority": 20,
+  "ratingAvg": 0.0,
+  "ratingCount": 0,
+  "extra": {
+    "tier": "pilot",
+    "region": "addis"
+  },
+  "createdAt": "2026-10-25T06:06:07.072443Z",
+  "updatedAt": "2026-10-25T06:06:25.232556591Z"
+}</code></pre>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th><code>error</code></th><th>When it happens</th></tr></thead><tbody><tr><td>200</td><td>-</td><td>OK, the updated app.</td></tr><tr><td>400</td><td><code>validation_failed</code></td><td>Missing or unknown status.</td></tr><tr><td>403</td><td><code>only_super_admin_can_revive_killed_app</code></td><td>ADMIN tried to leave KILLED.</td></tr><tr><td>403</td><td><code>insufficient_role</code></td><td>VIEWER.</td></tr><tr><td>404</td><td><code>not_found</code></td><td>No such app.</td></tr><tr><td>409</td><td><code>not_ready_for_live</code></td><td>Logo and/or support email missing; <code>fields</code>-style detail <code>missing</code> lists them.</td></tr><tr><td>401</td><td><code>unauthorized</code></td><td>No <code>Authorization</code> header, or an invalid, expired or revoked session token. Returned by the gateway's forward-auth (from registry-service).</td></tr><tr><td>403</td><td><code>mfa_required</code></td><td>The session is only aal1 (emailed code only), or Kratos refuses it because an authenticator app is enrolled but not used in this session. Do the authenticator step.</td></tr><tr><td>403</td><td><code>not_staff</code></td><td>A valid session, but the person is not an ACTIVE staff member (customers get this).</td></tr></tbody></table></div>
+<h4>Real error responses</h4><pre class="out nocopy"><code>Going LIVE too early:
+request body: {"status": "LIVE"}
+HTTP 409  {"error": "not_ready_for_live", "fields": {"missing": "logo"}}</code></pre>
+<pre class="out nocopy"><code>Unknown status:
+request body: {"status": "ARCHIVED"}
+HTTP 400  {"error": "validation_failed", "fields": {"status": "must be DRAFT, LIVE, PAUSED or KILLED"}}</code></pre>
+<pre class="out nocopy"><code>ADMIN reviving a KILLED app:
+request body: {"status": "DRAFT"}
+HTTP 403  {"error": "only_super_admin_can_revive_killed_app"}</code></pre>
+<h4>How to use it</h4><ul><li>Typical life: DRAFT, then LIVE; PAUSED for a temporary stop (reversible by any ADMIN); KILLED for abuse (reversible only by a super admin).</li><li>Setting the same status again succeeds and writes an audit row.</li></ul>
+</div></details>
+<details class="endpoint" id="ep-staff-post-apps-id-logo"><summary><span class="method m-post">POST</span><span class="path">/admin/api/v1/apps/{appId}/logo</span><span class="sum">Upload or replace the app logo</span></summary><div class="body">
+<dl class="meta"><dt>Audience</dt><dd>Adera staff (the dashboard)</dd><dt>Client path</dt><dd><code>/admin/api/v1/apps/{appId}/logo</code> through the gateway</dd><dt>Internal path</dt><dd>same path on registry-service :8080 (the gateway does not rewrite it)</dd><dt>Auth</dt><dd><code>Authorization: Bearer $TOKEN</code>, a Kratos session token of an <strong>aal2</strong> staff session. The gateway checks it and adds <code>X-Staff-Id</code>, <code>X-Staff-Role</code>, <code>X-Gateway-Secret</code>. Minimum role: <strong>ADMIN</strong>.</dd><dt>Rate limit</dt><dd>300 per 60 s per client IP (gateway route <code>admin-api</code>)</dd><dt>Implemented in</dt><dd><code>services/registry-service/src/main/java/app/adera/registry/app/AppService.java (uploadLogo), storage/LogoImageProcessor.java</code></dd></dl>
+<h4>Purpose</h4><p>Multipart upload. The server decodes the image (never trusting the file name or declared type), scales it down to fit 512 x 512 keeping the aspect ratio and any transparency, and stores a fresh <strong>PNG</strong> in RustFS under <code>apps/{appId}/logo/{imageId}.png</code>. The previous logo object is deleted. Re-encoding strips metadata and odd file tricks.</p>
+<h4>Request parameters</h4><div class="table-wrap"><table><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why it exists</th></tr></thead><tbody><tr><td>appId</td><td>path</td><td>UUID</td><td>yes</td><td>Existing app.</td><td>Identifies the app.</td></tr><tr><td>file</td><td>multipart field</td><td>file</td><td>yes</td><td>JPEG, PNG, GIF or BMP; at most 2 MiB (<code>LOGO_MAX_BYTES</code>); at most 12000 px a side and 40 million pixels.</td><td>The logo. Limits guard against huge or malicious images.</td></tr></tbody></table></div>
+<h4>Example request</h4><pre><code>curl -sS -i -X POST "$BASE/admin/api/v1/apps/$APP/logo" \
+  -H "Authorization: Bearer $TOKEN" \
+  -F file=@logo.png</code></pre>
+<h4>Example response</h4><pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+X-Request-Id: e092875c-4009-408e-bd32-0ddf91c50d63
+
+{
+  "id": "41548c1e-b03e-412a-bbbe-1e46343505b9",
+  "slug": "demo-fixit-f841",
+  "name": {
+    "am": "ዴሞ ፊክስኢት",
+    "en": "Demo FixIt"
+  },
+  "description": {
+    "am": "ቴክኒሻን ያግኙ",
+    "en": "Find a trusted technician near you."
+  },
+  "logoImageId": "48d4ac5a-64e5-4d2d-b91d-32d38a5625ba",
+  "logoUrl": "http://127.0.0.1:9000/adera-media/apps/41548c1e-b03e-412a-bbbe-1e46343505b9/logo/48d4ac5a-64e5-4d2d-b91d-32d38a5625ba.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&amp;X-Amz-Credential=&lt;masked&gt;&amp;X-Amz-Date=&lt;masked&gt;&amp;X-Amz-Expires=3600&amp;X-Amz-SignedHeaders=host&amp;X-Amz-Signature=&lt;masked&gt;",
+  "brandColor": "#0F9D58",
+  "categories": [
+    "home",
+    "services"
+  ],
+  "markets": [
+    "ET"
+  ],
+  "publisher": {
+    "name": "FixIt Demo PLC",
+    "legalName": null,
+    "supportEmail": "support@example.com",
+    "supportPhone": null,
+    "website": "https://fixit.example.com"
+  },
+  "entryUrl": "https://app.fixit.example.com/",
+  "allowedOrigins": [
+    "https://app.fixit.example.com"
+  ],
+  "status": "DRAFT",
+  "priority": 20,
+  "ratingAvg": 0.0,
+  "ratingCount": 0,
+  "extra": {
+    "tier": "pilot",
+    "region": "addis"
+  },
+  "createdAt": "2026-10-25T06:06:07.072443Z",
+  "updatedAt": "2026-10-25T06:06:08.568703216Z"
+}</code></pre>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th><code>error</code></th><th>When it happens</th></tr></thead><tbody><tr><td>200</td><td>-</td><td>OK, the updated app with a signed <code>logoUrl</code>.</td></tr><tr><td>400</td><td><code>validation_failed</code></td><td>No file, an empty file, or not a decodable JPEG/PNG/GIF/BMP, or dimensions too large (<code>fields.file</code>).</td></tr><tr><td>403</td><td><code>insufficient_role</code></td><td>VIEWER.</td></tr><tr><td>404</td><td><code>not_found</code></td><td>No such app.</td></tr><tr><td>413</td><td><code>file_too_large</code></td><td>More than 2 MiB (or the 4 MiB multipart limit).</td></tr><tr><td>401</td><td><code>unauthorized</code></td><td>No <code>Authorization</code> header, or an invalid, expired or revoked session token. Returned by the gateway's forward-auth (from registry-service).</td></tr><tr><td>403</td><td><code>mfa_required</code></td><td>The session is only aal1 (emailed code only), or Kratos refuses it because an authenticator app is enrolled but not used in this session. Do the authenticator step.</td></tr><tr><td>403</td><td><code>not_staff</code></td><td>A valid session, but the person is not an ACTIVE staff member (customers get this).</td></tr></tbody></table></div>
+<h4>Real error responses</h4><pre class="out nocopy"><code>Empty file part:
+HTTP 400  {"error": "validation_failed", "fields": {"file": "a file is required (multipart field 'file')"}}</code></pre>
+<pre class="out nocopy"><code>Not an image:
+HTTP 400  {"error": "validation_failed", "fields": {"file": "not a supported image (use PNG, JPEG, GIF or BMP)"}}</code></pre>
+<pre class="out nocopy"><code>Over 2 MiB:
+HTTP 413  {"error": "file_too_large"}</code></pre>
+<h4>How to use it</h4><ul><li>The logo is required before the app can go LIVE.</li><li>The signed <code>logoUrl</code> in the answer expires after 60 minutes (the query string is masked in this example).</li></ul>
+</div></details>
+<details class="endpoint" id="ep-staff-delete-apps-id-logo"><summary><span class="method m-delete">DELETE</span><span class="path">/admin/api/v1/apps/{appId}/logo</span><span class="sum">Remove the app logo</span></summary><div class="body">
+<dl class="meta"><dt>Audience</dt><dd>Adera staff (the dashboard)</dd><dt>Client path</dt><dd><code>/admin/api/v1/apps/{appId}/logo</code> through the gateway</dd><dt>Internal path</dt><dd>same path on registry-service :8080 (the gateway does not rewrite it)</dd><dt>Auth</dt><dd><code>Authorization: Bearer $TOKEN</code>, a Kratos session token of an <strong>aal2</strong> staff session. The gateway checks it and adds <code>X-Staff-Id</code>, <code>X-Staff-Role</code>, <code>X-Gateway-Secret</code>. Minimum role: <strong>ADMIN</strong>.</dd><dt>Rate limit</dt><dd>300 per 60 s per client IP (gateway route <code>admin-api</code>)</dd><dt>Implemented in</dt><dd><code>services/registry-service/src/main/java/app/adera/registry/app/AppService.java (removeLogo)</code></dd></dl>
+<h4>Purpose</h4><p>Deletes the stored logo file and clears the logo fields. Harmless if there is no logo. Note that a LIVE app without a logo stays LIVE (the logo is checked only when going live).</p>
+<h4>Request parameters</h4><div class="table-wrap"><table><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why it exists</th></tr></thead><tbody><tr><td>appId</td><td>path</td><td>UUID</td><td>yes</td><td>Existing app.</td><td>Identifies the app.</td></tr></tbody></table></div>
+<h4>Example request</h4><pre><code>curl -sS -i -X DELETE "$BASE/admin/api/v1/apps/$APP/logo" \
+  -H "Authorization: Bearer $TOKEN"</code></pre>
+<h4>Example response</h4><p>The answer is the updated app with <code>logoImageId</code> and <code>logoUrl</code> set to <code>null</code> (same shape as the app view in <a href="#ep-staff-patch-apps-id">PATCH</a>). Not captured separately.</p>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th><code>error</code></th><th>When it happens</th></tr></thead><tbody><tr><td>200</td><td>-</td><td>OK.</td></tr><tr><td>403</td><td><code>insufficient_role</code></td><td>VIEWER.</td></tr><tr><td>404</td><td><code>not_found</code></td><td>No such app.</td></tr><tr><td>401</td><td><code>unauthorized</code></td><td>No <code>Authorization</code> header, or an invalid, expired or revoked session token. Returned by the gateway's forward-auth (from registry-service).</td></tr><tr><td>403</td><td><code>mfa_required</code></td><td>The session is only aal1 (emailed code only), or Kratos refuses it because an authenticator app is enrolled but not used in this session. Do the authenticator step.</td></tr><tr><td>403</td><td><code>not_staff</code></td><td>A valid session, but the person is not an ACTIVE staff member (customers get this).</td></tr></tbody></table></div>
+<h4>How to use it</h4><ul><li>Uploading a new logo replaces the old one; you rarely need this call.</li></ul>
+</div></details>
+</section>
+<section><h2 id="config">Capabilities, payment settings, limits, addresses</h2>
+<details class="endpoint" id="ep-staff-get-capabilities"><summary><span class="method m-get">GET</span><span class="path">/admin/api/v1/capabilities</span><span class="sum">The catalog of capabilities an app can be given</span></summary><div class="body">
+<dl class="meta"><dt>Audience</dt><dd>Adera staff (the dashboard)</dd><dt>Client path</dt><dd><code>/admin/api/v1/capabilities</code> through the gateway</dd><dt>Internal path</dt><dd>same path on registry-service :8080 (the gateway does not rewrite it)</dd><dt>Auth</dt><dd><code>Authorization: Bearer $TOKEN</code>, a Kratos session token of an <strong>aal2</strong> staff session. The gateway checks it and adds <code>X-Staff-Id</code>, <code>X-Staff-Role</code>, <code>X-Gateway-Secret</code>. Minimum role: <strong>VIEWER</strong>.</dd><dt>Rate limit</dt><dd>300 per 60 s per client IP (gateway route <code>admin-api</code>)</dd><dt>Implemented in</dt><dd><code>services/registry-service/src/main/java/app/adera/registry/app/Capability.java</code></dd></dl>
+<h4>Purpose</h4><p>The fixed list of things an app can ask for, with a plain description, and whether a user-facing reason is required when granting it. The dashboard uses it to draw the permission switches.</p>
+<h4>Request parameters</h4><p>None.</p>
+<h4>Example request</h4><pre><code>curl -sS -i -X GET "$BASE/admin/api/v1/capabilities" \
+  -H "Authorization: Bearer $TOKEN"</code></pre>
+<h4>Example response</h4><pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+X-Request-Id: d0730211-30fc-4d70-b222-281731e2108f
+
+[
+  {
+    "reasonRequired": false,
+    "description": "Pseudonymous id and display name",
+    "key": "user.basic"
+  },
+  {
+    "reasonRequired": true,
+    "description": "The user's first and last name",
+    "key": "user.full_name"
+  },
+  {
+    "reasonRequired": true,
+    "description": "The user's phone number and email",
+    "key": "user.contact"
+  },
+  {
+    "reasonRequired": true,
+    "description": "One saved address the user picks",
+    "key": "user.address"
+  },
+  {
+    "reasonRequired": true,
+    "description": "City-level location",
+    "key": "location.coarse"
+  },
+  {
+    "reasonRequired": true,
+    "description": "Precise location, foreground only",
+    "key": "location.fine"
+  },
+  {
+    "reasonRequired": true,
+    "description": "Ask the user to pay (currencies and limits in payment settings)",
+    "key": "pay.request"
+  },
+  {
+    "reasonRequired": false,
+    "description": "Send in-app notifications (inbox + push) to users",
+    "key": "notify.inapp"
+  },
+  {
+    "reasonRequired": false,
+    "description": "Send SMS to users (costs money; capped)",
+    "key": "notify.sms"
+  },
+  {
+    "reasonRequired": false,
+    "description": "Send email to users",
+    "key": "notify.email"
+  }
+]</code></pre>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th><code>error</code></th><th>When it happens</th></tr></thead><tbody><tr><td>200</td><td>-</td><td>OK.</td></tr><tr><td>401</td><td><code>unauthorized</code></td><td>No <code>Authorization</code> header, or an invalid, expired or revoked session token. Returned by the gateway's forward-auth (from registry-service).</td></tr><tr><td>403</td><td><code>mfa_required</code></td><td>The session is only aal1 (emailed code only), or Kratos refuses it because an authenticator app is enrolled but not used in this session. Do the authenticator step.</td></tr><tr><td>403</td><td><code>not_staff</code></td><td>A valid session, but the person is not an ACTIVE staff member (customers get this).</td></tr></tbody></table></div>
+<h4>How to use it</h4><ul><li><code>reasonRequired: true</code> means granting needs an English reason of at least 10 characters, shown verbatim to users in the consent sheet.</li><li>Full table with limits: <a href="10-reference.html#capabilities">capability catalog</a>.</li></ul>
+</div></details>
+<details class="endpoint" id="ep-staff-put-apps-id-capabilities"><summary><span class="method m-put">PUT</span><span class="path">/admin/api/v1/apps/{appId}/capabilities/{capability}</span><span class="sum">Grant, deny or suspend one capability</span></summary><div class="body">
+<dl class="meta"><dt>Audience</dt><dd>Adera staff (the dashboard)</dd><dt>Client path</dt><dd><code>/admin/api/v1/apps/{appId}/capabilities/{capability}</code> through the gateway</dd><dt>Internal path</dt><dd>same path on registry-service :8080 (the gateway does not rewrite it)</dd><dt>Auth</dt><dd><code>Authorization: Bearer $TOKEN</code>, a Kratos session token of an <strong>aal2</strong> staff session. The gateway checks it and adds <code>X-Staff-Id</code>, <code>X-Staff-Role</code>, <code>X-Gateway-Secret</code>. Minimum role: <strong>ADMIN</strong>.</dd><dt>Rate limit</dt><dd>300 per 60 s per client IP (gateway route <code>admin-api</code>)</dd><dt>Implemented in</dt><dd><code>services/registry-service/src/main/java/app/adera/registry/app/AppConfigService.java (setCapability)</code></dd></dl>
+<h4>Purpose</h4><p>Sets one capability's state for one app. Granting <code>notify.sms</code>, <code>notify.email</code> or <code>notify.inapp</code> also creates a conservative default limit row for that channel if none exists (SMS 3 per user per day, 100 per day, 100 distinct users, 1000 total; email 5, 500, 500, 10000; in-app 20, 10000, 10000, unlimited) so a new grant is never unlimited. Only the three <code>notify.*</code> capabilities are enforced by code today; the rest are stored and shown.</p>
+<h4>Request parameters</h4><div class="table-wrap"><table><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why it exists</th></tr></thead><tbody><tr><td>appId</td><td>path</td><td>UUID</td><td>yes</td><td>Existing app.</td><td>Identifies the app.</td></tr><tr><td>capability</td><td>path</td><td>string</td><td>yes</td><td>One of the keys from <a href="#ep-staff-get-capabilities">GET /capabilities</a>.</td><td>Which permission.</td></tr><tr><td>state</td><td>body</td><td>string</td><td>yes</td><td><code>GRANTED</code>, <code>DENIED</code> or <code>SUSPENDED</code>.</td><td>The decision. SUSPENDED keeps the record but switches it off.</td></tr><tr><td>reason</td><td>body</td><td>object</td><td>when granting a reason-required capability</td><td>Map of language (<code>en</code>, <code>am</code>, <code>om</code>) to text; <code>en</code> at least 10 characters.</td><td>Shown to the user so consent is informed.</td></tr></tbody></table></div>
+<h4>Example request</h4><pre><code>curl -sS -i -X PUT "$BASE/admin/api/v1/apps/$APP/capabilities/user.full_name" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"state": "GRANTED", "reason": {"en": "To show technicians who you are", "am": "ቴክኒሻኖች እርስዎን እንዲያውቁ"}}'</code></pre>
+<h4>Example response</h4><pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+X-Request-Id: 02edb14c-3437-48a9-996e-b9a62afc6822
+
+{
+  "app": {
+    "id": "41548c1e-b03e-412a-bbbe-1e46343505b9",
+    "slug": "demo-fixit-f841",
+    "name": {
+      "am": "ዴሞ ፊክስኢት",
+      "en": "Demo FixIt"
+    },
+    "description": {
+      "am": "ቴክኒሻን ያግኙ",
+      "en": "Find a trusted technician near you."
+    },
+    "logoImageId": "48d4ac5a-64e5-4d2d-b91d-32d38a5625ba",
+    "logoUrl": "http://127.0.0.1:9000/adera-media/apps/41548c1e-b03e-412a-bbbe-1e46343505b9/logo/48d4ac5a-64e5-4d2d-b91d-32d38a5625ba.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&amp;X-Amz-Credential=&lt;masked&gt;&amp;X-Amz-Date=&lt;masked&gt;&amp;X-Amz-Expires=3600&amp;X-Amz-SignedHeaders=host&amp;X-Amz-Signature=&lt;masked&gt;",
+    "brandColor": "#0F9D58",
+    "categories": [
+      "home",
+      "services"
+    ],
+    "markets": [
+      "ET"
+    ],
+    "publisher": {
+      "name": "FixIt Demo PLC",
+      "legalName": null,
+      "supportEmail": "support@example.com",
+      "supportPhone": null,
+      "website": "https://fixit.example.com"
+    },
+    "entryUrl": "https://app.fixit.example.com/",
+    "allowedOrigins": [
+      "https://app.fixit.example.com"
+    ],
+    "status": "DRAFT",
+    "priority": 20,
+    "ratingAvg": 0.0,
+    "ratingCount": 0,
+    "extra": {
+      "tier": "pilot",
+      "region": "addis"
+    },
+    "createdAt": "2026-10-25T06:06:07.072443Z",
+    "updatedAt": "2026-10-25T06:06:08.568703Z"
+  },
+  "capabilities": [
+    {
+      "capability": "notify.email",
+      "state": "GRANTED",
+      "reason": {},
+      "updatedAt": "2026-10-25T06:06:08.815348Z"
+    },
+    {
+      "capability": "notify.inapp",
+      "state": "GRANTED",
+      "reason": {},
+      "updatedAt": "2026-10-25T06:06:08.909384Z"
+    },
+    {
+      "capability": "notify.sms",
+      "state": "GRANTED",
+      "reason": {},
+      "updatedAt": "2026-10-25T06:06:08.667412Z"
+    },
+    {
+      "capability": "user.full_name",
+      "state": "GRANTED",
+      "reason": {
+        "am": "ቴክኒሻኖች እርስዎን እንዲያውቁ",
+        "en": "To show technicians who you are"
+      },
+      "updatedAt": "2026-10-25T06:06:09.076096Z"
+    }
+  ],
+  "payment": null,
+  "notificationLimits": [
+    {
+      "channel": "EMAIL",
+      "maxPerUserPerDay": 5,
+      "maxPerDay": 500,
+      "maxDistinctUsersPerDay": 500,
+      "maxTotal": 10000
+    },
+    {
+      "channel": "IN_APP",
+      "maxPerUserPerDay": 20,
+      "maxPerDay": 10000,
+      "maxDistinctUsersPerDay": 10000,
+      "maxTotal": null
+    },
+    {
+      "channel": "SMS",
+      "maxPerUserPerDay": 3,
+      "maxPerDay": 100,
+      "maxDistinctUsersPerDay": 100,
+      "maxTotal": 1000
+    }
+  ],
+  "environments": [
+    {
+      "environment": "DEV",
+      "allowedCidrs": []
+    },
+    {
+      "environment": "PROD",
+      "allowedCidrs": []
+    }
+  ],
+  "keys": []
+}</code></pre>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th><code>error</code></th><th>When it happens</th></tr></thead><tbody><tr><td>200</td><td>-</td><td>OK. The body is the full app detail (same as GET /apps/{appId}).</td></tr><tr><td>400</td><td><code>validation_failed</code></td><td>Unknown capability, bad state, a reason in an unsupported language, a missing or too-short English reason, unknown field.</td></tr><tr><td>403</td><td><code>insufficient_role</code></td><td>VIEWER.</td></tr><tr><td>404</td><td><code>not_found</code></td><td>No such app.</td></tr><tr><td>401</td><td><code>unauthorized</code></td><td>No <code>Authorization</code> header, or an invalid, expired or revoked session token. Returned by the gateway's forward-auth (from registry-service).</td></tr><tr><td>403</td><td><code>mfa_required</code></td><td>The session is only aal1 (emailed code only), or Kratos refuses it because an authenticator app is enrolled but not used in this session. Do the authenticator step.</td></tr><tr><td>403</td><td><code>not_staff</code></td><td>A valid session, but the person is not an ACTIVE staff member (customers get this).</td></tr></tbody></table></div>
+<h4>Real error responses</h4><pre class="out nocopy"><code>Reason required but missing:
+request body: {"state": "GRANTED"}
+HTTP 400  {"error": "validation_failed", "fields": {"reason": "required for user.full_name: a plain-language English reason (min 10 chars) shown to users, e.g. 'To show technicians near you'"}}</code></pre>
+<pre class="out nocopy"><code>Unknown capability:
+request body: {"state": "GRANTED"}
+HTTP 400  {"error": "validation_failed", "fields": {"capability": "unknown capability 'user.shoe_size'"}}</code></pre>
+<pre class="out nocopy"><code>Bad state and unknown field:
+request body: {"state": "MAYBE", "color": 1}
+HTTP 400  {"error": "validation_failed", "fields": {"color": "unknown field", "state": "must be GRANTED, DENIED or SUSPENDED"}}</code></pre>
+<h4>How to use it</h4><ul><li>The grant takes effect for partner calls within about 15 seconds (notification-service caches app config).</li><li>Use <code>DENIED</code> to record that an app asked and was refused.</li></ul>
+</div></details>
+<details class="endpoint" id="ep-staff-put-apps-id-payment-settings"><summary><span class="method m-put">PUT</span><span class="path">/admin/api/v1/apps/{appId}/payment-settings</span><span class="sum">Set payment settings</span></summary><div class="body">
+<dl class="meta"><dt>Audience</dt><dd>Adera staff (the dashboard)</dd><dt>Client path</dt><dd><code>/admin/api/v1/apps/{appId}/payment-settings</code> through the gateway</dd><dt>Internal path</dt><dd>same path on registry-service :8080 (the gateway does not rewrite it)</dd><dt>Auth</dt><dd><code>Authorization: Bearer $TOKEN</code>, a Kratos session token of an <strong>aal2</strong> staff session. The gateway checks it and adds <code>X-Staff-Id</code>, <code>X-Staff-Role</code>, <code>X-Gateway-Secret</code>. Minimum role: <strong>ADMIN</strong>.</dd><dt>Rate limit</dt><dd>300 per 60 s per client IP (gateway route <code>admin-api</code>)</dd><dt>Implemented in</dt><dd><code>services/registry-service/src/main/java/app/adera/registry/app/AppConfigService.java (setPayment)</code></dd></dl>
+<h4>Purpose</h4><p>Stores which currencies the app may charge in, whether it may authorise now and capture later, and the allowed amount range. <strong>Stored only</strong>: payments are not built yet, so nothing reads these settings today. Replaces all four values (a PUT).</p>
+<h4>Request parameters</h4><div class="table-wrap"><table><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why it exists</th></tr></thead><tbody><tr><td>appId</td><td>path</td><td>UUID</td><td>yes</td><td>Existing app.</td><td>Identifies the app.</td></tr><tr><td>allowedCurrencies</td><td>body</td><td>string list</td><td>yes</td><td>Values from <code>ETB</code>, <code>USD</code>.</td><td>Which currencies the app may request.</td></tr><tr><td>allowHold</td><td>body</td><td>boolean</td><td>no (default false)</td><td>true or false.</td><td>Allow authorise-now, capture-later payments.</td></tr><tr><td>minAmountMinor, maxAmountMinor</td><td>body</td><td>integer or null</td><td>no</td><td>Whole numbers >= 0 in minor units (cents, santim); min must not exceed max.</td><td>Per-payment bounds.</td></tr></tbody></table></div>
+<h4>Example request</h4><pre><code>curl -sS -i -X PUT "$BASE/admin/api/v1/apps/$APP/payment-settings" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"allowedCurrencies": ["ETB"], "allowHold": false, "minAmountMinor": 1000, "maxAmountMinor": 5000000}'</code></pre>
+<h4>Example response</h4><pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+X-Request-Id: bf6cf39b-7411-498d-a9e4-1eef9fd6b65c
+
+{
+  "allowedCurrencies": [
+    "ETB"
+  ],
+  "allowHold": false,
+  "minAmountMinor": 1000,
+  "maxAmountMinor": 5000000
+}</code></pre>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th><code>error</code></th><th>When it happens</th></tr></thead><tbody><tr><td>200</td><td>-</td><td>OK, the saved settings.</td></tr><tr><td>400</td><td><code>validation_failed</code></td><td>Bad currency, non-numeric amount, min greater than max, unknown field.</td></tr><tr><td>403</td><td><code>insufficient_role</code></td><td>VIEWER.</td></tr><tr><td>404</td><td><code>not_found</code></td><td>No such app.</td></tr><tr><td>401</td><td><code>unauthorized</code></td><td>No <code>Authorization</code> header, or an invalid, expired or revoked session token. Returned by the gateway's forward-auth (from registry-service).</td></tr><tr><td>403</td><td><code>mfa_required</code></td><td>The session is only aal1 (emailed code only), or Kratos refuses it because an authenticator app is enrolled but not used in this session. Do the authenticator step.</td></tr><tr><td>403</td><td><code>not_staff</code></td><td>A valid session, but the person is not an ACTIVE staff member (customers get this).</td></tr></tbody></table></div>
+<h4>Real error responses</h4><pre class="out nocopy"><code>Invalid settings:
+request body: {"allowedCurrencies": ["EUR"], "minAmountMinor": 10, "maxAmountMinor": 5}
+HTTP 400  {"error": "validation_failed", "fields": {"allowedCurrencies": "supported currencies: ETB, USD", "minAmountMinor": "must not be greater than maxAmountMinor"}}</code></pre>
+<h4>How to use it</h4><ul><li>Safe to call now; it prepares the data the payment feature will use.</li></ul>
+</div></details>
+<details class="endpoint" id="ep-staff-put-apps-id-notification-limits-channel"><summary><span class="method m-put">PUT</span><span class="path">/admin/api/v1/apps/{appId}/notification-limits/{channel}</span><span class="sum">Set the sending limits for one channel</span></summary><div class="body">
+<dl class="meta"><dt>Audience</dt><dd>Adera staff (the dashboard)</dd><dt>Client path</dt><dd><code>/admin/api/v1/apps/{appId}/notification-limits/{channel}</code> through the gateway</dd><dt>Internal path</dt><dd>same path on registry-service :8080 (the gateway does not rewrite it)</dd><dt>Auth</dt><dd><code>Authorization: Bearer $TOKEN</code>, a Kratos session token of an <strong>aal2</strong> staff session. The gateway checks it and adds <code>X-Staff-Id</code>, <code>X-Staff-Role</code>, <code>X-Gateway-Secret</code>. Minimum role: <strong>ADMIN</strong>.</dd><dt>Rate limit</dt><dd>300 per 60 s per client IP (gateway route <code>admin-api</code>)</dd><dt>Implemented in</dt><dd><code>services/registry-service/src/main/java/app/adera/registry/app/AppConfigService.java (setLimit)</code></dd></dl>
+<h4>Purpose</h4><p>Sets how much the app may send on one channel. <code>null</code> means unlimited and <code>0</code> means none. All four values are replaced (omitted values become <code>null</code>, unlimited). Counting is per UTC day. A refused partner request uses no quota. This is the cost guard for SMS.</p>
+<h4>Request parameters</h4><div class="table-wrap"><table><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why it exists</th></tr></thead><tbody><tr><td>appId</td><td>path</td><td>UUID</td><td>yes</td><td>Existing app.</td><td>Identifies the app.</td></tr><tr><td>channel</td><td>path</td><td>string</td><td>yes</td><td><code>SMS</code>, <code>EMAIL</code> or <code>IN_APP</code> (case-insensitive).</td><td>Which channel.</td></tr><tr><td>maxPerUserPerDay</td><td>body</td><td>integer or null</td><td>no</td><td>Whole number >= 0.</td><td>Stops one user being spammed.</td></tr><tr><td>maxPerDay</td><td>body</td><td>integer or null</td><td>no</td><td>>= 0.</td><td>Total per day (cost cap).</td></tr><tr><td>maxDistinctUsersPerDay</td><td>body</td><td>integer or null</td><td>no</td><td>>= 0.</td><td>How many different people per day.</td></tr><tr><td>maxTotal</td><td>body</td><td>integer or null</td><td>no</td><td>>= 0 (64-bit).</td><td>Lifetime cap, e.g. a pilot budget.</td></tr></tbody></table></div>
+<h4>Example request</h4><pre><code>curl -sS -i -X PUT "$BASE/admin/api/v1/apps/$APP/notification-limits/SMS" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"maxPerUserPerDay": 2, "maxPerDay": 100, "maxDistinctUsersPerDay": 100, "maxTotal": 1000}'</code></pre>
+<h4>Example response</h4><pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+X-Request-Id: ada20703-6d53-487d-93b4-b0b235afcd11
+
+{
+  "channel": "SMS",
+  "maxPerUserPerDay": 2,
+  "maxPerDay": 100,
+  "maxDistinctUsersPerDay": 100,
+  "maxTotal": 1000
+}</code></pre>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th><code>error</code></th><th>When it happens</th></tr></thead><tbody><tr><td>200</td><td>-</td><td>OK, the saved row.</td></tr><tr><td>400</td><td><code>validation_failed</code></td><td>Channel not one of the three, a value that is negative or not a whole number, unknown field.</td></tr><tr><td>403</td><td><code>insufficient_role</code></td><td>VIEWER.</td></tr><tr><td>404</td><td><code>not_found</code></td><td>No such app.</td></tr><tr><td>401</td><td><code>unauthorized</code></td><td>No <code>Authorization</code> header, or an invalid, expired or revoked session token. Returned by the gateway's forward-auth (from registry-service).</td></tr><tr><td>403</td><td><code>mfa_required</code></td><td>The session is only aal1 (emailed code only), or Kratos refuses it because an authenticator app is enrolled but not used in this session. Do the authenticator step.</td></tr><tr><td>403</td><td><code>not_staff</code></td><td>A valid session, but the person is not an ACTIVE staff member (customers get this).</td></tr></tbody></table></div>
+<h4>Real error responses</h4><pre class="out nocopy"><code>Bad channel:
+request body: {"maxPerDay": 1}
+HTTP 400  {"error": "validation_failed", "fields": {"channel": "must be SMS, EMAIL or IN_APP"}}</code></pre>
+<pre class="out nocopy"><code>Bad values:
+request body: {"maxPerDay": -1, "maxTotal": "many", "oops": 1}
+HTTP 400  {"error": "validation_failed", "fields": {"oops": "unknown field", "maxPerDay": "must be a whole number &gt;= 0, or null for unlimited", "maxTotal": "must be a whole number &gt;= 0, or null for none"}}</code></pre>
+<h4>How to use it</h4><ul><li>Lowering a limit never deletes anything; it only affects new requests.</li><li>The quota errors partners see are listed on the <a href="08c-partner-api.html">partner page</a> (<code>429 quota_exceeded</code>, <code>limit</code> names which one).</li></ul>
+</div></details>
+<details class="endpoint" id="ep-staff-put-apps-id-environments-env"><summary><span class="method m-put">PUT</span><span class="path">/admin/api/v1/apps/{appId}/environments/{environment}</span><span class="sum">Set the allowed server addresses</span></summary><div class="body">
+<dl class="meta"><dt>Audience</dt><dd>Adera staff (the dashboard)</dd><dt>Client path</dt><dd><code>/admin/api/v1/apps/{appId}/environments/{environment}</code> through the gateway</dd><dt>Internal path</dt><dd>same path on registry-service :8080 (the gateway does not rewrite it)</dd><dt>Auth</dt><dd><code>Authorization: Bearer $TOKEN</code>, a Kratos session token of an <strong>aal2</strong> staff session. The gateway checks it and adds <code>X-Staff-Id</code>, <code>X-Staff-Role</code>, <code>X-Gateway-Secret</code>. Minimum role: <strong>ADMIN</strong>.</dd><dt>Rate limit</dt><dd>300 per 60 s per client IP (gateway route <code>admin-api</code>)</dd><dt>Implemented in</dt><dd><code>services/registry-service/src/main/java/app/adera/registry/app/AppConfigService.java (setEnvironment)</code></dd></dl>
+<h4>Purpose</h4><p>Sets the list of IPs or ranges from which the partner's servers may call the API, separately for <code>DEV</code> and <code>PROD</code>. You can fill in both; only the one that matches the deployment's <code>ADERA_ENV</code> (see <code>GET /admin/api/v1/system</code>) is used, the other is stored for the other deployment. The list replaces the old one. An empty list means <em>nobody</em> can call. This stops a leaked partner key being used from anywhere else.</p>
+<h4>Request parameters</h4><div class="table-wrap"><table><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why it exists</th></tr></thead><tbody><tr><td>appId</td><td>path</td><td>UUID</td><td>yes</td><td>Existing app.</td><td>Identifies the app.</td></tr><tr><td>environment</td><td>path</td><td>string</td><td>yes</td><td><code>DEV</code> or <code>PROD</code> (case-insensitive).</td><td>Development or production deployment. The old names TEST and LIVE are refused with 400.</td></tr><tr><td>allowedCidrs</td><td>body</td><td>string list</td><td>yes</td><td>At most 50 entries; each an IPv4/IPv6 address or a CIDR range like <code>198.51.100.0/24</code> (a single address becomes <code>/32</code>). No DNS names. A range matching everything (<code>/0</code>) is refused for PROD.</td><td>The address allowlist.</td></tr></tbody></table></div>
+<h4>Example request</h4><pre><code>curl -sS -i -X PUT "$BASE/admin/api/v1/apps/$APP/environments/DEV" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"allowedCidrs": ["203.0.113.10", "198.51.100.0/24"]}'</code></pre>
+<h4>Example response</h4><pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+X-Request-Id: cd26cc6c-cb43-41df-81f0-f097d5481963
+
+{
+  "environment": "DEV",
+  "allowedCidrs": [
+    "203.0.113.10/32",
+    "198.51.100.0/24"
+  ]
+}</code></pre>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th><code>error</code></th><th>When it happens</th></tr></thead><tbody><tr><td>200</td><td>-</td><td>OK, the normalised list (single addresses get a prefix: <code>/32</code> for IPv4, <code>/128</code> for IPv6).</td></tr><tr><td>400</td><td><code>validation_failed</code></td><td>Not a list, more than 50, an entry that is not an IP or range, or <code>/0</code> on PROD; bad environment name (including the old TEST and LIVE).</td></tr><tr><td>403</td><td><code>insufficient_role</code></td><td>VIEWER.</td></tr><tr><td>404</td><td><code>not_found</code></td><td>No such app.</td></tr><tr><td>401</td><td><code>unauthorized</code></td><td>No <code>Authorization</code> header, or an invalid, expired or revoked session token. Returned by the gateway's forward-auth (from registry-service).</td></tr><tr><td>403</td><td><code>mfa_required</code></td><td>The session is only aal1 (emailed code only), or Kratos refuses it because an authenticator app is enrolled but not used in this session. Do the authenticator step.</td></tr><tr><td>403</td><td><code>not_staff</code></td><td>A valid session, but the person is not an ACTIVE staff member (customers get this).</td></tr></tbody></table></div>
+<h4>Real error responses</h4><pre class="out nocopy"><code>Everything-range on PROD:
+request body: {"allowedCidrs": ["0.0.0.0/0"]}
+HTTP 400  {"error": "validation_failed", "fields": {"allowedCidrs": "a range that matches every address (/0) is not allowed for PROD"}}</code></pre>
+<pre class="out nocopy"><code>Not an address:
+request body: {"allowedCidrs": ["not-an-ip"]}
+HTTP 400  {"error": "validation_failed", "fields": {"allowedCidrs": "'not-an-ip' is not a valid IP address or range"}}</code></pre>
+<pre class="out nocopy"><code>Bad environment:
+request body: {"allowedCidrs": []}
+HTTP 400  {"error": "validation_failed", "fields": {"environment": "must be DEV or PROD"}}</code></pre>
+<pre class="out nocopy"><code>Not a list:
+request body: {"allowedCidrs": "1.2.3.4"}
+HTTP 400  {"error": "validation_failed", "fields": {"allowedCidrs": "must be a list (max 50) of IPs or ranges, e.g. [\"203.0.113.10\", \"198.51.100.0/24\"]"}}</code></pre>
+<h4>How to use it</h4><ul><li>Behind a reverse proxy the address Adera sees is the proxy's unless the gateway is configured with the real client IP (see the production checklist).</li><li>Changes are visible to partner calls within about 15 seconds.</li></ul>
+</div></details>
+</section>
+<section><h2 id="keys">Partner keys</h2>
+<details class="endpoint" id="ep-staff-get-apps-id-keys"><summary><span class="method m-get">GET</span><span class="path">/admin/api/v1/apps/{appId}/keys</span><span class="sum">List an app's keys</span></summary><div class="body">
+<dl class="meta"><dt>Audience</dt><dd>Adera staff (the dashboard)</dd><dt>Client path</dt><dd><code>/admin/api/v1/apps/{appId}/keys</code> through the gateway</dd><dt>Internal path</dt><dd>same path on registry-service :8080 (the gateway does not rewrite it)</dd><dt>Auth</dt><dd><code>Authorization: Bearer $TOKEN</code>, a Kratos session token of an <strong>aal2</strong> staff session. The gateway checks it and adds <code>X-Staff-Id</code>, <code>X-Staff-Role</code>, <code>X-Gateway-Secret</code>. Minimum role: <strong>VIEWER</strong>.</dd><dt>Rate limit</dt><dd>300 per 60 s per client IP (gateway route <code>admin-api</code>)</dd><dt>Implemented in</dt><dd><code>services/registry-service/src/main/java/app/adera/registry/key/KeyAdminController.java</code></dd></dl>
+<h4>Purpose</h4><p>Lists the keys of the app, newest first: id, environment, fingerprint, label, status and dates. Only public metadata; the public key itself is not returned here, and Adera never holds a private key.</p>
+<h4>Request parameters</h4><div class="table-wrap"><table><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why it exists</th></tr></thead><tbody><tr><td>appId</td><td>path</td><td>UUID</td><td>yes</td><td>Existing app.</td><td>Identifies the app.</td></tr></tbody></table></div>
+<h4>Example request</h4><pre><code>curl -sS -i -X GET "$BASE/admin/api/v1/apps/$APP/keys" \
+  -H "Authorization: Bearer $TOKEN"</code></pre>
+<h4>Example response</h4><pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+X-Request-Id: 9e5c7310-88f1-4642-910c-55898066dd77
+
+[
+  {
+    "keyId": "ak_dev_8acbea3d0147049a72ed8464",
+    "environment": "DEV",
+    "algorithm": "RS256",
+    "fingerprint": "9a42581c081f3ee783e6f11ad7681c4d2c7d138fe70b01e29f8a1fb6eee51d1f",
+    "label": "generated dev key",
+    "status": "ACTIVE",
+    "expiresAt": null,
+    "createdAt": "2026-10-25T06:06:20.760665Z",
+    "revokedAt": null
+  },
+  {
+    "keyId": "ak_dev_bf6323335f4d013bd838b3a6",
+    "environment": "DEV",
+    "algorithm": "RS256",
+    "fingerprint": "fe3a9d4646ab673ff6bf0e4d8e80ad07a3164abd07829f7bcafac5a558615c1b",
+    "label": "dev",
+    "status": "ACTIVE",
+    "expiresAt": "2027-12-31T00:00:00Z",
+    "createdAt": "2026-10-25T06:06:10.554483Z",
+    "revokedAt": null
+  }
+]</code></pre><p class="masked">(list shortened to the first 2 of 3 items)</p>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th><code>error</code></th><th>When it happens</th></tr></thead><tbody><tr><td>200</td><td>-</td><td>OK.</td></tr><tr><td>404</td><td><code>not_found</code></td><td>No such app.</td></tr><tr><td>401</td><td><code>unauthorized</code></td><td>No <code>Authorization</code> header, or an invalid, expired or revoked session token. Returned by the gateway's forward-auth (from registry-service).</td></tr><tr><td>403</td><td><code>mfa_required</code></td><td>The session is only aal1 (emailed code only), or Kratos refuses it because an authenticator app is enrolled but not used in this session. Do the authenticator step.</td></tr><tr><td>403</td><td><code>not_staff</code></td><td>A valid session, but the person is not an ACTIVE staff member (customers get this).</td></tr></tbody></table></div>
+<h4>How to use it</h4><ul><li><code>fingerprint</code> is the SHA-256 of the DER public key; ask the partner to read theirs out to confirm the right key was registered.</li><li><code>status</code> is <code>ACTIVE</code> or <code>REVOKED</code>; an ACTIVE key past its <code>expiresAt</code> is rejected by the partner API as <code>key_revoked_or_expired</code>.</li></ul>
+</div></details>
+<details class="endpoint" id="ep-staff-post-apps-id-keys"><summary><span class="method m-post">POST</span><span class="path">/admin/api/v1/apps/{appId}/keys</span><span class="sum">Register the partner's public key</span></summary><div class="body">
+<dl class="meta"><dt>Audience</dt><dd>Adera staff (the dashboard)</dd><dt>Client path</dt><dd><code>/admin/api/v1/apps/{appId}/keys</code> through the gateway</dd><dt>Internal path</dt><dd>same path on registry-service :8080 (the gateway does not rewrite it)</dd><dt>Auth</dt><dd><code>Authorization: Bearer $TOKEN</code>, a Kratos session token of an <strong>aal2</strong> staff session. The gateway checks it and adds <code>X-Staff-Id</code>, <code>X-Staff-Role</code>, <code>X-Gateway-Secret</code>. Minimum role: <strong>ADMIN</strong>.</dd><dt>Rate limit</dt><dd>300 per 60 s per client IP (gateway route <code>admin-api</code>)</dd><dt>Implemented in</dt><dd><code>services/registry-service/src/main/java/app/adera/registry/key/KeyAdminController.java, PartnerKeyService.java, PemKeys.java</code></dd></dl>
+<h4>Purpose</h4><p>The recommended way: the partner generates an RSA key pair (see <a href="06-security.html#signing">signing</a>) and gives you the <strong>public</strong> key. Adera stores it and returns the generated key id the partner must send as <code>X-Adera-Key-Id</code>. A private key sent by mistake is rejected.</p>
+<h4>Request parameters</h4><div class="table-wrap"><table><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why it exists</th></tr></thead><tbody><tr><td>appId</td><td>path</td><td>UUID</td><td>yes</td><td>Existing app.</td><td>Identifies the app.</td></tr><tr><td>environment</td><td>body</td><td>string</td><td>yes</td><td><code>DEV</code> or <code>PROD</code>.</td><td>Each key belongs to one environment. A key of the environment this deployment does not run can be registered, but is refused there with <code>wrong_environment</code>.</td></tr><tr><td>publicKeyPem</td><td>body</td><td>string</td><td>yes</td><td>PEM starting <code>-----BEGIN PUBLIC KEY-----</code>; RSA, at least 2048 bits. Any text containing <code>PRIVATE KEY</code> is refused.</td><td>The key that verifies the partner's signatures.</td></tr><tr><td>label</td><td>body</td><td>string</td><td>no</td><td>Up to 100 chars.</td><td>Human note, e.g. which server.</td></tr><tr><td>expiresAt</td><td>body</td><td>string</td><td>no</td><td>ISO-8601 instant in the future, e.g. <code>2027-12-31T00:00:00Z</code>.</td><td>Forces rotation.</td></tr></tbody></table></div>
+<h4>Example request</h4><pre><code>curl -sS -i -X POST "$BASE/admin/api/v1/apps/$APP/keys" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"environment": "PROD", "publicKeyPem": "-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAyy9oFXYvfGDv+GIT1h67\nKiLtXI+iQSlWeUjH+nOxJdBV2uwKtuELG9iXbTXwv8L12/YGd1llaPueseWGIg63\nCb+UsVZVoEnvI38VqCaG3lQLYoiOYEj1S6kKAKIjCXt07UXfXCDVeHCJ0BNvXBI1\n1fIuxOREi4g3ahFeoY/Q3fXZrA4Dt6p+jk5jXNPrGbhVGpTYBSmP/24G4ZzSfCCb\np2vs6CYFSGWZnswMgsK3uvS93kflI+0+URPnTYKPy/lVn77ynq/9L2L1TYISNg7p\n2XSabpmIQFvt/SrxNpS/ZVVRAkA8pXBqD10VE2ZjoUVS5KpZ19pXsu45IU7CcBfx\n3wIDAQAB\n-----END PUBLIC KEY-----\n", "label": "production server"}'</code></pre>
+<h4>Example response</h4><pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+X-Request-Id: 20aede11-cd42-40d5-931b-c66fb927aee0
+
+{
+  "keyId": "ak_prod_963c74c95700a968a25fb72a",
+  "environment": "PROD",
+  "algorithm": "RS256",
+  "fingerprint": "fe3a9d4646ab673ff6bf0e4d8e80ad07a3164abd07829f7bcafac5a558615c1b",
+  "label": "production server",
+  "status": "ACTIVE",
+  "expiresAt": null,
+  "createdAt": "2026-10-25T06:06:10.429433332Z",
+  "revokedAt": null
+}</code></pre>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th><code>error</code></th><th>When it happens</th></tr></thead><tbody><tr><td>200</td><td>-</td><td>OK. Key ids look like <code>ak_dev_</code> or <code>ak_prod_</code> plus 24 hex characters (keys created before the rename keep their old <code>ak_dev_</code> / <code>ak_prod_</code> ids).</td></tr><tr><td>400</td><td><code>validation_failed</code></td><td>Private key sent, not a PEM public key, under 2048 bits, bad environment, expiry in the past or not an instant, label too long, unknown field.</td></tr><tr><td>403</td><td><code>insufficient_role</code></td><td>VIEWER.</td></tr><tr><td>404</td><td><code>not_found</code></td><td>No such app.</td></tr><tr><td>409</td><td><code>too_many_active_keys</code></td><td>Already 5 ACTIVE keys in this environment (<code>max</code> says 5). Revoke one first.</td></tr><tr><td>401</td><td><code>unauthorized</code></td><td>No <code>Authorization</code> header, or an invalid, expired or revoked session token. Returned by the gateway's forward-auth (from registry-service).</td></tr><tr><td>403</td><td><code>mfa_required</code></td><td>The session is only aal1 (emailed code only), or Kratos refuses it because an authenticator app is enrolled but not used in this session. Do the authenticator step.</td></tr><tr><td>403</td><td><code>not_staff</code></td><td>A valid session, but the person is not an ACTIVE staff member (customers get this).</td></tr></tbody></table></div>
+<h4>Real error responses</h4><pre class="out nocopy"><code>A private key by mistake:
+request body: {"environment": "PROD", "publicKeyPem": "-----BEGIN PRIVATE KEY----- ... (a private key by mistake)"}
+HTTP 400  {"error": "validation_failed", "fields": {"publicKeyPem": "that is a PRIVATE key. Never send it: keep it on your server and send only the public key (BEGIN PUBLIC KEY)"}}</code></pre>
+<pre class="out nocopy"><code>Bad environment:
+request body: {"environment": "STAGING", "publicKeyPem": "-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAyy9oFXYvfGDv+GIT1h67\nKiLtXI+iQSlWeUjH+nOxJdBV2uwKtuELG9iXbTXwv8L12/YGd1llaPueseWGIg63\nCb+UsVZVoEnvI38VqCaG3lQLYoiOYEj1S6kKAKIjCXt07UXfXCDVeHCJ0BNvXBI1\n1fIuxOREi4g3ahFeoY/Q3fXZrA4Dt6p+j
+HTTP 400  {"error": "validation_failed", "fields": {"environment": "must be DEV or PROD"}}</code></pre>
+<pre class="out nocopy"><code>Not a PEM and unknown field:
+request body: {"environment": "PROD", "publicKeyPem": "hello", "extra": 1}
+HTTP 400  {"error": "validation_failed", "fields": {"extra": "unknown field"}}</code></pre>
+<pre class="out nocopy"><code>Expiry in the past:
+request body: {"environment": "PROD", "publicKeyPem": "-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAyy9oFXYvfGDv+GIT1h67\nKiLtXI+iQSlWeUjH+nOxJdBV2uwKtuELG9iXbTXwv8L12/YGd1llaPueseWGIg63\nCb+UsVZVoEnvI38VqCaG3lQLYoiOYEj1S6kKAKIjCXt07UXfXCDVeHCJ0BNvXBI1\n1fIuxOREi4g3ahFeoY/Q3fXZrA4Dt6p+j
+HTTP 400  {"error": "validation_failed", "fields": {"expiresAt": "must be in the future"}}</code></pre>
+<pre class="out nocopy"><code>Expiry not an instant:
+request body: {"environment": "PROD", "publicKeyPem": "-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAyy9oFXYvfGDv+GIT1h67\nKiLtXI+iQSlWeUjH+nOxJdBV2uwKtuELG9iXbTXwv8L12/YGd1llaPueseWGIg63\nCb+UsVZVoEnvI38VqCaG3lQLYoiOYEj1S6kKAKIjCXt07UXfXCDVeHCJ0BNvXBI1\n1fIuxOREi4g3ahFeoY/Q3fXZrA4Dt6p+j
+HTTP 400  {"error": "validation_failed", "fields": {"expiresAt": "must be an ISO-8601 instant like 2027-01-01T00:00:00Z"}}</code></pre>
+<pre class="out nocopy"><code>A sixth active key:
+request body: {"environment": "DEV", "publicKeyPem": "-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAyy9oFXYvfGDv+GIT1h67\nKiLtXI+iQSlWeUjH+nOxJdBV2uwKtuELG9iXbTXwv8L12/YGd1llaPueseWGIg63\nCb+UsVZVoEnvI38VqCaG3lQLYoiOYEj1S6kKAKIjCXt07UXfXCDVeHCJ0BNvXBI1\n1fIuxOREi4g3ahFeoY/Q3fXZrA4Dt6p+j
+HTTP 409  {"error": "too_many_active_keys", "fields": {"max": "5"}}</code></pre>
+<h4>How to use it</h4><ul><li>Rotation: register the new key, let the partner switch, then revoke the old one. Up to 5 active keys per environment make that overlap possible.</li><li>Send the partner the <code>keyId</code>, not the fingerprint.</li></ul>
+</div></details>
+<details class="endpoint" id="ep-staff-post-apps-id-keys-generate"><summary><span class="method m-post">POST</span><span class="path">/admin/api/v1/apps/{appId}/keys/generate</span><span class="sum">Generate a key pair for the partner (convenience for DEV)</span></summary><div class="body">
+<dl class="meta"><dt>Audience</dt><dd>Adera staff (the dashboard)</dd><dt>Client path</dt><dd><code>/admin/api/v1/apps/{appId}/keys/generate</code> through the gateway</dd><dt>Internal path</dt><dd>same path on registry-service :8080 (the gateway does not rewrite it)</dd><dt>Auth</dt><dd><code>Authorization: Bearer $TOKEN</code>, a Kratos session token of an <strong>aal2</strong> staff session. The gateway checks it and adds <code>X-Staff-Id</code>, <code>X-Staff-Role</code>, <code>X-Gateway-Secret</code>. Minimum role: <strong>ADMIN</strong>.</dd><dt>Rate limit</dt><dd>300 per 60 s per client IP (gateway route <code>admin-api</code>)</dd><dt>Implemented in</dt><dd><code>services/registry-service/src/main/java/app/adera/registry/key/KeyAdminController.java, PemKeys.java</code></dd></dl>
+<h4>Purpose</h4><p>Adera generates an RSA 3072-bit pair, stores only the public key and returns the <strong>private key once</strong> in this response. It cannot be shown again. Meant for DEV convenience; a partner going to PROD should generate their own key and send only the public half, so Adera never sees the private key.</p>
+<h4>Request parameters</h4><div class="table-wrap"><table><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why it exists</th></tr></thead><tbody><tr><td>appId</td><td>path</td><td>UUID</td><td>yes</td><td>Existing app.</td><td>Identifies the app.</td></tr><tr><td>environment</td><td>body</td><td>string</td><td>yes</td><td><code>DEV</code> or <code>PROD</code>.</td><td>Which environment the key is for (the other environment's key is stored but not active on this deployment).</td></tr><tr><td>label</td><td>body</td><td>string</td><td>no</td><td>Up to 100 chars.</td><td>Human note.</td></tr><tr><td>expiresAt</td><td>body</td><td>string</td><td>no</td><td>ISO-8601 instant in the future.</td><td>Forces rotation.</td></tr></tbody></table></div>
+<h4>Example request</h4><pre><code>curl -sS -i -X POST "$BASE/admin/api/v1/apps/$APP/keys/generate" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"environment": "DEV", "label": "generated dev key"}'</code></pre>
+<h4>Example response</h4><pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+X-Request-Id: 50c5c954-1f3c-4756-8478-2e122d911400
+
+{
+  "key": {
+    "keyId": "ak_dev_8acbea3d0147049a72ed8464",
+    "environment": "DEV",
+    "algorithm": "RS256",
+    "fingerprint": "9a42581c081f3ee783e6f11ad7681c4d2c7d138fe70b01e29f8a1fb6eee51d1f",
+    "label": "generated dev key",
+    "status": "ACTIVE",
+    "expiresAt": null,
+    "createdAt": "2026-10-25T06:06:20.760664511Z",
+    "revokedAt": null
+  },
+  "privateKeyPem": "-----BEGIN PRIVATE KEY-----\n&lt;masked: the real response shows the full private key once&gt;\n-----END PRIVATE KEY-----\n",
+  "warning": "Shown once. We store only the public key. Give the private key to the partner over a secure channel."
+}</code></pre><p class="masked">The real response contains the full private key; it is masked here.</p>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th><code>error</code></th><th>When it happens</th></tr></thead><tbody><tr><td>200</td><td>-</td><td>OK, <code>{key, privateKeyPem, warning}</code>.</td></tr><tr><td>400</td><td><code>validation_failed</code></td><td>Bad environment, bad expiry, unknown field.</td></tr><tr><td>403</td><td><code>insufficient_role</code></td><td>VIEWER.</td></tr><tr><td>404</td><td><code>not_found</code></td><td>No such app.</td></tr><tr><td>409</td><td><code>too_many_active_keys</code></td><td>5 active keys already.</td></tr><tr><td>401</td><td><code>unauthorized</code></td><td>No <code>Authorization</code> header, or an invalid, expired or revoked session token. Returned by the gateway's forward-auth (from registry-service).</td></tr><tr><td>403</td><td><code>mfa_required</code></td><td>The session is only aal1 (emailed code only), or Kratos refuses it because an authenticator app is enrolled but not used in this session. Do the authenticator step.</td></tr><tr><td>403</td><td><code>not_staff</code></td><td>A valid session, but the person is not an ACTIVE staff member (customers get this).</td></tr></tbody></table></div>
+<h4>How to use it</h4><ul><li>Hand the private key over through a secure channel and tell the partner to store it as a secret. Do not paste it into chat or tickets.</li><li>If it is lost, revoke the key and generate another.</li></ul>
+</div></details>
+<details class="endpoint" id="ep-staff-delete-apps-id-keys-keyid"><summary><span class="method m-delete">DELETE</span><span class="path">/admin/api/v1/apps/{appId}/keys/{keyId}</span><span class="sum">Revoke a key</span></summary><div class="body">
+<dl class="meta"><dt>Audience</dt><dd>Adera staff (the dashboard)</dd><dt>Client path</dt><dd><code>/admin/api/v1/apps/{appId}/keys/{keyId}</code> through the gateway</dd><dt>Internal path</dt><dd>same path on registry-service :8080 (the gateway does not rewrite it)</dd><dt>Auth</dt><dd><code>Authorization: Bearer $TOKEN</code>, a Kratos session token of an <strong>aal2</strong> staff session. The gateway checks it and adds <code>X-Staff-Id</code>, <code>X-Staff-Role</code>, <code>X-Gateway-Secret</code>. Minimum role: <strong>ADMIN</strong>.</dd><dt>Rate limit</dt><dd>300 per 60 s per client IP (gateway route <code>admin-api</code>)</dd><dt>Implemented in</dt><dd><code>services/registry-service/src/main/java/app/adera/registry/key/KeyAdminController.java</code></dd></dl>
+<h4>Purpose</h4><p>Marks the key <code>REVOKED</code> at once. It stays in the list for the record. A revoked key is rejected by the partner API with <code>401 key_revoked_or_expired</code> within about 15 seconds. Revoking an already revoked key succeeds and changes nothing.</p>
+<h4>Request parameters</h4><div class="table-wrap"><table><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why it exists</th></tr></thead><tbody><tr><td>appId</td><td>path</td><td>UUID</td><td>yes</td><td>Existing app.</td><td>Identifies the app.</td></tr><tr><td>keyId</td><td>path</td><td>string</td><td>yes</td><td>A key of this app (e.g. <code>ak_dev_...</code>).</td><td>Which key to revoke.</td></tr></tbody></table></div>
+<h4>Example request</h4><pre><code>curl -sS -i -X DELETE "$BASE/admin/api/v1/apps/$APP/keys/$KEY_ID" \
+  -H "Authorization: Bearer $TOKEN"</code></pre>
+<h4>Example response</h4><pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+X-Request-Id: faf4d12f-691a-4cb1-aac1-5f584db1835c
+
+{
+  "keyId": "ak_dev_8acbea3d0147049a72ed8464",
+  "environment": "DEV",
+  "algorithm": "RS256",
+  "fingerprint": "9a42581c081f3ee783e6f11ad7681c4d2c7d138fe70b01e29f8a1fb6eee51d1f",
+  "label": "generated dev key",
+  "status": "REVOKED",
+  "expiresAt": null,
+  "createdAt": "2026-10-25T06:06:20.760665Z",
+  "revokedAt": "2026-10-25T06:06:20.938855234Z"
+}</code></pre>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th><code>error</code></th><th>When it happens</th></tr></thead><tbody><tr><td>200</td><td>-</td><td>OK, the key with <code>status: REVOKED</code> and <code>revokedAt</code>.</td></tr><tr><td>403</td><td><code>insufficient_role</code></td><td>VIEWER.</td></tr><tr><td>404</td><td><code>not_found</code></td><td>No such key for this app (also if it belongs to another app).</td></tr><tr><td>401</td><td><code>unauthorized</code></td><td>No <code>Authorization</code> header, or an invalid, expired or revoked session token. Returned by the gateway's forward-auth (from registry-service).</td></tr><tr><td>403</td><td><code>mfa_required</code></td><td>The session is only aal1 (emailed code only), or Kratos refuses it because an authenticator app is enrolled but not used in this session. Do the authenticator step.</td></tr><tr><td>403</td><td><code>not_staff</code></td><td>A valid session, but the person is not an ACTIVE staff member (customers get this).</td></tr></tbody></table></div>
+<h4>Real error responses</h4><pre class="out nocopy"><code>Unknown key:
+HTTP 404  {"error": "not_found"}</code></pre>
+<h4>How to use it</h4><ul><li>Revoke first, investigate second, when a key may have leaked.</li></ul>
+</div></details>
+</section>
+<section><h2 id="moderation">Reviews and reports</h2>
+<details class="endpoint" id="ep-staff-get-apps-id-reviews"><summary><span class="method m-get">GET</span><span class="path">/admin/api/v1/apps/{appId}/reviews</span><span class="sum">Every review of an app (including hidden ones)</span></summary><div class="body">
+<dl class="meta"><dt>Audience</dt><dd>Adera staff (the dashboard)</dd><dt>Client path</dt><dd><code>/admin/api/v1/apps/{appId}/reviews</code> through the gateway</dd><dt>Internal path</dt><dd>same path on registry-service :8080 (the gateway does not rewrite it)</dd><dt>Auth</dt><dd><code>Authorization: Bearer $TOKEN</code>, a Kratos session token of an <strong>aal2</strong> staff session. The gateway checks it and adds <code>X-Staff-Id</code>, <code>X-Staff-Role</code>, <code>X-Gateway-Secret</code>. Minimum role: <strong>VIEWER</strong>.</dd><dt>Rate limit</dt><dd>300 per 60 s per client IP (gateway route <code>admin-api</code>)</dd><dt>Implemented in</dt><dd><code>services/registry-service/src/main/java/app/adera/registry/review/ReviewAdminController.java</code></dd></dl>
+<h4>Purpose</h4><p>Moderation view: all reviews newest first, with the author's user id and status. (The public view shows only VISIBLE reviews, anonymously.)</p>
+<h4>Request parameters</h4><div class="table-wrap"><table><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why it exists</th></tr></thead><tbody><tr><td>appId</td><td>path</td><td>UUID</td><td>yes</td><td>Existing app.</td><td>Identifies the app.</td></tr><tr><td>page</td><td>query</td><td>integer</td><td>no (0)</td><td>Zero-based page.</td><td>Paging.</td></tr><tr><td>size</td><td>query</td><td>integer</td><td>no (50)</td><td>1 to 100 (clamped).</td><td>Page size.</td></tr></tbody></table></div>
+<h4>Example request</h4><pre><code>curl -sS -i -X GET "$BASE/admin/api/v1/apps/$APP/reviews?page=0&amp;size=20" \
+  -H "Authorization: Bearer $TOKEN"</code></pre>
+<h4>Example response</h4><pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+X-Request-Id: 740837a1-6b03-46c2-9651-c2b37fbb3694
+
+[
+  {
+    "appId": "41548c1e-b03e-412a-bbbe-1e46343505b9",
+    "userId": "c2b89fc0-8db2-4f56-8493-f89aa51914ea",
+    "rating": 4,
+    "comment": "Fast and friendly.",
+    "createdAt": "2026-10-25T06:07:06.643870Z",
+    "id": "8490a1c2-9a99-4a7b-89db-9f0af9aad9c8",
+    "status": "VISIBLE",
+    "updatedAt": "2026-10-25T06:07:06.643870Z"
+  }
+]</code></pre>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th><code>error</code></th><th>When it happens</th></tr></thead><tbody><tr><td>200</td><td>-</td><td>OK (empty list when none).</td></tr><tr><td>401</td><td><code>unauthorized</code></td><td>No <code>Authorization</code> header, or an invalid, expired or revoked session token. Returned by the gateway's forward-auth (from registry-service).</td></tr><tr><td>403</td><td><code>mfa_required</code></td><td>The session is only aal1 (emailed code only), or Kratos refuses it because an authenticator app is enrolled but not used in this session. Do the authenticator step.</td></tr><tr><td>403</td><td><code>not_staff</code></td><td>A valid session, but the person is not an ACTIVE staff member (customers get this).</td></tr></tbody></table></div>
+<h4>How to use it</h4><ul><li>Contains the real user id; treat it as personal data in the dashboard.</li></ul>
+</div></details>
+<details class="endpoint" id="ep-staff-patch-reviews-id"><summary><span class="method m-patch">PATCH</span><span class="path">/admin/api/v1/reviews/{reviewId}</span><span class="sum">Hide or show a review</span></summary><div class="body">
+<dl class="meta"><dt>Audience</dt><dd>Adera staff (the dashboard)</dd><dt>Client path</dt><dd><code>/admin/api/v1/reviews/{reviewId}</code> through the gateway</dd><dt>Internal path</dt><dd>same path on registry-service :8080 (the gateway does not rewrite it)</dd><dt>Auth</dt><dd><code>Authorization: Bearer $TOKEN</code>, a Kratos session token of an <strong>aal2</strong> staff session. The gateway checks it and adds <code>X-Staff-Id</code>, <code>X-Staff-Role</code>, <code>X-Gateway-Secret</code>. Minimum role: <strong>ADMIN</strong>.</dd><dt>Rate limit</dt><dd>300 per 60 s per client IP (gateway route <code>admin-api</code>)</dd><dt>Implemented in</dt><dd><code>services/registry-service/src/main/java/app/adera/registry/review/ReviewService.java (moderate)</code></dd></dl>
+<h4>Purpose</h4><p>Sets a review to <code>HIDDEN</code> (removed from the public list and from the average) or back to <code>VISIBLE</code>. The app's rating average and count are recomputed. Audited.</p>
+<h4>Request parameters</h4><div class="table-wrap"><table><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why it exists</th></tr></thead><tbody><tr><td>reviewId</td><td>path</td><td>UUID</td><td>yes</td><td>Existing review.</td><td>Identifies the review.</td></tr><tr><td>status</td><td>body</td><td>string</td><td>yes</td><td><code>VISIBLE</code> or <code>HIDDEN</code>.</td><td>The moderation decision.</td></tr></tbody></table></div>
+<h4>Example request</h4><pre><code>curl -sS -i -X PATCH "$BASE/admin/api/v1/reviews/$REVIEW_ID" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"status": "HIDDEN"}'</code></pre>
+<h4>Example response</h4><pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+X-Request-Id: 2e02709d-1a13-41bf-a754-f5cfb5bd76ed
+
+{
+  "appId": "41548c1e-b03e-412a-bbbe-1e46343505b9",
+  "userId": "c2b89fc0-8db2-4f56-8493-f89aa51914ea",
+  "rating": 4,
+  "comment": "Fast and friendly.",
+  "createdAt": "2026-10-25T06:07:06.643870Z",
+  "id": "8490a1c2-9a99-4a7b-89db-9f0af9aad9c8",
+  "status": "HIDDEN",
+  "updatedAt": "2026-10-25T06:07:06.946979333Z"
+}</code></pre>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th><code>error</code></th><th>When it happens</th></tr></thead><tbody><tr><td>200</td><td>-</td><td>OK, the review.</td></tr><tr><td>400</td><td><code>validation_failed</code></td><td>Status is not VISIBLE or HIDDEN.</td></tr><tr><td>403</td><td><code>insufficient_role</code></td><td>VIEWER.</td></tr><tr><td>404</td><td><code>not_found</code></td><td>No such review.</td></tr><tr><td>401</td><td><code>unauthorized</code></td><td>No <code>Authorization</code> header, or an invalid, expired or revoked session token. Returned by the gateway's forward-auth (from registry-service).</td></tr><tr><td>403</td><td><code>mfa_required</code></td><td>The session is only aal1 (emailed code only), or Kratos refuses it because an authenticator app is enrolled but not used in this session. Do the authenticator step.</td></tr><tr><td>403</td><td><code>not_staff</code></td><td>A valid session, but the person is not an ACTIVE staff member (customers get this).</td></tr></tbody></table></div>
+<h4>Real error responses</h4><pre class="out nocopy"><code>Bad status:
+request body: {"status": "DELETED"}
+HTTP 400  {"error": "validation_failed", "fields": {"status": "must be VISIBLE or HIDDEN"}}</code></pre>
+<pre class="out nocopy"><code>Unknown review:
+request body: {"status": "HIDDEN"}
+HTTP 404  {"error": "not_found"}</code></pre>
+<h4>How to use it</h4><ul><li>Hide rather than delete: the record stays for the audit trail.</li></ul>
+</div></details>
+<details class="endpoint" id="ep-staff-get-reports"><summary><span class="method m-get">GET</span><span class="path">/admin/api/v1/reports</span><span class="sum">User reports about apps</span></summary><div class="body">
+<dl class="meta"><dt>Audience</dt><dd>Adera staff (the dashboard)</dd><dt>Client path</dt><dd><code>/admin/api/v1/reports</code> through the gateway</dd><dt>Internal path</dt><dd>same path on registry-service :8080 (the gateway does not rewrite it)</dd><dt>Auth</dt><dd><code>Authorization: Bearer $TOKEN</code>, a Kratos session token of an <strong>aal2</strong> staff session. The gateway checks it and adds <code>X-Staff-Id</code>, <code>X-Staff-Role</code>, <code>X-Gateway-Secret</code>. Minimum role: <strong>VIEWER</strong>.</dd><dt>Rate limit</dt><dd>300 per 60 s per client IP (gateway route <code>admin-api</code>)</dd><dt>Implemented in</dt><dd><code>services/registry-service/src/main/java/app/adera/registry/review/ReviewAdminController.java</code></dd></dl>
+<h4>Purpose</h4><p>The "report this app" submissions from users, newest first. A user reporting the same app again while an earlier report is open does not add a duplicate.</p>
+<h4>Request parameters</h4><div class="table-wrap"><table><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why it exists</th></tr></thead><tbody><tr><td>status</td><td>query</td><td>string</td><td>no (all)</td><td><code>OPEN</code>, <code>REVIEWED</code> or <code>DISMISSED</code>.</td><td>Work through the open queue.</td></tr><tr><td>page</td><td>query</td><td>integer</td><td>no (0)</td><td>Zero-based.</td><td>Paging.</td></tr><tr><td>size</td><td>query</td><td>integer</td><td>no (50)</td><td>1 to 100.</td><td>Page size.</td></tr></tbody></table></div>
+<h4>Example request</h4><pre><code>curl -sS -i -X GET "$BASE/admin/api/v1/reports?status=OPEN" \
+  -H "Authorization: Bearer $TOKEN"</code></pre>
+<h4>Example response</h4><pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+X-Request-Id: 83a659fb-407f-44ab-804e-5ee8430becaf
+
+[
+  {
+    "appId": "41548c1e-b03e-412a-bbbe-1e46343505b9",
+    "userId": "c2b89fc0-8db2-4f56-8493-f89aa51914ea",
+    "reason": "BROKEN",
+    "details": "The booking button does nothing.",
+    "createdAt": "2026-10-25T06:07:06.795070Z",
+    "handledAt": null,
+    "handledBy": null,
+    "id": "dcdf890e-9b00-461e-8548-233becd25658",
+    "status": "OPEN"
+  }
+]</code></pre>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th><code>error</code></th><th>When it happens</th></tr></thead><tbody><tr><td>200</td><td>-</td><td>OK.</td></tr><tr><td>401</td><td><code>unauthorized</code></td><td>No <code>Authorization</code> header, or an invalid, expired or revoked session token. Returned by the gateway's forward-auth (from registry-service).</td></tr><tr><td>403</td><td><code>mfa_required</code></td><td>The session is only aal1 (emailed code only), or Kratos refuses it because an authenticator app is enrolled but not used in this session. Do the authenticator step.</td></tr><tr><td>403</td><td><code>not_staff</code></td><td>A valid session, but the person is not an ACTIVE staff member (customers get this).</td></tr></tbody></table></div>
+<h4>How to use it</h4><ul><li>An unknown <code>status</code> value is not an error here: it simply matches nothing.</li></ul>
+</div></details>
+<details class="endpoint" id="ep-staff-patch-reports-id"><summary><span class="method m-patch">PATCH</span><span class="path">/admin/api/v1/reports/{reportId}</span><span class="sum">Mark a report reviewed or dismissed</span></summary><div class="body">
+<dl class="meta"><dt>Audience</dt><dd>Adera staff (the dashboard)</dd><dt>Client path</dt><dd><code>/admin/api/v1/reports/{reportId}</code> through the gateway</dd><dt>Internal path</dt><dd>same path on registry-service :8080 (the gateway does not rewrite it)</dd><dt>Auth</dt><dd><code>Authorization: Bearer $TOKEN</code>, a Kratos session token of an <strong>aal2</strong> staff session. The gateway checks it and adds <code>X-Staff-Id</code>, <code>X-Staff-Role</code>, <code>X-Gateway-Secret</code>. Minimum role: <strong>ADMIN</strong>.</dd><dt>Rate limit</dt><dd>300 per 60 s per client IP (gateway route <code>admin-api</code>)</dd><dt>Implemented in</dt><dd><code>services/registry-service/src/main/java/app/adera/registry/review/ReviewService.java (handleReport)</code></dd></dl>
+<h4>Purpose</h4><p>Records the staff decision on a report and who made it. Audited. To act on the app itself use the status endpoint.</p>
+<h4>Request parameters</h4><div class="table-wrap"><table><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why it exists</th></tr></thead><tbody><tr><td>reportId</td><td>path</td><td>UUID</td><td>yes</td><td>Existing report.</td><td>Identifies the report.</td></tr><tr><td>status</td><td>body</td><td>string</td><td>yes</td><td><code>OPEN</code>, <code>REVIEWED</code> or <code>DISMISSED</code>.</td><td>The outcome.</td></tr></tbody></table></div>
+<h4>Example request</h4><pre><code>curl -sS -i -X PATCH "$BASE/admin/api/v1/reports/$REPORT_ID" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"status": "REVIEWED"}'</code></pre>
+<h4>Example response</h4><pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+X-Request-Id: d2cf3e29-2f46-4da1-9981-45620c7d78c1
+
+{
+  "appId": "41548c1e-b03e-412a-bbbe-1e46343505b9",
+  "userId": "c2b89fc0-8db2-4f56-8493-f89aa51914ea",
+  "reason": "BROKEN",
+  "details": "The booking button does nothing.",
+  "createdAt": "2026-10-25T06:07:06.795070Z",
+  "handledAt": "2026-10-25T06:07:07.345182428Z",
+  "handledBy": "0b648e27-181c-4650-87d7-441a5f07fb00",
+  "id": "dcdf890e-9b00-461e-8548-233becd25658",
+  "status": "REVIEWED"
+}</code></pre>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th><code>error</code></th><th>When it happens</th></tr></thead><tbody><tr><td>200</td><td>-</td><td>OK, the report with <code>handledBy</code> and <code>handledAt</code>.</td></tr><tr><td>400</td><td><code>validation_failed</code></td><td>Bad status.</td></tr><tr><td>403</td><td><code>insufficient_role</code></td><td>VIEWER.</td></tr><tr><td>404</td><td><code>not_found</code></td><td>No such report.</td></tr><tr><td>401</td><td><code>unauthorized</code></td><td>No <code>Authorization</code> header, or an invalid, expired or revoked session token. Returned by the gateway's forward-auth (from registry-service).</td></tr><tr><td>403</td><td><code>mfa_required</code></td><td>The session is only aal1 (emailed code only), or Kratos refuses it because an authenticator app is enrolled but not used in this session. Do the authenticator step.</td></tr><tr><td>403</td><td><code>not_staff</code></td><td>A valid session, but the person is not an ACTIVE staff member (customers get this).</td></tr></tbody></table></div>
+<h4>Real error responses</h4><pre class="out nocopy"><code>Bad status:
+request body: {"status": "DONE"}
+HTTP 400  {"error": "validation_failed", "fields": {"status": "must be OPEN, REVIEWED or DISMISSED"}}</code></pre>
+<h4>How to use it</h4><ul><li>Reports do not change the app automatically.</li></ul>
+</div></details>
+</section>
+<section><h2 id="audit-staff">Audit log and staff accounts</h2>
+<details class="endpoint" id="ep-staff-get-audit"><summary><span class="method m-get">GET</span><span class="path">/admin/api/v1/audit</span><span class="sum">Read the audit log</span></summary><div class="body">
+<dl class="meta"><dt>Audience</dt><dd>Adera staff (the dashboard)</dd><dt>Client path</dt><dd><code>/admin/api/v1/audit</code> through the gateway</dd><dt>Internal path</dt><dd>same path on registry-service :8080 (the gateway does not rewrite it)</dd><dt>Auth</dt><dd><code>Authorization: Bearer $TOKEN</code>, a Kratos session token of an <strong>aal2</strong> staff session. The gateway checks it and adds <code>X-Staff-Id</code>, <code>X-Staff-Role</code>, <code>X-Gateway-Secret</code>. Minimum role: <strong>ADMIN</strong>.</dd><dt>Rate limit</dt><dd>300 per 60 s per client IP (gateway route <code>admin-api</code>)</dd><dt>Implemented in</dt><dd><code>services/registry-service/src/main/java/app/adera/registry/audit/AuditController.java</code></dd></dl>
+<h4>Purpose</h4><p>The append-only record of every change staff made, newest first: who (id, role, IP), what (<code>action</code> such as <code>app.create</code>, <code>capability.set</code>, <code>key.register</code>, <code>staff.update</code>), on what (<code>targetType</code>, <code>targetId</code>) and details. Written in the same database transaction as the change, so a change cannot exist without its row.</p>
+<h4>Request parameters</h4><div class="table-wrap"><table><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why it exists</th></tr></thead><tbody><tr><td>limit</td><td>query</td><td>integer</td><td>no (50)</td><td>1 to 200 (clamped).</td><td>How many rows.</td></tr><tr><td>target</td><td>query</td><td>string</td><td>no</td><td>A target id: app id, key id, staff id, review id.</td><td>Show the history of one thing.</td></tr><tr><td>offset</td><td>query</td><td>integer</td><td>no (0)</td><td>0 or more.</td><td>Paging. The total number of matches is in the <code>X-Total-Count</code> response header.</td></tr><tr><td>actor</td><td>query</td><td>UUID</td><td>no</td><td>A staff id; anything else is 400 with <code>fields.actor</code>.</td><td>What did this person change?</td></tr><tr><td>action</td><td>query</td><td>string</td><td>no</td><td>Matches the <em>start</em> of the action: <code>app.</code> matches app.create, app.status...</td><td>Find one kind of change.</td></tr><tr><td>targetType</td><td>query</td><td>string</td><td>no</td><td>For example <code>mini_app</code>, <code>app_user</code>, <code>staff</code>.</td><td>Narrow to one kind of thing.</td></tr><tr><td>from, to</td><td>query</td><td>ISO instant</td><td>no</td><td><code>from</code> inclusive, <code>to</code> exclusive, like <code>2026-10-01T00:00:00Z</code>; others 400.</td><td>Date range.</td></tr></tbody></table></div>
+<h4>Example request</h4><pre><code>curl -sS -i -X GET "$BASE/admin/api/v1/audit?limit=3&amp;target=$APP" \
+  -H "Authorization: Bearer $TOKEN"</code></pre>
+<h4>Example response</h4><pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+X-Request-Id: 6ab95b12-ebaf-4bfc-b69e-93088d0871d9
+
+[
+  {
+    "actorId": "0b648e27-181c-4650-87d7-441a5f07fb00",
+    "actorRole": "SUPER_ADMIN",
+    "action": "app.status",
+    "targetType": "mini_app",
+    "targetId": "41548c1e-b03e-412a-bbbe-1e46343505b9",
+    "meta": {
+      "to": "LIVE",
+      "from": "PAUSED"
+    },
+    "ip": "172.18.0.1",
+    "at": "2026-10-25T06:07:59.713277Z",
+    "id": "dc3d6418-fb6f-4b52-aefa-65fcab1a017a"
+  },
+  {
+    "actorId": "0b648e27-181c-4650-87d7-441a5f07fb00",
+    "actorRole": "SUPER_ADMIN",
+    "action": "app.status",
+    "targetType": "mini_app",
+    "targetId": "41548c1e-b03e-412a-bbbe-1e46343505b9",
+    "meta": {
+      "to": "PAUSED",
+      "from": "LIVE"
+    },
+    "ip": "172.18.0.1",
+    "at": "2026-10-25T06:07:43.507568Z",
+    "id": "6d5a2fba-b753-4643-b7c1-7b4c19e79699"
+  },
+  {
+    "actorId": "0b648e27-181c-4650-87d7-441a5f07fb00",
+    "actorRole": "SUPER_ADMIN",
+    "action": "capability.set",
+    "targetType": "mini_app",
+    "targetId": "41548c1e-b03e-412a-bbbe-1e46343505b9",
+    "meta": {
+      "state": "GRANTED",
+      "capability": "notify.email"
+    },
+    "ip": "172.18.0.1",
+    "at": "2026-10-25T06:07:43.412424Z",
+    "id": "338691e5-c36f-494f-8249-cac10c7cf3f9"
+  }
+]</code></pre>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th><code>error</code></th><th>When it happens</th></tr></thead><tbody><tr><td>200</td><td>-</td><td>OK.</td></tr><tr><td>403</td><td><code>insufficient_role</code></td><td>VIEWER (audit needs ADMIN).</td></tr><tr><td>401</td><td><code>unauthorized</code></td><td>No <code>Authorization</code> header, or an invalid, expired or revoked session token. Returned by the gateway's forward-auth (from registry-service).</td></tr><tr><td>403</td><td><code>mfa_required</code></td><td>The session is only aal1 (emailed code only), or Kratos refuses it because an authenticator app is enrolled but not used in this session. Do the authenticator step.</td></tr><tr><td>403</td><td><code>not_staff</code></td><td>A valid session, but the person is not an ACTIVE staff member (customers get this).</td></tr></tbody></table></div>
+<h4>Real error responses</h4><pre class="out nocopy"><code>A VIEWER:
+HTTP 403  {"error": "insufficient_role"}</code></pre>
+<h4>How to use it</h4><ul><li>The actions named in <code>action</code> are listed in the <a href="10-reference.html">reference</a>.</li><li>There is no pagination beyond <code>limit</code>; filter by <code>target</code> for long histories.</li></ul>
+</div></details>
+<details class="endpoint" id="ep-staff-get-staff"><summary><span class="method m-get">GET</span><span class="path">/admin/api/v1/staff</span><span class="sum">List staff accounts</span></summary><div class="body">
+<dl class="meta"><dt>Audience</dt><dd>Adera staff (the dashboard)</dd><dt>Client path</dt><dd><code>/admin/api/v1/staff</code> through the gateway</dd><dt>Internal path</dt><dd>same path on registry-service :8080 (the gateway does not rewrite it)</dd><dt>Auth</dt><dd><code>Authorization: Bearer $TOKEN</code>, a Kratos session token of an <strong>aal2</strong> staff session. The gateway checks it and adds <code>X-Staff-Id</code>, <code>X-Staff-Role</code>, <code>X-Gateway-Secret</code>. Minimum role: <strong>SUPER_ADMIN</strong>.</dd><dt>Rate limit</dt><dd>300 per 60 s per client IP (gateway route <code>admin-api</code>)</dd><dt>Implemented in</dt><dd><code>services/registry-service/src/main/java/app/adera/registry/staff/StaffController.java</code></dd></dl>
+<h4>Purpose</h4><p>Lists every staff member (oldest first) with email, role, status and dates.</p>
+<h4>Request parameters</h4><p>None.</p>
+<h4>Example request</h4><pre><code>curl -sS -i -X GET "$BASE/admin/api/v1/staff" \
+  -H "Authorization: Bearer $TOKEN"</code></pre>
+<h4>Example response</h4><pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+X-Request-Id: 38d8f962-343c-4e66-bb5e-ee84034bf017
+
+[
+  {
+    "id": "0b648e27-181c-4650-87d7-441a5f07fb00",
+    "email": "admin@adera.local",
+    "role": "SUPER_ADMIN",
+    "status": "ACTIVE",
+    "createdAt": "2026-10-25T00:23:28.949725Z",
+    "updatedAt": "2026-10-25T00:23:28.949725Z"
+  },
+  {
+    "id": "c158df4a-c9c9-4846-9847-2676b47625e0",
+    "email": "demo.viewer@example.com",
+    "role": "VIEWER",
+    "status": "ACTIVE",
+    "createdAt": "2026-10-25T06:06:21.395298Z",
+    "updatedAt": "2026-10-25T06:06:21.395298Z"
+  }
+]</code></pre>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th><code>error</code></th><th>When it happens</th></tr></thead><tbody><tr><td>200</td><td>-</td><td>OK.</td></tr><tr><td>403</td><td><code>insufficient_role</code></td><td>Not a super admin.</td></tr><tr><td>401</td><td><code>unauthorized</code></td><td>No <code>Authorization</code> header, or an invalid, expired or revoked session token. Returned by the gateway's forward-auth (from registry-service).</td></tr><tr><td>403</td><td><code>mfa_required</code></td><td>The session is only aal1 (emailed code only), or Kratos refuses it because an authenticator app is enrolled but not used in this session. Do the authenticator step.</td></tr><tr><td>403</td><td><code>not_staff</code></td><td>A valid session, but the person is not an ACTIVE staff member (customers get this).</td></tr></tbody></table></div>
+<h4>Real error responses</h4><pre class="out nocopy"><code>A VIEWER:
+HTTP 403  {"error": "insufficient_role"}</code></pre>
+<h4>How to use it</h4><ul><li>Emails are real addresses: personal data.</li></ul>
+</div></details>
+<details class="endpoint" id="ep-staff-post-staff"><summary><span class="method m-post">POST</span><span class="path">/admin/api/v1/staff</span><span class="sum">Add a staff member</span></summary><div class="body">
+<dl class="meta"><dt>Audience</dt><dd>Adera staff (the dashboard)</dd><dt>Client path</dt><dd><code>/admin/api/v1/staff</code> through the gateway</dd><dt>Internal path</dt><dd>same path on registry-service :8080 (the gateway does not rewrite it)</dd><dt>Auth</dt><dd><code>Authorization: Bearer $TOKEN</code>, a Kratos session token of an <strong>aal2</strong> staff session. The gateway checks it and adds <code>X-Staff-Id</code>, <code>X-Staff-Role</code>, <code>X-Gateway-Secret</code>. Minimum role: <strong>SUPER_ADMIN</strong>.</dd><dt>Rate limit</dt><dd>300 per 60 s per client IP (gateway route <code>admin-api</code>)</dd><dt>Implemented in</dt><dd><code>services/registry-service/src/main/java/app/adera/registry/staff/StaffController.java, StaffService.java</code></dd></dl>
+<h4>Purpose</h4><p>Makes an email address a staff member with a role. If nobody with that email has ever signed in, a Kratos identity is created for it (email trait only); otherwise the role is granted on the existing identity. Idempotent: calling it again re-activates the person and sets the role. The new staff member then signs in with an emailed code and enrols an authenticator app on first use.</p>
+<h4>Request parameters</h4><div class="table-wrap"><table><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why it exists</th></tr></thead><tbody><tr><td>email</td><td>body</td><td>string</td><td>yes</td><td>Valid email address; stored lower-case.</td><td>Identifies the person (and where the sign-in code goes).</td></tr><tr><td>role</td><td>body</td><td>string</td><td>yes</td><td><code>VIEWER</code>, <code>ADMIN</code> or <code>SUPER_ADMIN</code>.</td><td>What they may do.</td></tr></tbody></table></div>
+<h4>Example request</h4><pre><code>curl -sS -i -X POST "$BASE/admin/api/v1/staff" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"email": "demo.viewer@example.com", "role": "VIEWER"}'</code></pre>
+<h4>Example response</h4><pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+X-Request-Id: 66b1c7c1-d6a1-4c58-8aa8-039110f0ef24
+
+{
+  "id": "c158df4a-c9c9-4846-9847-2676b47625e0",
+  "email": "demo.viewer@example.com",
+  "role": "VIEWER",
+  "status": "ACTIVE",
+  "createdAt": "2026-10-25T06:06:21.395298307Z",
+  "updatedAt": "2026-10-25T06:06:21.395298307Z"
+}</code></pre>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th><code>error</code></th><th>When it happens</th></tr></thead><tbody><tr><td>200</td><td>-</td><td>OK, the staff row.</td></tr><tr><td>400</td><td><code>validation_failed</code></td><td>Bad email or role.</td></tr><tr><td>403</td><td><code>insufficient_role</code></td><td>Not a super admin.</td></tr><tr><td>503</td><td><code>identity_service_unavailable</code></td><td>Kratos is down or rejected the create.</td></tr><tr><td>401</td><td><code>unauthorized</code></td><td>No <code>Authorization</code> header, or an invalid, expired or revoked session token. Returned by the gateway's forward-auth (from registry-service).</td></tr><tr><td>403</td><td><code>mfa_required</code></td><td>The session is only aal1 (emailed code only), or Kratos refuses it because an authenticator app is enrolled but not used in this session. Do the authenticator step.</td></tr><tr><td>403</td><td><code>not_staff</code></td><td>A valid session, but the person is not an ACTIVE staff member (customers get this).</td></tr></tbody></table></div>
+<h4>Real error responses</h4><pre class="out nocopy"><code>Bad email and role:
+request body: {"email": "nope", "role": "KING"}
+HTTP 400  {"error": "validation_failed", "fields": {"role": "must be one of VIEWER, ADMIN, SUPER_ADMIN"}}</code></pre>
+<h4>How to use it</h4><ul><li>The role is stored in the Kratos identity (<code>metadata_public.role</code>) and mirrored in registry-service's <code>staff</code> table.</li><li>An identity created this way has no profile row in user-service until the person first calls <code>/api/v1/me</code> (admin-created identities skip the registration hook).</li></ul>
+</div></details>
+<details class="endpoint" id="ep-staff-patch-staff-id"><summary><span class="method m-patch">PATCH</span><span class="path">/admin/api/v1/staff/{identityId}</span><span class="sum">Change a staff member's role or status</span></summary><div class="body">
+<dl class="meta"><dt>Audience</dt><dd>Adera staff (the dashboard)</dd><dt>Client path</dt><dd><code>/admin/api/v1/staff/{identityId}</code> through the gateway</dd><dt>Internal path</dt><dd>same path on registry-service :8080 (the gateway does not rewrite it)</dd><dt>Auth</dt><dd><code>Authorization: Bearer $TOKEN</code>, a Kratos session token of an <strong>aal2</strong> staff session. The gateway checks it and adds <code>X-Staff-Id</code>, <code>X-Staff-Role</code>, <code>X-Gateway-Secret</code>. Minimum role: <strong>SUPER_ADMIN</strong>.</dd><dt>Rate limit</dt><dd>300 per 60 s per client IP (gateway route <code>admin-api</code>)</dd><dt>Implemented in</dt><dd><code>services/registry-service/src/main/java/app/adera/registry/staff/StaffController.java, StaffService.java</code></dd></dl>
+<h4>Purpose</h4><p>Changes role and/or status. <code>DISABLED</code> removes the role from the Kratos identity and <strong>revokes all their sessions</strong>, so access ends immediately. Safeguards: you cannot demote or disable yourself, and the last active super admin cannot be removed.</p>
+<h4>Request parameters</h4><div class="table-wrap"><table><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why it exists</th></tr></thead><tbody><tr><td>identityId</td><td>path</td><td>UUID</td><td>yes</td><td>The staff member's id (the Kratos identity id).</td><td>Identifies the person.</td></tr><tr><td>role</td><td>body</td><td>string</td><td>no</td><td><code>VIEWER</code>, <code>ADMIN</code>, <code>SUPER_ADMIN</code>.</td><td>New role.</td></tr><tr><td>status</td><td>body</td><td>string</td><td>no</td><td><code>ACTIVE</code> or <code>DISABLED</code>.</td><td>Switch access on or off.</td></tr></tbody></table></div>
+<h4>Example request</h4><pre><code>curl -sS -i -X PATCH "$BASE/admin/api/v1/staff/$STAFF_ID" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"role": "ADMIN"}'</code></pre>
+<h4>Example response</h4><pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+X-Request-Id: 316f04c7-a5ab-4e7c-bc85-aa02d08537df
+
+{
+  "id": "c158df4a-c9c9-4846-9847-2676b47625e0",
+  "email": "demo.viewer@example.com",
+  "role": "ADMIN",
+  "status": "ACTIVE",
+  "createdAt": "2026-10-25T06:06:21.395298Z",
+  "updatedAt": "2026-10-25T06:06:24.613195160Z"
+}</code></pre>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th><code>error</code></th><th>When it happens</th></tr></thead><tbody><tr><td>200</td><td>-</td><td>OK, the staff row.</td></tr><tr><td>400</td><td><code>validation_failed</code></td><td>Bad role or status or unknown field.</td></tr><tr><td>403</td><td><code>insufficient_role</code></td><td>Not a super admin.</td></tr><tr><td>404</td><td><code>not_found</code></td><td>No such staff member.</td></tr><tr><td>409</td><td><code>cannot_demote_self</code></td><td>A super admin tried to lower or disable themselves.</td></tr><tr><td>409</td><td><code>last_super_admin</code></td><td>Would leave no active super admin (not reachable through the normal API, because the acting super admin is themselves active; documented from the code).</td></tr><tr><td>401</td><td><code>unauthorized</code></td><td>No <code>Authorization</code> header, or an invalid, expired or revoked session token. Returned by the gateway's forward-auth (from registry-service).</td></tr><tr><td>403</td><td><code>mfa_required</code></td><td>The session is only aal1 (emailed code only), or Kratos refuses it because an authenticator app is enrolled but not used in this session. Do the authenticator step.</td></tr><tr><td>403</td><td><code>not_staff</code></td><td>A valid session, but the person is not an ACTIVE staff member (customers get this).</td></tr></tbody></table></div>
+<h4>Real error responses</h4><pre class="out nocopy"><code>Bad values:
+request body: {"role": "KING", "status": "GONE", "x": 1}
+HTTP 400  {"error": "validation_failed", "fields": {"x": "unknown field", "role": "must be one of VIEWER, ADMIN, SUPER_ADMIN", "status": "must be ACTIVE or DISABLED"}}</code></pre>
+<pre class="out nocopy"><code>Unknown person:
+request body: {"role": "ADMIN"}
+HTTP 404  {"error": "not_found"}</code></pre>
+<pre class="out nocopy"><code>Demoting yourself:
+request body: {"role": "ADMIN"}
+HTTP 409  {"error": "cannot_demote_self"}</code></pre>
+<h4>How to use it</h4><ul><li>To remove someone, set <code>status</code> to <code>DISABLED</code>; there is no delete (the audit trail keeps referring to them).</li><li>A role change applies on the person's next request; no new login needed.</li></ul>
+</div></details>
+</section>
+<section><h2 id="dashboard-users">Dashboard counts and registered users</h2>
+<p>Added for the backoffice (see <a href="11-backoffice.html">section 11</a>). The users endpoints are served by <strong>user-service</strong> behind the same staff check; the gateway route <code>admin-users</code> (priority 30) sends them there instead of to registry-service. The dashboard counts are served by registry-service. <strong>Personal data:</strong> a VIEWER gets masked email and phone (<code>a***@g***.com</code>, <code>+251*****4567</code>) and no gender, date of birth or <code>extra</code> values; ADMIN and SUPER_ADMIN see everything. FCM push tokens and exact coordinates are never returned to anyone.</p>
+<details class="endpoint" id="ep-staff-get-dashboard"><summary><span class="method m-get">GET</span><span class="path">/admin/api/v1/dashboard</span><span class="sum">Counts for the dashboard home page</span></summary><div class="body">
+<dl class="meta"><dt>Audience</dt><dd>Adera staff (the dashboard)</dd><dt>Client path</dt><dd><code>/admin/api/v1/dashboard</code> through the gateway</dd><dt>Internal path</dt><dd>same path on the service :8080 (the gateway does not rewrite it)</dd><dt>Auth</dt><dd><code>Authorization: Bearer $TOKEN</code>, a Kratos session token of an <strong>aal2</strong> staff session. The gateway checks it and adds <code>X-Staff-Id</code>, <code>X-Staff-Role</code>, <code>X-Gateway-Secret</code>. Minimum role: <strong>VIEWER</strong>.</dd><dt>Rate limit</dt><dd>300 per 60 s per client IP (gateway route <code>admin-api</code>)</dd><dt>Implemented in</dt><dd><code>services/registry-service/src/main/java/app/adera/registry/dashboard/DashboardController.java</code></dd></dl>
+<h4>Purpose</h4><p>Real counts from the registry database: mini apps by status, open reports, review counts, active and disabled staff, and up to ten DRAFT apps with what each still lacks before it can go LIVE (<code>logo</code>, <code>supportEmail</code>). The notification and user numbers come from their own endpoints (<code>/notification/stats</code>, <code>/users/stats</code>).</p>
+<h4>Example request</h4><pre><code>curl -sS -i "$BASE/admin/api/v1/dashboard" \
+  -H "Authorization: Bearer $TOKEN"</code></pre>
+<h4>Example response</h4><pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+
+{
+  &quot;apps&quot;: {
+    &quot;DRAFT&quot;: 0,
+    &quot;LIVE&quot;: 0,
+    &quot;PAUSED&quot;: 0,
+    &quot;KILLED&quot;: 4,
+    &quot;total&quot;: 4
+  },
+  &quot;reports&quot;: {
+    &quot;open&quot;: 0,
+    &quot;total&quot;: 0
+  },
+  &quot;reviews&quot;: {
+    &quot;total&quot;: 0,
+    &quot;hidden&quot;: 0,
+    &quot;last7Days&quot;: 0
+  },
+  &quot;staff&quot;: {
+    &quot;active&quot;: 1,
+    &quot;disabled&quot;: 1
+  },
+  &quot;draftApps&quot;: []
+}</code></pre>
+<h4>How to use it</h4><ul><li>Any staff role can read it.</li><li>The dashboard home page combines this with <code>GET /notification/stats</code>, <code>GET /users/stats</code>, <code>GET /reports?status=OPEN</code> and the latest rows of the notification log and audit log.</li></ul>
+</div></details>
+<details class="endpoint" id="ep-staff-get-users"><summary><span class="method m-get">GET</span><span class="path">/admin/api/v1/users</span><span class="sum">Search and page through registered users</span></summary><div class="body">
+<dl class="meta"><dt>Audience</dt><dd>Adera staff (the dashboard)</dd><dt>Client path</dt><dd><code>/admin/api/v1/users</code> through the gateway</dd><dt>Internal path</dt><dd>same path on the service :8080 (the gateway does not rewrite it)</dd><dt>Auth</dt><dd><code>Authorization: Bearer $TOKEN</code>, a Kratos session token of an <strong>aal2</strong> staff session. The gateway checks it and adds <code>X-Staff-Id</code>, <code>X-Staff-Role</code>, <code>X-Gateway-Secret</code>. Minimum role: <strong>VIEWER</strong>.</dd><dt>Rate limit</dt><dd>300 per 60 s per client IP (gateway route <code>admin-users</code>)</dd><dt>Implemented in</dt><dd><code>services/user-service/src/main/java/app/adera/user/admin/AdminUserController.java</code></dd></dl>
+<h4>Purpose</h4><p>The user list, newest first. <code>q</code> matches the exact user id (when it is a UUID) or, case-insensitively, part of the email, phone number (also when typed with spaces or dashes), first name, last name or the full name. Email and phone are masked for VIEWER.</p>
+<h4>Request parameters</h4><div class="table-wrap"><table><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why it exists</th></tr></thead><tbody><tr><td>q</td><td>query</td><td>string</td><td>no</td><td>Free text or a user id.</td><td>Support lookups by phone, email, name or id.</td></tr><tr><td>status</td><td>query</td><td>string</td><td>no</td><td><code>ACTIVE</code>, <code>SUSPENDED</code> or <code>DELETED</code>. Other values: 400 with <code>fields.status</code>.</td><td>Find blocked accounts.</td></tr><tr><td>page</td><td>query</td><td>integer</td><td>no (0)</td><td>Zero-based.</td><td>Paging.</td></tr><tr><td>size</td><td>query</td><td>integer</td><td>no (25)</td><td>1 to 100 (clamped).</td><td>Page size.</td></tr></tbody></table></div>
+<h4>Example request</h4><pre><code>curl -sS -i "$BASE/admin/api/v1/users?q=Sample&amp;size=5" \
+  -H "Authorization: Bearer $TOKEN"</code></pre>
+<h4>Example response</h4><pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+
+{
+  &quot;items&quot;: [
+    {
+      &quot;id&quot;: &quot;3ea5eb9f-324e-45b8-b712-e4ca7a0e9803&quot;,
+      &quot;email&quot;: null,
+      &quot;phone&quot;: &quot;+2519*****29&quot;,
+      &quot;firstName&quot;: &quot;Sample&quot;,
+      &quot;lastName&quot;: &quot;Person&quot;,
+      &quot;status&quot;: &quot;ACTIVE&quot;,
+      &quot;market&quot;: &quot;ET&quot;,
+      &quot;language&quot;: &quot;am&quot;,
+      &quot;verificationTier&quot;: &quot;CONTACT&quot;,
+      &quot;createdAt&quot;: &quot;2026-10-25T08:10:30.720546Z&quot;,
+      &quot;lastSeenAt&quot;: &quot;2026-10-25T08:10:33.161609Z&quot;
+    }
+  ],
+  &quot;page&quot;: 0,
+  &quot;size&quot;: 5,
+  &quot;total&quot;: 1
+}</code></pre>
+<h4>How to use it</h4><ul><li><code>total</code> is the number of matches, not of the page; the dashboard uses it for pagination.</li><li>This example is from a throw-away account that was deleted afterwards; the phone number is masked here for the page only (the API returned it in full to a super admin).</li></ul>
+</div></details>
+<details class="endpoint" id="ep-staff-get-users-stats"><summary><span class="method m-get">GET</span><span class="path">/admin/api/v1/users/stats</span><span class="sum">User counts</span></summary><div class="body">
+<dl class="meta"><dt>Audience</dt><dd>Adera staff (the dashboard)</dd><dt>Client path</dt><dd><code>/admin/api/v1/users/stats</code> through the gateway</dd><dt>Internal path</dt><dd>same path on the service :8080 (the gateway does not rewrite it)</dd><dt>Auth</dt><dd><code>Authorization: Bearer $TOKEN</code>, a Kratos session token of an <strong>aal2</strong> staff session. The gateway checks it and adds <code>X-Staff-Id</code>, <code>X-Staff-Role</code>, <code>X-Gateway-Secret</code>. Minimum role: <strong>VIEWER</strong>.</dd><dt>Rate limit</dt><dd>300 per 60 s per client IP (gateway route <code>admin-users</code>)</dd><dt>Implemented in</dt><dd><code>services/user-service/src/main/java/app/adera/user/admin/AdminUserController.java</code></dd></dl>
+<h4>Purpose</h4><p>Total users, by status, and how many signed up in the last 7 days. Used by the dashboard home page.</p>
+<h4>Example request</h4><pre><code>curl -sS -i "$BASE/admin/api/v1/users/stats" \
+  -H "Authorization: Bearer $TOKEN"</code></pre>
+<h4>Example response</h4><pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+
+{
+  &quot;total&quot;: 2,
+  &quot;active&quot;: 1,
+  &quot;suspended&quot;: 1,
+  &quot;deleted&quot;: 0,
+  &quot;createdLast7Days&quot;: 2
+}</code></pre>
+<h4>How to use it</h4><ul><li>Registered before <code>/users/{id}</code> in the route table, so <code>stats</code> is never read as a user id.</li></ul>
+</div></details>
+<details class="endpoint" id="ep-staff-get-users-id"><summary><span class="method m-get">GET</span><span class="path">/admin/api/v1/users/{id}</span><span class="sum">One user: profile, location summary, devices, mute preferences</span></summary><div class="body">
+<dl class="meta"><dt>Audience</dt><dd>Adera staff (the dashboard)</dd><dt>Client path</dt><dd><code>/admin/api/v1/users/{id}</code> through the gateway</dd><dt>Internal path</dt><dd>same path on the service :8080 (the gateway does not rewrite it)</dd><dt>Auth</dt><dd><code>Authorization: Bearer $TOKEN</code>, a Kratos session token of an <strong>aal2</strong> staff session. The gateway checks it and adds <code>X-Staff-Id</code>, <code>X-Staff-Role</code>, <code>X-Gateway-Secret</code>. Minimum role: <strong>VIEWER</strong>.</dd><dt>Rate limit</dt><dd>300 per 60 s per client IP (gateway route <code>admin-users</code>)</dd><dt>Implemented in</dt><dd><code>services/user-service/src/main/java/app/adera/user/admin/AdminUserService.java</code></dd></dl>
+<h4>Purpose</h4><p>Everything staff need to help a user without exposing what they do not need. <code>location</code> is a summary (country, region, city, whether a precise point exists), never coordinates. <code>devices</code> has counts and platforms, never FCM tokens. <code>aliasCount</code> is how many mini apps know this user under a pseudonym (the pseudonyms themselves are not shown). <code>mutePreferences</code> lists per-app mutes. For a VIEWER, <code>gender</code> and <code>dateOfBirth</code> are null, <code>extra</code> is null and <code>extraKeys</code> lists only the key names, and <code>masked</code> is true.</p>
+<h4>Request parameters</h4><div class="table-wrap"><table><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why it exists</th></tr></thead><tbody><tr><td>id</td><td>path</td><td>UUID</td><td>yes</td><td>Existing user id.</td><td>Which user.</td></tr></tbody></table></div>
+<h4>Example request</h4><pre><code>curl -sS -i "$BASE/admin/api/v1/users/$USER_ID" \
+  -H "Authorization: Bearer $TOKEN"</code></pre>
+<h4>Example response</h4><pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+
+{
+  &quot;id&quot;: &quot;3ea5eb9f-324e-45b8-b712-e4ca7a0e9803&quot;,
+  &quot;email&quot;: null,
+  &quot;phone&quot;: &quot;+2519*****29&quot;,
+  &quot;firstName&quot;: &quot;Sample&quot;,
+  &quot;lastName&quot;: &quot;Person&quot;,
+  &quot;status&quot;: &quot;ACTIVE&quot;,
+  &quot;market&quot;: &quot;ET&quot;,
+  &quot;language&quot;: &quot;am&quot;,
+  &quot;verificationTier&quot;: &quot;CONTACT&quot;,
+  &quot;createdAt&quot;: &quot;2026-10-25T08:10:30.720546Z&quot;,
+  &quot;lastSeenAt&quot;: &quot;2026-10-25T08:10:33.161609Z&quot;,
+  &quot;gender&quot;: null,
+  &quot;dateOfBirth&quot;: null,
+  &quot;timezone&quot;: &quot;Africa/Addis_Ababa&quot;,
+  &quot;avatarImageId&quot;: null,
+  &quot;location&quot;: null,
+  &quot;termsAcceptedVersion&quot;: null,
+  &quot;termsAcceptedAt&quot;: null,
+  &quot;deletedAt&quot;: null,
+  &quot;updatedAt&quot;: &quot;2026-10-25T08:10:33.276571Z&quot;,
+  &quot;extra&quot;: {
+    &quot;interests&quot;: [
+      &quot;music&quot;
+    ]
+  },
+  &quot;devices&quot;: {
+    &quot;active&quot;: 0,
+    &quot;total&quot;: 0,
+    &quot;platforms&quot;: []
+  },
+  &quot;aliasCount&quot;: 0,
+  &quot;mutePreferences&quot;: [],
+  &quot;masked&quot;: false
+}</code></pre>
+<h4>How to use it</h4><ul><li>Unknown id: 404 <code>not_found</code>.</li></ul>
+</div></details>
+<details class="endpoint" id="ep-staff-post-users-id-status"><summary><span class="method m-post">POST</span><span class="path">/admin/api/v1/users/{id}/status</span><span class="sum">Suspend, reactivate or mark a user deleted</span></summary><div class="body">
+<dl class="meta"><dt>Audience</dt><dd>Adera staff (the dashboard)</dd><dt>Client path</dt><dd><code>/admin/api/v1/users/{id}/status</code> through the gateway</dd><dt>Internal path</dt><dd>same path on the service :8080 (the gateway does not rewrite it)</dd><dt>Auth</dt><dd><code>Authorization: Bearer $TOKEN</code>, a Kratos session token of an <strong>aal2</strong> staff session. The gateway checks it and adds <code>X-Staff-Id</code>, <code>X-Staff-Role</code>, <code>X-Gateway-Secret</code>. Minimum role: <strong>ADMIN</strong>.</dd><dt>Rate limit</dt><dd>300 per 60 s per client IP (gateway route <code>admin-users</code>)</dd><dt>Implemented in</dt><dd><code>services/user-service/src/main/java/app/adera/user/admin/AdminUserService.java</code></dd></dl>
+<h4>Purpose</h4><p>Sets the user's status. <strong>SUSPENDED</strong>: the user's Kratos sessions are revoked, the gateway refuses them (<code>403 account_suspended</code>, also after signing in again), and no notification can reach them (the delivery context says <code>reachable: false</code> and carries no phone, email or push tokens). <strong>ACTIVE</strong> reverses a suspension. <strong>DELETED</strong> is final: <code>403 account_deleted</code> afterwards and any further change is 409 <code>user_deleted</code>. Asking for the status the user already has is a no-op (200, nothing audited). The change and its audit row (<code>user.status</code>, with from, to and reason) succeed or fail together: if the audit log is unreachable the change is rolled back (503 <code>audit_unavailable</code>).</p>
+<h4>Request parameters</h4><div class="table-wrap"><table><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why it exists</th></tr></thead><tbody><tr><td>status</td><td>body</td><td>string</td><td>yes</td><td><code>ACTIVE</code>, <code>SUSPENDED</code> or <code>DELETED</code>.</td><td>The new state.</td></tr><tr><td>reason</td><td>body</td><td>string</td><td>for SUSPENDED and DELETED</td><td>3 to 500 characters.</td><td>Kept in the audit log so the next staff member knows why.</td></tr></tbody></table></div>
+<h4>Example request</h4><pre><code>curl -sS -i -X POST "$BASE/admin/api/v1/users/$USER_ID/status" \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"status":"SUSPENDED","reason":"documentation example"}'</code></pre>
+<h4>Example response</h4><pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+
+{
+  &quot;id&quot;: &quot;3ea5eb9f-324e-45b8-b712-e4ca7a0e9803&quot;,
+  &quot;email&quot;: null,
+  &quot;phone&quot;: &quot;+2519*****29&quot;,
+  &quot;firstName&quot;: &quot;Sample&quot;,
+  &quot;lastName&quot;: &quot;Person&quot;,
+  &quot;status&quot;: &quot;SUSPENDED&quot;,
+  &quot;market&quot;: &quot;ET&quot;,
+  &quot;language&quot;: &quot;am&quot;,
+  &quot;verificationTier&quot;: &quot;CONTACT&quot;,
+  &quot;createdAt&quot;: &quot;2026-10-25T08:10:30.720546Z&quot;,
+  &quot;lastSeenAt&quot;: &quot;2026-10-25T08:10:33.161609Z&quot;,
+  &quot;gender&quot;: null,
+  &quot;dateOfBirth&quot;: null,
+  &quot;timezone&quot;: &quot;Africa/Addis_Ababa&quot;,
+  &quot;avatarImageId&quot;: null,
+  &quot;location&quot;: null,
+  &quot;termsAcceptedVersion&quot;: null,
+  &quot;termsAcceptedAt&quot;: null,
+  &quot;deletedAt&quot;: null,
+  &quot;updatedAt&quot;: &quot;2026-10-25T08:10:33.596768Z&quot;,
+  &quot;extra&quot;: {
+    &quot;interests&quot;: [
+      &quot;music&quot;
+    ]
+  },
+  &quot;devices&quot;: {
+    &quot;active&quot;: 0,
+    &quot;total&quot;: 0,
+    &quot;platforms&quot;: []
+  },
+  &quot;aliasCount&quot;: 0,
+  &quot;mutePreferences&quot;: [],
+  &quot;masked&quot;: false
+}
+  ... same fields as the detail response ...
+}</code></pre>
+<h4>Errors</h4><ul><li>400 <code>validation_failed</code> (bad status, missing reason)</li><li>404 <code>not_found</code></li><li>409 <code>user_deleted</code></li><li>503 <code>audit_unavailable</code></li></ul>
+<h4>How to use it</h4><ul><li>A VIEWER gets 403 <code>insufficient_role</code>. Unknown body fields are rejected with 400 <code>validation_failed</code>.</li><li>Validation example (HTTP 400): <pre class="out"><code>{
+  &quot;error&quot;: &quot;validation_failed&quot;,
+  &quot;fields&quot;: {
+    &quot;status&quot;: &quot;must be ACTIVE, SUSPENDED or DELETED&quot;
+  }
+}</code></pre></li></ul>
+</div></details>
+<details class="endpoint" id="ep-staff-get-reviews"><summary><span class="method m-get">GET</span><span class="path">/admin/api/v1/reviews</span><span class="sum">Reviews of every app (moderation list)</span></summary><div class="body">
+<dl class="meta"><dt>Audience</dt><dd>Adera staff (the dashboard)</dd><dt>Client path</dt><dd><code>/admin/api/v1/reviews</code> through the gateway</dd><dt>Internal path</dt><dd>same path on the service :8080 (the gateway does not rewrite it)</dd><dt>Auth</dt><dd><code>Authorization: Bearer $TOKEN</code>, a Kratos session token of an <strong>aal2</strong> staff session. The gateway checks it and adds <code>X-Staff-Id</code>, <code>X-Staff-Role</code>, <code>X-Gateway-Secret</code>. Minimum role: <strong>VIEWER</strong>.</dd><dt>Rate limit</dt><dd>300 per 60 s per client IP (gateway route <code>admin-api</code>)</dd><dt>Implemented in</dt><dd><code>services/registry-service/src/main/java/app/adera/registry/review/ReviewAdminController.java</code></dd></dl>
+<h4>Purpose</h4><p>All reviews across apps, newest first, hidden ones included. The total is in the <code>X-Total-Count</code> response header. The same header and the same <code>status</code>/<code>appId</code> filters apply to <code>GET /reports</code> (status <code>OPEN</code>, <code>REVIEWED</code> or <code>DISMISSED</code>).</p>
+<h4>Request parameters</h4><div class="table-wrap"><table><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why it exists</th></tr></thead><tbody><tr><td>status</td><td>query</td><td>string</td><td>no</td><td><code>VISIBLE</code> or <code>HIDDEN</code>; other values 400.</td><td>Find hidden reviews.</td></tr><tr><td>appId</td><td>query</td><td>UUID</td><td>no</td><td>Existing app id.</td><td>One app only.</td></tr><tr><td>page</td><td>query</td><td>integer</td><td>no (0)</td><td>Zero-based.</td><td>Paging.</td></tr><tr><td>size</td><td>query</td><td>integer</td><td>no (50)</td><td>1 to 100.</td><td>Page size.</td></tr></tbody></table></div>
+<h4>Example request</h4><pre><code>curl -sS -i "$BASE/admin/api/v1/reviews?status=HIDDEN&amp;page=0&amp;size=20" \
+  -H "Authorization: Bearer $TOKEN"</code></pre>
+<h4>Example response</h4><pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+
+[]
+
+(Illustrative: the development database holds no reviews right now. Each row has the same fields as in GET /apps/{appId}/reviews, plus appSlug.)</code></pre>
+<h4>How to use it</h4><ul><li>Hide or show one with <code>PATCH /reviews/{reviewId}</code>.</li></ul>
+</div></details>
+</section>
+<section><h2 id="templates">Notification templates</h2><p>Served by notification-service behind the same staff check. <strong>Why templates exist:</strong> partners cannot send free text, so nobody can use Adera to send phishing or spam in its name. Staff approve the exact words; the partner supplies only short, length-limited, link-checked values.</p>
+<details class="endpoint" id="ep-staff-get-notification-templates"><summary><span class="method m-get">GET</span><span class="path">/admin/api/v1/notification/templates</span><span class="sum">List an app's templates</span></summary><div class="body">
+<dl class="meta"><dt>Audience</dt><dd>Adera staff (the dashboard)</dd><dt>Client path</dt><dd><code>/admin/api/v1/notification/templates</code> through the gateway</dd><dt>Internal path</dt><dd>same path on notification-service :8080 (the gateway does not rewrite it)</dd><dt>Auth</dt><dd><code>Authorization: Bearer $TOKEN</code>, a Kratos session token of an <strong>aal2</strong> staff session. The gateway checks it and adds <code>X-Staff-Id</code>, <code>X-Staff-Role</code>, <code>X-Gateway-Secret</code>. Minimum role: <strong>VIEWER</strong>.</dd><dt>Rate limit</dt><dd>300 per 60 s per client IP (gateway route <code>admin-notification</code>)</dd><dt>Implemented in</dt><dd><code>services/notification-service/src/main/java/app/adera/notification/partner/admin/TemplateAdminController.java</code></dd></dl>
+<h4>Purpose</h4><p>All templates of one app, ordered by code, with <code>usableNow</code> and <code>unusableReason</code> telling whether a partner could send each one right now.</p>
+<h4>Request parameters</h4><div class="table-wrap"><table><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why it exists</th></tr></thead><tbody><tr><td>appId</td><td>query</td><td>UUID</td><td>yes</td><td>Existing app id.</td><td>Templates belong to an app.</td></tr></tbody></table></div>
+<h4>Example request</h4><pre><code>curl -sS -i -X GET "$BASE/admin/api/v1/notification/templates?appId=$APP" \
+  -H "Authorization: Bearer $TOKEN"</code></pre>
+<h4>Example response</h4><pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+X-Request-Id: 80a4cfd2-8326-474d-84eb-7a9588356120
+
+[
+  {
+    "id": "a382808f-1175-4eb3-8129-dd61aa75634a",
+    "appId": "41548c1e-b03e-412a-bbbe-1e46343505b9",
+    "code": "job-accepted",
+    "kind": "DIRECT",
+    "category": "TRANSACTIONAL",
+    "params": [
+      {
+        "name": "name",
+        "required": true,
+        "maxLength": 30,
+        "allowLinks": false
+      }
+    ],
+    "content": {
+      "am": {
+        "sms": "ሰላም {name}, ስራዎ ተቀባይነት አግኝቷል",
+        "body": "ሰላም {name}"
+      },
+      "en": {
+        "sms": "Hi {name}, your Adera job was accepted",
+        "body": "Hi {name}, your job was accepted",
+        "emailSubject": "Job accepted"
+      }
+    },
+    "active": true,
+    "validFrom": null,
+    "expiresAt": null,
+    "version": 1,
+    "usableNow": true,
+    "unusableReason": null,
+    "createdAt": "2026-10-25T06:06:25.690700Z",
+    "updatedAt": "2026-10-25T06:06:25.690700Z"
+  },
+  {
+    "id": "3818e600-727b-47e6-89f7-383cbc166dea",
+    "appId": "41548c1e-b03e-412a-bbbe-1e46343505b9",
+    "code": "ride-here",
+    "kind": "IN_APP",
+    "category": "TRANSACTIONAL",
+    "params": [
+      {
+        "name": "name",
+        "required": true,
+        "maxLength": 30,
+        "allowLinks": false
+      }
+    ],
+    "content": {
+      "en": {
+        "body": "Your technician is here",
+        "title": "Hello {name}"
+      }
+    },
+    "active": true,
+    "validFrom": null,
+    "expiresAt": null,
+    "version": 1,
+    "usableNow": true,
+    "unusableReason": null,
+    "createdAt": "2026-10-25T06:06:25.868142Z",
+    "updatedAt": "2026-10-25T06:06:25.868142Z"
+  }
+]</code></pre>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th><code>error</code></th><th>When it happens</th></tr></thead><tbody><tr><td>200</td><td>-</td><td>OK.</td></tr><tr><td>400</td><td><code>invalid_request</code></td><td><code>appId</code> missing or not a UUID.</td></tr><tr><td>401</td><td><code>unauthorized</code></td><td>No <code>Authorization</code> header, or an invalid, expired or revoked session token. Returned by the gateway's forward-auth (from registry-service).</td></tr><tr><td>403</td><td><code>mfa_required</code></td><td>The session is only aal1 (emailed code only), or Kratos refuses it because an authenticator app is enrolled but not used in this session. Do the authenticator step.</td></tr><tr><td>403</td><td><code>not_staff</code></td><td>A valid session, but the person is not an ACTIVE staff member (customers get this).</td></tr></tbody></table></div>
+<h4>Real error responses</h4><pre class="out nocopy"><code>No appId:
+HTTP 400  {"error": "invalid_request"}</code></pre>
+<h4>How to use it</h4><ul><li><code>unusableReason</code> values: <code>template_inactive</code>, <code>template_not_yet_valid</code>, <code>template_expired</code>.</li></ul>
+</div></details>
+<details class="endpoint" id="ep-staff-post-notification-templates"><summary><span class="method m-post">POST</span><span class="path">/admin/api/v1/notification/templates</span><span class="sum">Create a template</span></summary><div class="body">
+<dl class="meta"><dt>Audience</dt><dd>Adera staff (the dashboard)</dd><dt>Client path</dt><dd><code>/admin/api/v1/notification/templates</code> through the gateway</dd><dt>Internal path</dt><dd>same path on notification-service :8080 (the gateway does not rewrite it)</dd><dt>Auth</dt><dd><code>Authorization: Bearer $TOKEN</code>, a Kratos session token of an <strong>aal2</strong> staff session. The gateway checks it and adds <code>X-Staff-Id</code>, <code>X-Staff-Role</code>, <code>X-Gateway-Secret</code>. Minimum role: <strong>ADMIN</strong>.</dd><dt>Rate limit</dt><dd>300 per 60 s per client IP (gateway route <code>admin-notification</code>)</dd><dt>Implemented in</dt><dd><code>services/notification-service/src/main/java/app/adera/notification/partner/admin/TemplateAdminController.java, template/TemplateService.java, TemplateRules.java</code></dd></dl>
+<h4>Purpose</h4><p>Creates a template for an app at version 1. Every <code>{placeholder}</code> in the texts must be a declared param; the texts are length-checked. Partners can read it at <a href="08c-partner-api.html">GET /v1/templates</a> as soon as it is active and the app is usable.</p>
+<h4>Request parameters</h4><div class="table-wrap"><table><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why it exists</th></tr></thead><tbody><tr><td>appId</td><td>body</td><td>UUID</td><td>create: yes</td><td>An existing mini app.</td><td>A template belongs to one app; partners see only their own.</td></tr><tr><td>code</td><td>body</td><td>string</td><td>create: yes</td><td>2-60 chars of lowercase letters, digits, <code>_ . -</code>; unique per app; permanent.</td><td>Stable name staff and partners refer to.</td></tr><tr><td>kind</td><td>body</td><td>string</td><td>create: yes</td><td><code>DIRECT</code> (SMS, falling back to email) or <code>IN_APP</code> (inbox + push). Permanent.</td><td>Decides how the message travels; the partner never chooses a channel.</td></tr><tr><td>category</td><td>body</td><td>string</td><td>create: yes</td><td><code>TRANSACTIONAL</code>, <code>REMINDER</code> or <code>PROMOTIONAL</code>.</td><td>Classifies the message (for policy and future opt-out rules).</td></tr><tr><td>params</td><td>body</td><td>list of objects</td><td>no</td><td>Up to 10 declared values: <code>{name, maxLength (1-500, default 100), required (default true), allowLinks (default false)}</code>; names unique, start with a letter, letters/digits/<code>_</code>, up to 30 chars.</td><td>The only things a partner may fill in. Partners cannot send free text.</td></tr><tr><td>content</td><td>body</td><td>object</td><td>create: yes</td><td>Map of language (<code>en</code>, <code>am</code>, <code>om</code>) to texts from <code>title</code> (100), <code>body</code> (1000), <code>sms</code> (320), <code>emailSubject</code> (150), <code>emailHtml</code> (20000). <code>{placeholders}</code> must be declared params. English <code>body</code> required; IN_APP also needs an English <code>title</code>.</td><td>What the user reads, in their language, falling back to English.</td></tr><tr><td>active</td><td>body</td><td>boolean</td><td>no (true)</td><td>true or false.</td><td>Switch a template off without deleting it.</td></tr><tr><td>validFrom, expiresAt</td><td>body</td><td>string</td><td>no</td><td>ISO-8601 instants; <code>expiresAt</code> after <code>validFrom</code>, and in the future on create.</td><td>A time window (campaigns).</td></tr></tbody></table></div>
+<h4>Example request</h4><pre><code>curl -sS -i -X POST "$BASE/admin/api/v1/notification/templates" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"appId": "$APP", "code": "job-accepted", "kind": "DIRECT", "category": "TRANSACTIONAL", "params": [{"name": "name", "maxLength": 30}], "content": {"en": {"sms": "Hi {name}, your Adera job was accepted", "body": "Hi {name}, your job was accepted", "emailSubject": "Job accepted"}, "am": {"sms": "ሰላም {name}, ስራዎ ተቀባይነት አግኝቷል", "body": "ሰላም {name}"}}}'</code></pre>
+<h4>Example response</h4><pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+X-Request-Id: 1b995c1c-b3a4-4e37-aeba-776fb55714f1
+
+{
+  "id": "a382808f-1175-4eb3-8129-dd61aa75634a",
+  "appId": "41548c1e-b03e-412a-bbbe-1e46343505b9",
+  "code": "job-accepted",
+  "kind": "DIRECT",
+  "category": "TRANSACTIONAL",
+  "params": [
+    {
+      "name": "name",
+      "maxLength": 30,
+      "required": true,
+      "allowLinks": false
+    }
+  ],
+  "content": {
+    "en": {
+      "sms": "Hi {name}, your Adera job was accepted",
+      "body": "Hi {name}, your job was accepted",
+      "emailSubject": "Job accepted"
+    },
+    "am": {
+      "sms": "ሰላም {name}, ስራዎ ተቀባይነት አግኝቷል",
+      "body": "ሰላም {name}"
+    }
+  },
+  "active": true,
+  "validFrom": null,
+  "expiresAt": null,
+  "version": 1,
+  "usableNow": true,
+  "unusableReason": null,
+  "createdAt": "2026-10-25T06:06:25.690699674Z",
+  "updatedAt": "2026-10-25T06:06:25.690699674Z"
+}</code></pre>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th><code>error</code></th><th>When it happens</th></tr></thead><tbody><tr><td>200</td><td>-</td><td>OK, the template (answered 200, not 201).</td></tr><tr><td>400</td><td><code>validation_failed</code></td><td>Missing or malformed code, kind, category, content; a placeholder that is not declared; text too long; unknown field; <code>appId</code> missing or no such mini app.</td></tr><tr><td>403</td><td><code>insufficient_role</code></td><td>VIEWER.</td></tr><tr><td>409</td><td><code>template_code_taken</code></td><td>This app already has a template with this code.</td></tr><tr><td>401</td><td><code>unauthorized</code></td><td>No <code>Authorization</code> header, or an invalid, expired or revoked session token. Returned by the gateway's forward-auth (from registry-service).</td></tr><tr><td>403</td><td><code>mfa_required</code></td><td>The session is only aal1 (emailed code only), or Kratos refuses it because an authenticator app is enrolled but not used in this session. Do the authenticator step.</td></tr><tr><td>403</td><td><code>not_staff</code></td><td>A valid session, but the person is not an ACTIVE staff member (customers get this).</td></tr></tbody></table></div>
+<h4>Real error responses</h4><pre class="out nocopy"><code>Empty body:
+request body: {}
+HTTP 400  {"error": "validation_failed", "fields": {"appId": "required: the mini app's id"}}</code></pre>
+<pre class="out nocopy"><code>Many problems:
+request body: {"appId": "41548c1e-b03e-412a-bbbe-1e46343505b9", "code": "Bad Code", "kind": "FAX", "category": "NEWS", "content": {"fr": {"body": "x"}}, "oops": 1}
+HTTP 400  {"error": "validation_failed", "fields": {"oops": "unknown field", "code": "required: 2-60 chars of lowercase letters, digits, '_', '.', '-' (e.g. job-accepted)", "kind": "required: DIRECT (SMS or email) or IN_APP (inbox + push)", "category": "must be TRANSACTIONAL, REMINDER or PROMOTIONAL", "content": "unsupported language 'fr' (use en, am, om)"}}</code></pre>
+<pre class="out nocopy"><code>Placeholder not declared:
+request body: {"appId": "41548c1e-b03e-412a-bbbe-1e46343505b9", "code": "job-bad", "kind": "DIRECT", "category": "TRANSACTIONAL", "params": [], "content": {"en": {"body": "Hi {name}"}}}
+HTTP 400  {"error": "validation_failed", "fields": {"content.en.body": "uses {name} which is not a declared param"}}</code></pre>
+<pre class="out nocopy"><code>Unknown app:
+request body: {"appId": "050eeedb-fff2-49ec-b39f-6d81693e722e", "code": "job-x", "kind": "DIRECT", "category": "TRANSACTIONAL", "content": {"en": {"body": "Hi"}}}
+HTTP 400  {"error": "validation_failed", "fields": {"appId": "no such mini app"}}</code></pre>
+<pre class="out nocopy"><code>Duplicate code:
+request body: {"appId": "41548c1e-b03e-412a-bbbe-1e46343505b9", "code": "job-accepted", "kind": "DIRECT", "category": "TRANSACTIONAL", "content": {"en": {"body": "x"}}}
+HTTP 409  {"error": "template_code_taken"}</code></pre>
+<pre class="out nocopy"><code>A VIEWER:
+request body: {"appId": "41548c1e-b03e-412a-bbbe-1e46343505b9", "code": "x1", "kind": "IN_APP", "category": "TRANSACTIONAL", "content": {"en": {"title": "t", "body": "b"}}}
+HTTP 403  {"error": "insufficient_role"}</code></pre>
+<h4>How to use it</h4><ul><li>For an <code>IN_APP</code> template use <code>title</code> and <code>body</code>; for <code>DIRECT</code> use <code>sms</code> (falls back to <code>body</code>) and optionally <code>emailSubject</code> / <code>emailHtml</code>.</li><li><code>emailHtml</code> values are HTML-escaped when filled in.</li><li>The SMS text should stay within the GSM character set to avoid costly Unicode segments; Amharic text uses Unicode.</li></ul>
+</div></details>
+<details class="endpoint" id="ep-staff-get-notification-templates-id"><summary><span class="method m-get">GET</span><span class="path">/admin/api/v1/notification/templates/{id}</span><span class="sum">One template</span></summary><div class="body">
+<dl class="meta"><dt>Audience</dt><dd>Adera staff (the dashboard)</dd><dt>Client path</dt><dd><code>/admin/api/v1/notification/templates/{id}</code> through the gateway</dd><dt>Internal path</dt><dd>same path on notification-service :8080 (the gateway does not rewrite it)</dd><dt>Auth</dt><dd><code>Authorization: Bearer $TOKEN</code>, a Kratos session token of an <strong>aal2</strong> staff session. The gateway checks it and adds <code>X-Staff-Id</code>, <code>X-Staff-Role</code>, <code>X-Gateway-Secret</code>. Minimum role: <strong>VIEWER</strong>.</dd><dt>Rate limit</dt><dd>300 per 60 s per client IP (gateway route <code>admin-notification</code>)</dd><dt>Implemented in</dt><dd><code>services/notification-service/src/main/java/app/adera/notification/partner/admin/TemplateAdminController.java</code></dd></dl>
+<h4>Purpose</h4><p>Reads one template (any app).</p>
+<h4>Request parameters</h4><div class="table-wrap"><table><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why it exists</th></tr></thead><tbody><tr><td>id</td><td>path</td><td>UUID</td><td>yes</td><td>Template id.</td><td>Identifies the template.</td></tr></tbody></table></div>
+<h4>Example request</h4><pre><code>curl -sS -i -X GET "$BASE/admin/api/v1/notification/templates/$TEMPLATE_ID" \
+  -H "Authorization: Bearer $TOKEN"</code></pre>
+<h4>Example response</h4><pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+X-Request-Id: dcf36fe8-d5c7-479c-bb18-dd8f1493361d
+
+{
+  "id": "a382808f-1175-4eb3-8129-dd61aa75634a",
+  "appId": "41548c1e-b03e-412a-bbbe-1e46343505b9",
+  "code": "job-accepted",
+  "kind": "DIRECT",
+  "category": "TRANSACTIONAL",
+  "params": [
+    {
+      "name": "name",
+      "required": true,
+      "maxLength": 30,
+      "allowLinks": false
+    }
+  ],
+  "content": {
+    "am": {
+      "sms": "ሰላም {name}, ስራዎ ተቀባይነት አግኝቷል",
+      "body": "ሰላም {name}"
+    },
+    "en": {
+      "sms": "Hi {name}, your Adera job was accepted",
+      "body": "Hi {name}, your job was accepted",
+      "emailSubject": "Job accepted"
+    }
+  },
+  "active": true,
+  "validFrom": null,
+  "expiresAt": null,
+  "version": 1,
+  "usableNow": true,
+  "unusableReason": null,
+  "createdAt": "2026-10-25T06:06:25.690700Z",
+  "updatedAt": "2026-10-25T06:06:25.690700Z"
+}</code></pre>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th><code>error</code></th><th>When it happens</th></tr></thead><tbody><tr><td>200</td><td>-</td><td>OK.</td></tr><tr><td>404</td><td><code>not_found</code></td><td>No such template.</td></tr><tr><td>400</td><td><code>invalid_request</code></td><td>id is not a UUID.</td></tr><tr><td>401</td><td><code>unauthorized</code></td><td>No <code>Authorization</code> header, or an invalid, expired or revoked session token. Returned by the gateway's forward-auth (from registry-service).</td></tr><tr><td>403</td><td><code>mfa_required</code></td><td>The session is only aal1 (emailed code only), or Kratos refuses it because an authenticator app is enrolled but not used in this session. Do the authenticator step.</td></tr><tr><td>403</td><td><code>not_staff</code></td><td>A valid session, but the person is not an ACTIVE staff member (customers get this).</td></tr></tbody></table></div>
+<h4>Real error responses</h4><pre class="out nocopy"><code>Unknown id:
+HTTP 404  {"error": "not_found"}</code></pre>
+</div></details>
+<details class="endpoint" id="ep-staff-patch-notification-templates-id"><summary><span class="method m-patch">PATCH</span><span class="path">/admin/api/v1/notification/templates/{id}</span><span class="sum">Edit or switch off a template</span></summary><div class="body">
+<dl class="meta"><dt>Audience</dt><dd>Adera staff (the dashboard)</dd><dt>Client path</dt><dd><code>/admin/api/v1/notification/templates/{id}</code> through the gateway</dd><dt>Internal path</dt><dd>same path on notification-service :8080 (the gateway does not rewrite it)</dd><dt>Auth</dt><dd><code>Authorization: Bearer $TOKEN</code>, a Kratos session token of an <strong>aal2</strong> staff session. The gateway checks it and adds <code>X-Staff-Id</code>, <code>X-Staff-Role</code>, <code>X-Gateway-Secret</code>. Minimum role: <strong>ADMIN</strong>.</dd><dt>Rate limit</dt><dd>300 per 60 s per client IP (gateway route <code>admin-notification</code>)</dd><dt>Implemented in</dt><dd><code>services/notification-service/src/main/java/app/adera/notification/partner/admin/TemplateAdminController.java, template/TemplateService.java</code></dd></dl>
+<h4>Purpose</h4><p>Changes the words, the declared values, the category, the validity window, or the <code>active</code> flag. Changing <code>params</code> or <code>content</code> bumps <code>version</code> (notifications remember which version they used). <code>code</code>, <code>kind</code> and <code>appId</code> never change.</p>
+<h4>Request parameters</h4><div class="table-wrap"><table><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why it exists</th></tr></thead><tbody><tr><td>id</td><td>path</td><td>UUID</td><td>yes</td><td>Template id.</td><td>Identifies the template.</td></tr><tr><td>category</td><td>body</td><td>string</td><td>create: yes</td><td><code>TRANSACTIONAL</code>, <code>REMINDER</code> or <code>PROMOTIONAL</code>.</td><td>Classifies the message (for policy and future opt-out rules).</td></tr><tr><td>params</td><td>body</td><td>list of objects</td><td>no</td><td>Up to 10 declared values: <code>{name, maxLength (1-500, default 100), required (default true), allowLinks (default false)}</code>; names unique, start with a letter, letters/digits/<code>_</code>, up to 30 chars.</td><td>The only things a partner may fill in. Partners cannot send free text.</td></tr><tr><td>content</td><td>body</td><td>object</td><td>create: yes</td><td>Map of language (<code>en</code>, <code>am</code>, <code>om</code>) to texts from <code>title</code> (100), <code>body</code> (1000), <code>sms</code> (320), <code>emailSubject</code> (150), <code>emailHtml</code> (20000). <code>{placeholders}</code> must be declared params. English <code>body</code> required; IN_APP also needs an English <code>title</code>.</td><td>What the user reads, in their language, falling back to English.</td></tr><tr><td>active</td><td>body</td><td>boolean</td><td>no (true)</td><td>true or false.</td><td>Switch a template off without deleting it.</td></tr><tr><td>validFrom, expiresAt</td><td>body</td><td>string</td><td>no</td><td>ISO-8601 instants; <code>expiresAt</code> after <code>validFrom</code>, and in the future on create.</td><td>A time window (campaigns).</td></tr></tbody></table></div>
+<h4>Example request</h4><pre><code>curl -sS -i -X PATCH "$BASE/admin/api/v1/notification/templates/$TEMPLATE_ID" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"content": {"en": {"sms": "Hi {name}, your Adera job was accepted. Thank you!", "body": "Hi {name}, your job was accepted", "emailSubject": "Job accepted"}}}'</code></pre>
+<h4>Example response</h4><pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+X-Request-Id: 668554fe-3bbb-4d08-8670-33739454f2f0
+
+{
+  "id": "a382808f-1175-4eb3-8129-dd61aa75634a",
+  "appId": "41548c1e-b03e-412a-bbbe-1e46343505b9",
+  "code": "job-accepted",
+  "kind": "DIRECT",
+  "category": "TRANSACTIONAL",
+  "params": [
+    {
+      "name": "name",
+      "required": true,
+      "maxLength": 30,
+      "allowLinks": false
+    }
+  ],
+  "content": {
+    "en": {
+      "sms": "Hi {name}, your Adera job was accepted. Thank you!",
+      "body": "Hi {name}, your job was accepted",
+      "emailSubject": "Job accepted"
+    }
+  },
+  "active": true,
+  "validFrom": null,
+  "expiresAt": null,
+  "version": 2,
+  "usableNow": true,
+  "unusableReason": null,
+  "createdAt": "2026-10-25T06:06:25.690700Z",
+  "updatedAt": "2026-10-25T06:06:26.396586633Z"
+}</code></pre>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th><code>error</code></th><th>When it happens</th></tr></thead><tbody><tr><td>200</td><td>-</td><td>OK, the template.</td></tr><tr><td>400</td><td><code>validation_failed</code></td><td>Invalid value, <code>code</code>/<code>kind</code>/<code>appId</code> sent ("cannot be changed after creation"), placeholder not declared after a params change, <code>expiresAt</code> not after <code>validFrom</code>.</td></tr><tr><td>403</td><td><code>insufficient_role</code></td><td>VIEWER.</td></tr><tr><td>404</td><td><code>not_found</code></td><td>No such template.</td></tr><tr><td>401</td><td><code>unauthorized</code></td><td>No <code>Authorization</code> header, or an invalid, expired or revoked session token. Returned by the gateway's forward-auth (from registry-service).</td></tr><tr><td>403</td><td><code>mfa_required</code></td><td>The session is only aal1 (emailed code only), or Kratos refuses it because an authenticator app is enrolled but not used in this session. Do the authenticator step.</td></tr><tr><td>403</td><td><code>not_staff</code></td><td>A valid session, but the person is not an ACTIVE staff member (customers get this).</td></tr></tbody></table></div>
+<h4>Real error responses</h4><pre class="out nocopy"><code>Fields that cannot change:
+request body: {"kind": "IN_APP", "code": "new", "params": []}
+HTTP 400  {"error": "validation_failed", "fields": {"kind": "cannot be changed after creation", "code": "cannot be changed after creation"}}</code></pre>
+<h4>How to use it</h4><ul><li>Switch a template off with <code>{"active": false}</code>; partners then get <code>422 template_inactive</code>.</li></ul>
+</div></details>
+</section>
+<section><h2 id="delivery-log">Delivery log and usage</h2><p>The answer to "why did it not arrive?" and "how close is this app to its limits?". Message values are never shown (they can contain personal data).</p>
+<details class="endpoint" id="ep-staff-get-notification-notifications"><summary><span class="method m-get">GET</span><span class="path">/admin/api/v1/notification/notifications</span><span class="sum">Recent notifications of an app</span></summary><div class="body">
+<dl class="meta"><dt>Audience</dt><dd>Adera staff (the dashboard)</dd><dt>Client path</dt><dd><code>/admin/api/v1/notification/notifications</code> through the gateway</dd><dt>Internal path</dt><dd>same path on notification-service :8080 (the gateway does not rewrite it)</dd><dt>Auth</dt><dd><code>Authorization: Bearer $TOKEN</code>, a Kratos session token of an <strong>aal2</strong> staff session. The gateway checks it and adds <code>X-Staff-Id</code>, <code>X-Staff-Role</code>, <code>X-Gateway-Secret</code>. Minimum role: <strong>VIEWER</strong>.</dd><dt>Rate limit</dt><dd>300 per 60 s per client IP (gateway route <code>admin-notification</code>)</dd><dt>Implemented in</dt><dd><code>services/notification-service/src/main/java/app/adera/notification/partner/admin/NotificationAdminController.java</code></dd></dl>
+<h4>Purpose</h4><p>The most recent notifications of one app, newest first, with status, channel, reason and attempt count.</p>
+<h4>Request parameters</h4><div class="table-wrap"><table><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why it exists</th></tr></thead><tbody><tr><td>appId</td><td>query</td><td>UUID</td><td>no</td><td>Existing app id. Left out, the list covers all apps (the global Notifications screen).</td><td>Which app.</td></tr><tr><td>status</td><td>query</td><td>string</td><td>no</td><td>A status (case-insensitive), e.g. <code>FAILED</code>.</td><td>Find problems quickly.</td></tr><tr><td>limit</td><td>query</td><td>integer</td><td>no (50)</td><td>1 to 200.</td><td>How many.</td></tr><tr><td>channel, environment, kind</td><td>query</td><td>string</td><td>no</td><td>Case-insensitive exact match, e.g. <code>SMS</code>, <code>DEV</code>.</td><td>Filters.</td></tr><tr><td>from, to</td><td>query</td><td>ISO instant</td><td>no</td><td>Created at or after <code>from</code>, before <code>to</code>; others 400.</td><td>Date range.</td></tr><tr><td>offset</td><td>query</td><td>integer</td><td>no (0)</td><td>0 or more.</td><td>Paging; the number of matches is in the <code>X-Total-Count</code> header.</td></tr></tbody></table></div>
+<h4>Example request</h4><pre><code>curl -sS -i -X GET "$BASE/admin/api/v1/notification/notifications?appId=$APP&amp;status=sent&amp;limit=2" \
+  -H "Authorization: Bearer $TOKEN"</code></pre>
+<h4>Example response</h4><pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+X-Request-Id: d62f1a83-a3a6-46a3-abb5-d5bdd74e8c6d
+
+[
+  {
+    "id": "96d9be3a-ad68-4ec3-8d09-b05942070ead",
+    "externalId": "sbx-3",
+    "environment": "DEV",
+    "status": "SUPPRESSED",
+    "channel": "SMS",
+    "reason": "recipient_opted_out",
+    "attempts": 0,
+    "kind": "DIRECT",
+    "createdAt": "2026-10-25T06:07:26.861Z",
+    "completedAt": "2026-10-25T06:07:26.861Z"
+  },
+  {
+    "id": "973390f3-4d03-4f02-8d9a-320252dd3a19",
+    "externalId": "sbx-1",
+    "environment": "DEV",
+    "status": "SENT",
+    "channel": "SMS",
+    "reason": null,
+    "attempts": 1,
+    "kind": "DIRECT",
+    "createdAt": "2026-10-25T06:07:26.614Z",
+    "completedAt": "2026-10-25T06:07:27.794Z"
+  },
+  {
+    "id": "caf7fc1e-1987-44bf-83ae-d2236a7715d7",
+    "externalId": "job-1013",
+    "environment": "PROD",
+    "status": "SUPPRESSED",
+    "channel": "SMS",
+    "reason": "recipient_opted_out",
+    "attempts": 0,
+    "kind": "DIRECT",
+    "createdAt": "2026-10-25T06:07:26.409Z",
+    "completedAt": "2026-10-25T06:07:26.409Z"
+  }
+]</code></pre><p class="masked">(list shortened to the first 3 of 6 items)</p>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th><code>error</code></th><th>When it happens</th></tr></thead><tbody><tr><td>200</td><td>-</td><td>OK.</td></tr><tr><td>400</td><td><code>invalid_request</code></td><td>appId missing or not a UUID.</td></tr><tr><td>401</td><td><code>unauthorized</code></td><td>No <code>Authorization</code> header, or an invalid, expired or revoked session token. Returned by the gateway's forward-auth (from registry-service).</td></tr><tr><td>403</td><td><code>mfa_required</code></td><td>The session is only aal1 (emailed code only), or Kratos refuses it because an authenticator app is enrolled but not used in this session. Do the authenticator step.</td></tr><tr><td>403</td><td><code>not_staff</code></td><td>A valid session, but the person is not an ACTIVE staff member (customers get this).</td></tr></tbody></table></div>
+<h4>Real error responses</h4><pre class="out nocopy"><code>No appId:
+HTTP 400  {"error": "invalid_request"}</code></pre>
+<h4>How to use it</h4><ul><li>Statuses and reasons are explained in the <a href="10-reference.html#glossary-status">status glossary</a>.</li><li>It covers both environments (DEV and PROD rows can both exist, for example after a switch); the <code>environment</code> column says which.</li></ul>
+</div></details>
+<details class="endpoint" id="ep-staff-get-notification-notifications-id"><summary><span class="method m-get">GET</span><span class="path">/admin/api/v1/notification/notifications/{id}</span><span class="sum">One notification with all attempts and callbacks</span></summary><div class="body">
+<dl class="meta"><dt>Audience</dt><dd>Adera staff (the dashboard)</dd><dt>Client path</dt><dd><code>/admin/api/v1/notification/notifications/{id}</code> through the gateway</dd><dt>Internal path</dt><dd>same path on notification-service :8080 (the gateway does not rewrite it)</dd><dt>Auth</dt><dd><code>Authorization: Bearer $TOKEN</code>, a Kratos session token of an <strong>aal2</strong> staff session. The gateway checks it and adds <code>X-Staff-Id</code>, <code>X-Staff-Role</code>, <code>X-Gateway-Secret</code>. Minimum role: <strong>VIEWER</strong>.</dd><dt>Rate limit</dt><dd>300 per 60 s per client IP (gateway route <code>admin-notification</code>)</dd><dt>Implemented in</dt><dd><code>services/notification-service/src/main/java/app/adera/notification/partner/admin/NotificationAdminController.java</code></dd></dl>
+<h4>Purpose</h4><p>Everything about one notification: the final status and reason, every delivery attempt (channel, provider, outcome, error code) and every callback (status, attempts, last HTTP status or error, next attempt). Use the <code>id</code> (<code>notificationId</code>), not the partner's <code>externalId</code>.</p>
+<h4>Request parameters</h4><div class="table-wrap"><table><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why it exists</th></tr></thead><tbody><tr><td>id</td><td>path</td><td>UUID</td><td>yes</td><td>The notification id.</td><td>Identifies it.</td></tr></tbody></table></div>
+<h4>Example request</h4><pre><code>curl -sS -i -X GET "$BASE/admin/api/v1/notification/notifications/$NOTIFICATION_ID" \
+  -H "Authorization: Bearer $TOKEN"</code></pre>
+<h4>Example response</h4><pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+X-Request-Id: 20ee772c-2fbb-485f-bbbc-d74a5a9a811d
+
+{
+  "id": "6bfb3f59-a8c6-4033-bcc0-b5a6562776e4",
+  "appId": "41548c1e-b03e-412a-bbbe-1e46343505b9",
+  "externalId": "job-1001",
+  "environment": "PROD",
+  "status": "SENT",
+  "channel": "SMS",
+  "reason": null,
+  "attempts": 1,
+  "kind": "DIRECT",
+  "templateId": "a382808f-1175-4eb3-8129-dd61aa75634a",
+  "templateVersion": 2,
+  "createdAt": "2026-10-25T06:07:24.229Z",
+  "nextAttemptAt": "2026-10-25T06:07:24.229Z",
+  "expiresAt": "2026-10-25T07:07:24.169Z",
+  "completedAt": "2026-10-25T06:07:24.580Z",
+  "attemptLog": [
+    {
+      "channel": "SMS",
+      "provider": "console",
+      "outcome": "OK",
+      "errorCode": null,
+      "at": "2026-10-25T06:07:24.574Z"
+    }
+  ],
+  "callbacks": [
+    {
+      "status": "DELIVERED",
+      "attempts": 1,
+      "lastHttpStatus": 200,
+      "lastError": null,
+      "nextAttemptAt": "2026-10-25T06:07:24.580Z"
+    }
+  ]
+}</code></pre>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th><code>error</code></th><th>When it happens</th></tr></thead><tbody><tr><td>200</td><td>-</td><td>OK.</td></tr><tr><td>404</td><td><code>not_found</code></td><td>No such notification.</td></tr><tr><td>400</td><td><code>invalid_request</code></td><td>id not a UUID.</td></tr><tr><td>401</td><td><code>unauthorized</code></td><td>No <code>Authorization</code> header, or an invalid, expired or revoked session token. Returned by the gateway's forward-auth (from registry-service).</td></tr><tr><td>403</td><td><code>mfa_required</code></td><td>The session is only aal1 (emailed code only), or Kratos refuses it because an authenticator app is enrolled but not used in this session. Do the authenticator step.</td></tr><tr><td>403</td><td><code>not_staff</code></td><td>A valid session, but the person is not an ACTIVE staff member (customers get this).</td></tr></tbody></table></div>
+<h4>Real error responses</h4><pre class="out nocopy"><code>Unknown id:
+HTTP 404  {"error": "not_found"}</code></pre>
+<h4>How to use it</h4><ul><li><code>attemptLog[].provider</code> is <code>console</code>, <code>twilio</code>, <code>mailpit</code>, <code>resend</code>, <code>fcm-fake</code>, <code>fcm</code> or <code>sandbox</code>.</li><li>A callback with <code>lastError: address_not_public</code> (or another UrlGuard reason) means the partner's callback URL was refused.</li></ul>
+</div></details>
+<details class="endpoint" id="ep-staff-get-notification-usage"><summary><span class="method m-get">GET</span><span class="path">/admin/api/v1/notification/usage</span><span class="sum">Usage against limits</span></summary><div class="body">
+<dl class="meta"><dt>Audience</dt><dd>Adera staff (the dashboard)</dd><dt>Client path</dt><dd><code>/admin/api/v1/notification/usage</code> through the gateway</dd><dt>Internal path</dt><dd>same path on notification-service :8080 (the gateway does not rewrite it)</dd><dt>Auth</dt><dd><code>Authorization: Bearer $TOKEN</code>, a Kratos session token of an <strong>aal2</strong> staff session. The gateway checks it and adds <code>X-Staff-Id</code>, <code>X-Staff-Role</code>, <code>X-Gateway-Secret</code>. Minimum role: <strong>VIEWER</strong>.</dd><dt>Rate limit</dt><dd>300 per 60 s per client IP (gateway route <code>admin-notification</code>)</dd><dt>Implemented in</dt><dd><code>services/notification-service/src/main/java/app/adera/notification/partner/admin/NotificationAdminController.java, delivery/UsageService.java</code></dd></dl>
+<h4>Purpose</h4><p>Per channel: messages sent today (UTC), distinct users reached today and the lifetime total, for one app and environment. Compare with the limits from the app detail.</p>
+<h4>Request parameters</h4><div class="table-wrap"><table><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why it exists</th></tr></thead><tbody><tr><td>appId</td><td>query</td><td>UUID</td><td>yes</td><td>Existing app id.</td><td>Which app.</td></tr><tr><td>environment</td><td>query</td><td>string</td><td>no (this deployment's)</td><td><code>DEV</code> or <code>PROD</code>.</td><td>Defaults to the environment this deployment runs. Usage is counted separately per environment.</td></tr></tbody></table></div>
+<h4>Example request</h4><pre><code>curl -sS -i -X GET "$BASE/admin/api/v1/notification/usage?appId=$APP&amp;environment=PROD" \
+  -H "Authorization: Bearer $TOKEN"</code></pre>
+<h4>Example response</h4><pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+X-Request-Id: d8267fa8-7248-4193-9306-25e97a79a8ea
+
+[
+  {
+    "channel": "IN_APP",
+    "lifetime": 1,
+    "today": 1,
+    "distinct_users_today": 1
+  },
+  {
+    "channel": "SMS",
+    "lifetime": 2,
+    "today": 2,
+    "distinct_users_today": 1
+  }
+]</code></pre>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th><code>error</code></th><th>When it happens</th></tr></thead><tbody><tr><td>200</td><td>-</td><td>OK. An empty list means nothing was counted yet.</td></tr><tr><td>401</td><td><code>unauthorized</code></td><td>No <code>Authorization</code> header, or an invalid, expired or revoked session token. Returned by the gateway's forward-auth (from registry-service).</td></tr><tr><td>403</td><td><code>mfa_required</code></td><td>The session is only aal1 (emailed code only), or Kratos refuses it because an authenticator app is enrolled but not used in this session. Do the authenticator step.</td></tr><tr><td>403</td><td><code>not_staff</code></td><td>A valid session, but the person is not an ACTIVE staff member (customers get this).</td></tr></tbody></table></div>
+<h4>How to use it</h4><ul><li>The numbers count quota reservations, which includes requests accepted but not yet delivered, and muted (SUPPRESSED) ones.</li></ul>
+</div></details>
+<details class="endpoint" id="ep-staff-get-notification-stats"><summary><span class="method m-get">GET</span><span class="path">/admin/api/v1/notification/stats</span><span class="sum">Notification counts (all apps or one)</span></summary><div class="body">
+<dl class="meta"><dt>Audience</dt><dd>Adera staff (the dashboard)</dd><dt>Client path</dt><dd><code>/admin/api/v1/notification/stats</code> through the gateway</dd><dt>Internal path</dt><dd>same path on the service :8080 (the gateway does not rewrite it)</dd><dt>Auth</dt><dd><code>Authorization: Bearer $TOKEN</code>, a Kratos session token of an <strong>aal2</strong> staff session. The gateway checks it and adds <code>X-Staff-Id</code>, <code>X-Staff-Role</code>, <code>X-Gateway-Secret</code>. Minimum role: <strong>VIEWER</strong>.</dd><dt>Rate limit</dt><dd>300 per 60 s per client IP (gateway route <code>admin-notification</code>)</dd><dt>Implemented in</dt><dd><code>services/notification-service/src/main/java/app/adera/notification/partner/admin/NotificationAdminController.java</code></dd></dl>
+<h4>Purpose</h4><p>Counts for the dashboard: all time, the last 24 hours, by status and by channel. Optionally for one app.</p>
+<h4>Request parameters</h4><div class="table-wrap"><table><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why it exists</th></tr></thead><tbody><tr><td>appId</td><td>query</td><td>UUID</td><td>no</td><td>Existing app id.</td><td>Counts for one app.</td></tr></tbody></table></div>
+<h4>Example request</h4><pre><code>curl -sS -i "$BASE/admin/api/v1/notification/stats" \
+  -H "Authorization: Bearer $TOKEN"</code></pre>
+<h4>Example response</h4><pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+
+{
+  &quot;total&quot;: 0,
+  &quot;last24h&quot;: {
+    &quot;total&quot;: 0,
+    &quot;byStatus&quot;: {}
+  },
+  &quot;byStatus&quot;: {},
+  &quot;byChannel&quot;: {}
+}
+
+(Captured from the development database while it held no notifications; with data, byStatus is like {"SENT": 7, "FAILED": 1}.)</code></pre>
+<h4>How to use it</h4><ul><li>Message values are never part of any of these answers.</li></ul>
+</div></details>
+</section>
+<div class="pager"><a class="prev" href="08a-user-api.html"><small>Previous</small>8a. End-user API</a><a class="next" href="08c-partner-api.html"><small>Next</small>8c. Partner API</a></div>
+<p class="footer">Adera backend documentation &middot; last verified 2026-10-25 &middot; <a href="../index.html">contents</a></p>
+</main>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

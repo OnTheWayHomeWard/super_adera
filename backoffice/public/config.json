@@ -1,0 +1,9 @@
+{
+  "devHints": true,
+  "mailpitUrl": "http://127.0.0.1:8025",
+  "grafanaUrl": "http://127.0.0.1:3001",
+  "prometheusUrl": "http://127.0.0.1:9090",
+  "infisicalUrl": "http://127.0.0.1:8080",
+  "rabbitmqUrl": "http://127.0.0.1:15672",
+  "rustfsConsoleUrl": "http://127.0.0.1:9001"
+}

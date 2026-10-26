@@ -1,0 +1,486 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>4. Services | Adera docs</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+<button id="menu-btn" type="button" aria-label="Toggle menu">Menu</button>
+<a class="brand" href="../index.html">Adera docs</a>
+<span class="spacer"></span>
+<a href="../index.html">Contents</a>
+<button id="theme-btn" type="button" aria-label="Toggle light or dark theme">Theme</button>
+</header>
+<div class="layout">
+<nav class="sidebar" aria-label="Sections">
+<ul><li><a href="../index.html" class="">Home / contents</a></li></ul>
+<h4>Sections</h4><ul>
+<li><a href="01-overview.html">1. Overview</a>
+</li>
+<li><a href="02-setup.html">2. Setup and running</a>
+</li>
+<li><a href="03-tools.html">3. Tools</a>
+</li>
+<li><a href="04-services.html" class=current>4. Services</a>
+<ul><li><a href="#overview">At a glance</a></li><li><a href="#notification-service">notification-service</a></li><li><a href="#user-service">user-service</a></li><li><a href="#registry-service">registry-service</a></li><li><a href="#notes">Notes and rough edges seen while documenting</a></li></ul>
+</li>
+<li><a href="05-communication.html">5. How it communicates</a>
+</li>
+<li><a href="06-security.html">6. Security model</a>
+</li>
+<li><a href="07-data.html">7. Data</a>
+</li>
+<li><a href="08-endpoints.html">8. Endpoint reference</a>
+</li>
+<li><a href="09-guides.html">9. Guides</a>
+</li>
+<li><a href="10-reference.html">10. Reference</a>
+</li>
+<li><a href="11-backoffice.html">11. Backoffice (staff dashboard)</a>
+</li>
+<li><a href="12-backoffice-guide.html">12. Backoffice guide (staff manual)</a>
+</li>
+<li><a href="13-sample-data.html">13. Sample data (test scenarios)</a>
+</li>
+</ul>
+<h4>Endpoints</h4><ul>
+<li><a href="08a-user-api.html">8a. End-user API</a>
+</li>
+<li><a href="08b-staff-api.html">8b. Staff / dashboard API</a>
+</li>
+<li><a href="08c-partner-api.html">8c. Partner API</a>
+</li>
+<li><a href="08d-internal-api.html">8d. Internal API</a>
+</li>
+<li><a href="08e-kratos-flows.html">8e. Kratos flows</a>
+</li>
+<li><a href="08f-operational.html">8f. Operational endpoints</a>
+</li>
+</ul>
+</nav>
+<main>
+<h1>4. Services</h1>
+<p class="lead">The three Spring Boot services we wrote ourselves. Everything else in the platform is an off-the-shelf tool (see <a href="03-tools.html">Tools</a>); these services hold only product logic.</p>
+
+<div class="callout why"><span class="label">Why three small services</span>
+<p>Each service owns one database and one job, and nothing else can read that database (see <a href="03-tools.html#postgres">Postgres</a>). They are
+<strong>independent Maven projects</strong> (no shared parent build, no shared library): a shared library is only worth extracting once real shared code exists.
+The cost is a little repeated code, for example the same <code>Cidrs</code> helper and the same gateway-trust filter pattern appear in more than one service. That is accepted on purpose.</p></div>
+
+<h2 id="overview">At a glance</h2>
+<div class="table-wrap"><table>
+<thead><tr><th>Service</th><th>Host port (dev)</th><th>Database</th><th>Owns</th><th>Talks to</th></tr></thead>
+<tbody>
+<tr><td><a href="#notification-service">notification-service</a></td><td>8085</td><td><code>notification</code> (login <code>notif_svc</code>)</td><td>Delivery of every message: Kratos codes (SMS/email), partner notifications, inbox, callbacks, quotas</td><td>Postgres, Mailpit/Resend, Twilio, Firebase, registry-service, user-service, Infisical (at start)</td></tr>
+<tr><td><a href="#user-service">user-service</a></td><td>8086</td><td><code>users</code> (login <code>users_svc</code>)</td><td>The full user record, avatar, devices and push tokens, pseudonymous aliases, per-app mute choices</td><td>Postgres, Kratos (public and admin), RustFS</td></tr>
+<tr><td><a href="#registry-service">registry-service</a></td><td>8087</td><td><code>registry</code> (login <code>registry_svc</code>)</td><td>Mini apps, capabilities, limits, allowed addresses, partner keys, staff and roles, reviews/reports, audit</td><td>Postgres, Kratos (public and admin), RustFS</td></tr>
+</tbody></table></div>
+<p>Inside the compose network every service listens on <code>8080</code>; the host ports above exist only for development and are bound to <code>127.0.0.1</code>.
+Production traffic enters through the gateway only (<a href="05-communication.html#trust-model">trust model</a>).</p>
+
+<h3 id="common">What all three share</h3>
+<ul>
+<li><strong>Stack:</strong> Spring Boot 4.1.2 (parent <code>spring-boot-starter-parent</code>), Java 21, Maven, Spring MVC, Spring Data JPA + Flyway (<code>ddl-auto: validate</code>: the schema is changed only by migrations), Actuator, Micrometer Prometheus registry, OpenTelemetry starter, Bean Validation.</li>
+<li><strong>Error shape:</strong> JSON <code>{"error": "&lt;code&gt;", ...details}</code>. Codes are machine-readable and stable; full index in <a href="10-reference.html#error-codes">Reference</a>.</li>
+<li><strong>Trust filters:</strong> each service has a servlet filter that checks constant-time (<code>MessageDigest.isEqual</code>) shared secrets by path. An <em>empty</em> secret disables its check; this is for local development only (registry-service logs a warning at start).</li>
+<li><strong>Observability:</strong> <code>management.endpoints.web.exposure.include = health,info,prometheus</code>. Traces go by OTLP/HTTP to <code>OTEL_TRACES_ENDPOINT</code> (compose sets <code>http://otel-collector:4318/v1/traces</code>), sampling probability <code>TRACING_SAMPLE_RATE</code> (default <code>1.0</code>: every request, fine for dev, lower it in production). Prometheus scrapes <code>/actuator/prometheus</code> of each service (jobs <code>notification-service</code>, <code>user-service</code>, <code>registry-service</code> in <code>infra/prometheus/prometheus.yml</code>). We did not write any custom metrics: only the Spring/JVM/HTTP ones.</li>
+<li><strong>Clock:</strong> a single <code>Clock.systemUTC()</code> bean so tests can fix time.</li>
+<li><strong>Prototype <code>RestClient.Builder</code> bean:</strong> each client customises its own copy (base URL), so clients never share a builder (a Spring Boot 4 gotcha we hit).</li>
+<li><strong>Docker image:</strong> multi-stage. Build stage <code>maven:3.9-eclipse-temurin-21</code> (<code>mvn -B -q -DskipTests package</code>), run stage <code>eclipse-temurin:21-jre</code> as non-root user <code>app</code> (uid 10001), <code>java -XX:MaxRAMPercentage=75 -jar /app/app.jar</code>, port 8080. No secrets are baked in.</li>
+</ul>
+
+<h3 id="build-test">Building and testing (any service)</h3>
+<p>This machine's default JDK is 26, so always pin Java 21 for Maven:</p>
+<pre><code>cd services/&lt;service&gt;
+export JAVA_HOME=/usr/lib/jvm/java-21-openjdk
+./mvnw -q test                 # unit + integration tests (integration tests need Docker for Testcontainers)
+./mvnw -q -DskipTests package  # builds target/&lt;service&gt;-0.0.1-SNAPSHOT.jar
+
+# the container image (what compose runs):
+cd ../..
+docker compose build &lt;service&gt;
+docker compose up -d &lt;service&gt;</code></pre>
+<div class="callout"><span class="label">Test counts (surefire reports in <code>target/surefire-reports</code>, 2026-10-25)</span>
+<p>notification-service <strong>50</strong>, user-service <strong>65</strong>, registry-service <strong>56</strong>, all passing. (<code>docs/SETUP.md</code> section 11 still quotes older counts of 28 and 47 for the first two; section 7c has the current numbers.)
+The integration tests start a real Postgres 16 in Testcontainers (<code>TestcontainersConfiguration</code> in each service) and use in-memory fakes for RustFS (<code>InMemoryAvatarStorage</code>, <code>InMemoryObjectStorage</code>) and mocked HTTP for Kratos/Twilio/Resend/registry/user-service.</p></div>
+
+<!-- ===================================================================== -->
+<h2 id="notification-service">notification-service</h2>
+<p><span class="badge ours">our code</span> <span class="badge built">built</span> Port 8085 (dev), database <code>notification</code>, <code>services/notification-service</code>. Java package root <code>app.adera.notification</code>.</p>
+
+<h3 id="ns-responsibilities">Responsibilities</h3>
+<ol>
+<li><strong>Kratos courier.</strong> Kratos is configured with the HTTP courier strategy: every login/registration code it would send goes to <code>POST /internal/kratos/sms</code> or <code>/internal/kratos/email</code>. This service rate-limits per recipient, optionally applies a live allowlist, calls the selected provider (console or Twilio for SMS, Mailpit or Resend for email) and writes a <code>send_log</code> row with no code and no full recipient.</li>
+<li><strong>Partner notification platform.</strong> Mini-app backends call <code>/v1/*</code> with RSA-signed requests. The service verifies the signature and the caller's address, resolves the user's pseudonymous id through user-service, enforces templates and quotas, queues the notification, delivers it in background workers (SMS, email, in-app + push) with retry, and sends signed callbacks.</li>
+<li><strong>In-app inbox.</strong> The bell-menu data for a signed-in user (<code>/api/v1/me/notifications</code>).</li>
+<li><strong>Staff visibility.</strong> Template management and the delivery log/usage numbers under <code>/admin/api/v1/notification/*</code>.</li>
+<li><strong>Our signing key.</strong> Signs every <code>/v1</code> response and every callback; publishes the public half at <code>/.well-known/jwks.json</code>.</li>
+</ol>
+
+<svg class="diagram" viewBox="0 0 900 470" role="img" aria-label="notification-service components">
+<title>notification-service: components and who they call</title>
+<defs><marker id="ah-ns" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z"/></marker></defs>
+<rect class="zone" x="215" y="14" width="520" height="440" rx="10"/>
+<text class="title" x="230" y="34">notification-service (Spring Boot, :8080)</text>
+
+<rect class="box tool" x="20" y="60" width="150" height="54" rx="8"/><text class="title" x="95" y="84" text-anchor="middle">Ory Kratos</text><text class="muted" x="95" y="102" text-anchor="middle">courier (HTTP)</text>
+<rect class="box tool" x="20" y="190" width="150" height="54" rx="8"/><text class="title" x="95" y="214" text-anchor="middle">APISIX</text><text class="muted" x="95" y="232" text-anchor="middle">partners, staff, users</text>
+<rect class="box ours" x="20" y="300" width="150" height="46" rx="8"/><text class="title" x="95" y="327" text-anchor="middle">registry-service</text>
+<rect class="box ours" x="20" y="364" width="150" height="46" rx="8"/><text class="title" x="95" y="391" text-anchor="middle">user-service</text>
+
+<rect class="box ours" x="235" y="60" width="150" height="54" rx="8"/><text class="title" x="310" y="82" text-anchor="middle">KratosCourier</text><text class="muted" x="310" y="100" text-anchor="middle">Controller</text>
+<rect class="box ours" x="415" y="60" width="130" height="54" rx="8"/><text class="title" x="480" y="82" text-anchor="middle">Notification</text><text class="muted" x="480" y="100" text-anchor="middle">Dispatcher</text>
+<rect class="box ours" x="575" y="60" width="140" height="54" rx="8"/><text class="title" x="645" y="82" text-anchor="middle">Sms / Email</text><text class="muted" x="645" y="100" text-anchor="middle">providers</text>
+
+<rect class="box ours" x="235" y="190" width="150" height="54" rx="8"/><text class="title" x="310" y="210" text-anchor="middle">Filters</text><text class="muted" x="310" y="226" text-anchor="middle">PartnerAuth, ResponseSigning,</text><text class="muted" x="310" y="238" text-anchor="middle">GatewayTrust</text>
+<rect class="box ours" x="415" y="190" width="130" height="54" rx="8"/><text class="title" x="480" y="210" text-anchor="middle">Acceptor +</text><text class="muted" x="480" y="226" text-anchor="middle">controllers</text><text class="muted" x="480" y="238" text-anchor="middle">templates, inbox</text>
+<rect class="box ours" x="575" y="190" width="140" height="54" rx="8"/><text class="title" x="645" y="210" text-anchor="middle">NotificationStore</text><text class="muted" x="645" y="226" text-anchor="middle">+ UsageService</text>
+
+<rect class="box ours" x="235" y="330" width="150" height="54" rx="8"/><text class="title" x="310" y="352" text-anchor="middle">Delivery / Callback</text><text class="muted" x="310" y="370" text-anchor="middle">workers (1 s / 2 s)</text>
+<rect class="box ours" x="415" y="330" width="130" height="54" rx="8"/><text class="title" x="480" y="352" text-anchor="middle">DeliveryService</text><text class="muted" x="480" y="370" text-anchor="middle">+ CallbackSender</text>
+<rect class="box ours" x="575" y="330" width="140" height="54" rx="8"/><text class="title" x="645" y="352" text-anchor="middle">Sms / Email / Fcm</text><text class="muted" x="645" y="370" text-anchor="middle">providers</text>
+
+<rect class="box store" x="770" y="190" width="110" height="54" rx="8"/><text class="title" x="825" y="214" text-anchor="middle">Postgres</text><text class="muted" x="825" y="232" text-anchor="middle">notification</text>
+<rect class="box ext" x="770" y="60" width="110" height="54" rx="8"/><text class="title" x="825" y="82" text-anchor="middle">Twilio / Resend</text><text class="muted" x="825" y="100" text-anchor="middle">Mailpit, console</text>
+<rect class="box ext" x="770" y="330" width="110" height="54" rx="8"/><text class="title" x="825" y="352" text-anchor="middle">Firebase (FCM)</text><text class="muted" x="825" y="370" text-anchor="middle">partner callback URL</text>
+
+<path class="edge hot" marker-end="url(#ah-ns)" d="M170 87H235"/>
+<path class="edge hot" marker-end="url(#ah-ns)" d="M385 87H415"/>
+<path class="edge hot" marker-end="url(#ah-ns)" d="M545 87H575"/>
+<path class="edge" marker-end="url(#ah-ns)" d="M715 87H770"/>
+<path class="edge hot" marker-end="url(#ah-ns)" d="M170 217H235"/>
+<path class="edge hot" marker-end="url(#ah-ns)" d="M385 217H415"/>
+<path class="edge hot" marker-end="url(#ah-ns)" d="M545 217H575"/>
+<path class="edge" marker-end="url(#ah-ns)" d="M715 217H770"/>
+<path class="edge dash" marker-end="url(#ah-ns)" d="M310 244V300H170"/>
+<path class="edge dash" marker-end="url(#ah-ns)" d="M480 244V387H170"/>
+<path class="edge" marker-end="url(#ah-ns)" d="M385 357H415"/>
+<path class="edge" marker-end="url(#ah-ns)" d="M545 357H575"/>
+<path class="edge" marker-end="url(#ah-ns)" d="M715 357H770"/>
+<path class="edge dash" marker-end="url(#ah-ns)" d="M310 330V260H825V244"/>
+<path class="edge dash" marker-end="url(#ah-ns)" d="M500 114V150H825V190"/>
+<text class="muted" x="238" y="296">partner keys, app context</text>
+<text class="muted" x="520" y="404">alias resolve, delivery context</text>
+<text class="muted" x="20" y="445">Solid: request flow. Dashed: lookups and database access. Blue boxes are our code.</text>
+</svg>
+
+<h3 id="ns-packages">Packages and classes</h3>
+<div class="table-wrap"><table>
+<thead><tr><th>Package / class</th><th>What it does and why</th></tr></thead>
+<tbody>
+<tr><td><code>config</code>: <code>AppConfig</code>, <code>NotificationProperties</code>, <code>InfisicalEnvironmentPostProcessor</code></td><td>Clock and prototype <code>RestClient.Builder</code> beans; typed <code>adera.notification.*</code> properties; the Infisical secret loader (registered in <code>META-INF/spring.factories</code>, see below).</td></tr>
+<tr><td><code>kratos</code>: <code>KratosCourierController</code>, <code>ApiExceptionHandler</code></td><td>The two courier endpoints. Any outcome other than a delivery failure is HTTP 200 on purpose (a rate-limited or allowlist-skipped message must not be retried by Kratos). A <code>DeliveryException</code> becomes <strong>502 <code>delivery_failed</code></strong> so Kratos keeps the message queued and retries.</td></tr>
+<tr><td><code>dispatch</code>: <code>NotificationDispatcher</code></td><td>The one place every Kratos message passes: (1) per-recipient rate limit from <code>send_log</code>, (2) live allowlist, (3) provider call, (4) <code>send_log</code> row. Non-real providers also copy the message into the dev store.</td></tr>
+<tr><td><code>dispatch</code>: <code>SendLog</code>, <code>SendLogRepository</code></td><td>JPA entity for <code>send_log</code>. Statuses <code>SENT, FAILED, SUPPRESSED, SKIPPED</code>. Only SENT and FAILED count toward the rate limit.</td></tr>
+<tr><td><code>dispatch</code>: <code>Masking</code></td><td><code>+251911234567 -&gt; +2519******67</code>, <code>alice@example.com -&gt; a***@example.com</code>, plus a SHA-256 of the normalised (trimmed, lower-cased) recipient used as the rate-limit key: stable, but the number cannot be read back.</td></tr>
+<tr><td><code>dispatch</code>: <code>DevMessageStore</code>, <code>DeliveryException</code>, <code>DispatchResult</code></td><td>In-memory ring of the last 100 messages handled by <em>non-real</em> providers (so tests can read codes); a short error code that is safe to log; the result handed back to the controller.</td></tr>
+<tr><td><code>dev</code>: <code>DevMessageController</code>, <code>ProviderSafetyCheck</code></td><td><code>GET/DELETE /dev/messages</code>, only registered when <code>adera.notification.dev-endpoints=true</code>. The safety check refuses to start the service if dev endpoints are on while a real provider is selected, and prints the <code>NOTIFICATION MODE: ...</code> banner.</td></tr>
+<tr><td><code>sms</code>: <code>SmsProvider</code>, <code>ConsoleSmsProvider</code>, <code>TwilioSmsProvider</code>, <code>GsmText</code></td><td>Provider interface (<code>name()</code>, <code>isReal()</code>, <code>send()</code>), selected by <code>@ConditionalOnProperty</code>. Console logs a masked line. Twilio posts a form to the REST API with basic auth, prefers a Messaging Service SID, falls back to a sender number; the error code is <code>twilio_http_&lt;status&gt;</code> or <code>twilio_unreachable</code> and never contains the body. <code>GsmText</code> replaces curly quotes, dashes, arrows and similar with GSM-7 safe characters (one non-GSM character would switch a whole SMS to UCS-2 and multiply cost); Amharic text is left alone.</td></tr>
+<tr><td><code>email</code>: <code>EmailProvider</code>, <code>EmailMessage</code>, <code>MailpitEmailProvider</code>, <code>ResendEmailProvider</code></td><td>Mailpit sends SMTP to <code>SMTP_HOST:SMTP_PORT</code> (error <code>mailpit_unreachable</code>). Resend posts JSON with a bearer key (error <code>resend_http_&lt;status&gt;</code> / <code>resend_unreachable</code>).</td></tr>
+<tr><td><code>partner</code>: <code>PartnerProperties</code>, <code>PartnerSafetyCheck</code>, <code>ApiException</code>, <code>PartnerExceptionHandler</code>, <code>TtlCache</code>, <code>UpstreamUnavailableException</code></td><td>Typed <code>adera.partner.*</code> properties; startup guard (see below); the one error type/handler for partner, admin and inbox APIs; a tiny TTL cache that also remembers "not found"; a marker for "registry or user-service is down" which becomes <strong>503 <code>service_unavailable</code></strong>.</td></tr>
+<tr><td><code>partner.auth</code>: <code>PartnerAuthFilter</code></td><td>Guards <code>/v1/**</code>. Order of checks: body at most 64 KiB (413), three signature headers present (401 <code>missing_signature</code>), timestamp numeric and within <code>max-skew-minutes</code> (401 <code>invalid_timestamp</code> / <code>stale_timestamp</code>), key known (401 <code>unknown_key</code>) and usable (401 <code>key_revoked_or_expired</code>), RSA signature valid over the canonical string (401 <code>invalid_signature</code>), key's environment equal to this deployment's (403 <code>wrong_environment</code>), app known (401 <code>unknown_app</code>) and allowed to run (403 with registry's deny reason, e.g. <code>app_draft</code>), client address inside the app's allowed CIDRs (403 <code>ip_not_allowed</code>). The client address is the gateway's <code>X-Client-IP</code>, believed only if <code>X-Gateway-Secret</code> proves the call came from the gateway. The body is cached so controllers can read it again.</td></tr>
+<tr><td><code>partner.auth</code>: <code>Signatures</code>, <code>SigningKeyHolder</code>, <code>ResponseSigningFilter</code>, <code>JwksController</code></td><td>ADERA-SIG-1 (RS256, SHA256withRSA) canonical strings; our key (loaded from <code>PARTNER_SIGNING_PRIVATE_KEY_B64</code> or an ephemeral dev key; refuses to start without one when a real SMS/email provider is on); a filter that signs every <code>/v1</code> response including errors, bound to the request signature it answers; the public JWKS (cache-control 1 hour). See <a href="06-security.html#signing">Security: signing</a>.</td></tr>
+<tr><td><code>partner.auth</code>: <code>RegistryClient</code>, <code>UserDirectoryClient</code>, <code>Cidrs</code></td><td>HTTP clients for <code>registry-service</code> (<code>/internal/partner-keys/{id}</code>, <code>/internal/apps/{id}/context</code>) and <code>user-service</code> (<code>/internal/aliases/resolve</code>, <code>/internal/users/{id}/delivery-context</code>, <code>/internal/devices/deactivate</code>), all with <code>X-Internal-Secret</code>. Registry answers are cached 15 seconds, so a revoked key or a killed app stops working within about 15 s. <code>Cidrs</code> matches a literal IP against allowed ranges (never resolves a hostname).</td></tr>
+<tr><td><code>partner.delivery</code>: <code>PartnerNotificationController</code>, <code>NotificationAcceptor</code></td><td><code>POST /v1/notifications</code>, <code>GET /v1/notifications/{externalId}</code>. The acceptor validates, checks idempotency (<code>request_hash</code>), checks the template and its values, resolves the user, chooses the channel (the partner never does), applies mute and quotas, stores the row as QUEUED and answers 202.</td></tr>
+<tr><td><code>partner.delivery</code>: <code>NotificationStore</code>, <code>UsageService</code>, <code>Notification*</code></td><td>Every life-cycle write in its own short transaction (no DB connection held while talking to Twilio or a partner). <code>UsageService.reserve</code> locks the app/channel counter row, so concurrent requests cannot overshoot a limit; a rejected request rolls the insert back and uses no quota.</td></tr>
+<tr><td><code>partner.delivery</code>: <code>DeliveryWorker</code>, <code>DeliveryService</code>, <code>RetryPolicy</code></td><td>See <a href="#ns-workers">workers</a>.</td></tr>
+<tr><td><code>partner.delivery</code>: <code>CallbackWorker</code>, <code>CallbackSender</code>, <code>UrlGuard</code></td><td>Signed status callbacks with an SSRF guard (https only, no credentials in the URL, port 443/8443, every resolved address must be public, redirects never followed).</td></tr>
+<tr><td><code>partner.delivery</code>: <code>FcmProvider</code>, <code>FakeFcmProvider</code>, <code>FirebaseFcmProvider</code></td><td>Push. <code>fake</code> (default) logs only; <code>firebase</code> needs the service-account JSON (<code>FIREBASE_SERVICE_ACCOUNT_B64</code> or <code>FIREBASE_CREDENTIALS_PATH</code>) and refuses to start without it. Results <code>OK / UNREGISTERED / TRANSIENT_FAILURE</code>; UNREGISTERED (also INVALID_ARGUMENT, SENDER_ID_MISMATCH) makes us ask user-service to deactivate the token.</td></tr>
+<tr><td><code>partner.template</code>: <code>PartnerTemplateController</code>, <code>TemplateService</code>, <code>TemplateRules</code>, <code>Template</code>, <code>TemplateView</code></td><td>Admin-approved templates. Partners cannot send free text: they pick a template and fill declared values (length-limited, no control characters, no links unless <code>allowLinks</code>). Content per language (<code>en</code>, <code>am</code>, <code>om</code>) with text keys <code>title, body, sms, emailSubject, emailHtml</code>; every <code>{placeholder}</code> must be a declared param; HTML values are escaped; the user's language falls back to English text by text.</td></tr>
+<tr><td><code>partner.admin</code>: <code>GatewayTrustFilter</code>, <code>StaffRole</code>, <code>TemplateAdminController</code>, <code>NotificationAdminController</code></td><td>For <code>/admin/api/**</code> and <code>/api/**</code>: gateway secret plus verified staff id/role (or user id). Staff can read the delivery log and usage; ADMIN and above create/edit templates. Message <em>values</em> are never returned by the admin list (they can contain personal data).</td></tr>
+<tr><td><code>partner.inbox</code>: <code>InboxController</code></td><td>List, unread count, mark read, mark all read for the calling user. Mark-read of someone else's item is a 404.</td></tr>
+</tbody></table></div>
+<div class="callout warn"><span class="label">Not authenticated</span>
+<p><code>/internal/kratos/*</code> (courier) and <code>/dev/messages</code> have no authentication of their own: <code>GatewayTrustFilter</code> only covers <code>/admin/api/**</code> and <code>/api/**</code>, and <code>PartnerAuthFilter</code> only <code>/v1/**</code>. They are safe only because the gateway does not route them and the port is bound to <code>127.0.0.1</code>. A shared-secret header is on the to-do list (<a href="10-reference.html#not-built">not built yet</a>). <code>/actuator/*</code> is also open inside the network.</p></div>
+
+<h3 id="ns-workers">Background workers</h3>
+<div class="table-wrap"><table>
+<thead><tr><th>Worker</th><th>Schedule</th><th>Batch</th><th>What it does</th></tr></thead>
+<tbody>
+<tr><td><code>DeliveryWorker</code></td><td><code>@Scheduled(fixedDelay = 1000)</code> (1 s after the previous run ends)</td><td>20</td><td>Atomically claims due rows with <code>UPDATE ... WHERE id IN (SELECT ... FOR UPDATE SKIP LOCKED) RETURNING id</code>: rows in <code>QUEUED</code>/<code>RETRYING</code> with <code>next_attempt_at &lt;= now()</code>, or <code>PROCESSING</code> rows whose 60-second claim (<code>locked_until</code>) expired. The claim bumps <code>attempts</code>. Then <code>DeliveryService.deliver</code> for each.</td></tr>
+<tr><td><code>CallbackWorker</code></td><td><code>@Scheduled(fixedDelay = 2000)</code></td><td>20</td><td>Same claiming pattern on the <code>callback</code> table (<code>PENDING</code> due, or <code>PROCESSING</code> expired). Delivered on 2xx; blocked addresses and the 8th failed attempt end as <code>FAILED</code>; otherwise back to <code>PENDING</code> with the next delay.</td></tr>
+</tbody></table></div>
+<p>Both workers are skipped when <code>PARTNER_WORKERS_ENABLED=false</code> (used by tests). Because claiming uses <code>SKIP LOCKED</code>, several instances can run workers without sending twice, and a crashed worker's claim simply expires.</p>
+<div class="table-wrap"><table>
+<thead><tr><th>Retry rule</th><th>Value</th></tr></thead>
+<tbody>
+<tr><td>Notification delivery delay after attempt <em>n</em></td><td>30 s doubling (30 s, 1 m, 2 m, 4 m, ...), capped at 1 hour, plus or minus 10 % jitter</td></tr>
+<tr><td>Max delivery attempts</td><td>8 (then <code>FAILED</code> with reason <code>max_attempts:&lt;last reason&gt;</code>)</td></tr>
+<tr><td>Stop by deadline</td><td>if the next attempt would pass <code>expires_at</code> (<code>ttlSeconds</code>, default 86400, range 60 to 604800) the notification becomes <code>EXPIRED</code></td></tr>
+<tr><td>Permanent provider errors</td><td><code>twilio_http_4xx</code> / <code>resend_http_4xx</code> except 408 and 429: <code>FAILED</code> at once, never retried (bad number, rejected sender)</td></tr>
+<tr><td>Callback delay</td><td>1 m doubling, capped at 6 hours, plus or minus 10 % jitter; 8 attempts (about a day)</td></tr>
+</tbody></table></div>
+<p><code>DeliveryService.deliver</code> re-checks the user at delivery time (phone, email and mute may have changed): in DEV the synthetic users (<code>u_p_test_*</code>) are marked SENT without sending (attempt provider <code>sandbox</code>; real users go through the dev providers like any message); unreachable user, no phone/email, muted, or not on the live allowlist end terminally as <code>UNREACHABLE</code> or <code>SUPPRESSED</code>; in-app notifications always write the inbox row first (idempotent per notification), then push to each active token; push is best effort.</p>
+
+<h3 id="ns-safety">Startup safety checks</h3>
+<ul>
+<li><strong><code>ProviderSafetyCheck</code>:</strong> <code>NOTIFY_DEV_ENDPOINTS=true</code> together with a real SMS or email provider aborts startup (dev endpoints would expose one-time codes). On ready it logs <code>NOTIFICATION MODE: sms=... email=... allowlist=... devEndpoints=...</code> at WARN.</li>
+<li><strong><code>PartnerSafetyCheck</code>:</strong> <code>PARTNER_ALLOW_PRIVATE_CALLBACKS=true</code> together with <em>any</em> real provider (SMS, email or push) aborts startup. On ready it logs <code>PARTNER PLATFORM: push=... workers=... privateCallbacks=...</code>.</li>
+<li><strong><code>SigningKeyHolder</code>:</strong> no <code>PARTNER_SIGNING_PRIVATE_KEY_B64</code> with a real SMS/email provider aborts startup; otherwise an ephemeral key <code>ephemeral-xxxxxxxx</code> is generated and a warning is logged (partners cannot rely on it across restarts).</li>
+<li>Real providers fail fast with a clear message when credentials are missing (Twilio account SID/token and a messaging service SID or number; Resend key and sender; Firebase credentials).</li>
+</ul>
+
+<h3 id="ns-infisical">Infisical loader</h3>
+<p><code>InfisicalEnvironmentPostProcessor</code> runs before the Spring context exists. If <code>INFISICAL_TOKEN</code>, <code>INFISICAL_PROJECT_ID</code> and <code>INFISICAL_DOMAIN</code> are set, it calls <code>GET {domain}/api/v4/secrets?projectId=...&amp;environment={INFISICAL_ENV, default dev}&amp;secretPath={INFISICAL_PATH, default /notification}&amp;expandSecretReferences=true</code> (5 s timeout, <strong>HTTP/1.1 pinned</strong> because the default h2c upgrade makes Infisical answer 400) and adds every returned secret as the <em>lowest-priority</em> property source named <code>infisical</code>. A real environment variable therefore always wins, which makes local overrides easy. A failure is logged (message only, never the token) but not fatal: dev providers still start; a real provider then fails fast naming the missing key. Because it runs before logging exists it uses <code>DeferredLogFactory</code>, or its messages would be lost.</p>
+<p>Keys currently present in Infisical <code>dev</code> <code>/notification</code> (names only, checked 2026-10-25): <code>PARTNER_SIGNING_KEY_ID</code>, <code>PARTNER_SIGNING_PRIVATE_KEY_B64</code>, <code>RESEND_API_KEY</code>, <code>RESEND_FROM_EMAIL</code>, <code>RESEND_FROM_NAME</code>, <code>TWILIO_ACCOUNT_SID</code>, <code>TWILIO_AUTH_TOKEN</code>, <code>TWILIO_MESSAGING_SERVICE_SID</code>, <code>TWILIO_PHONE_NUMBER</code>. <code>FIREBASE_SERVICE_ACCOUNT_B64</code> is not there yet. The other folders (<code>/</code>, <code>/infra</code>, <code>/kratos</code>, <code>/gateway</code>, <code>/user</code>) were empty. Only notification-service has this loader; user-service and registry-service read their secrets from environment variables set by compose from <code>.env</code>.</p>
+
+<h3 id="ns-config">Configuration properties</h3>
+<p>Prefix <code>adera.notification</code> (Kratos courier side), <code>adera.partner</code> (partner platform). Defaults are the values in <code>application.yml</code>; where compose overrides a default it is noted. Secret-valued properties are listed by name only.</p>
+<div class="table-wrap"><table>
+<thead><tr><th>Property</th><th>Env var</th><th>Default</th><th>Meaning</th></tr></thead>
+<tbody>
+<tr><td><code>spring.datasource.url / username / password</code></td><td><code>DB_URL</code>, <code>DB_USER</code>, <code>DB_PASSWORD</code></td><td><code>jdbc:postgresql://localhost:5432/notification</code>, <code>notif_svc</code>, empty</td><td>Postgres. Compose sets them from <code>NOTIFICATION_DB_PASSWORD</code>. <em>Secret: password.</em></td></tr>
+<tr><td><code>spring.mail.host / port</code></td><td><code>SMTP_HOST</code>, <code>SMTP_PORT</code></td><td><code>localhost</code>, <code>1025</code></td><td>SMTP for the Mailpit provider (compose: <code>mailpit:1025</code>). Mail health check is disabled so a down inbox never marks the service DOWN.</td></tr>
+<tr><td><code>adera.notification.sms-provider</code></td><td><code>SMS_PROVIDER</code></td><td><code>console</code> (compose default also <code>console</code>)</td><td><code>console</code> or <code>twilio</code> (real, costs money).</td></tr>
+<tr><td><code>adera.notification.email-provider</code></td><td><code>EMAIL_PROVIDER</code></td><td><code>mailpit</code></td><td><code>mailpit</code> or <code>resend</code> (real).</td></tr>
+<tr><td><code>adera.notification.dev-endpoints</code></td><td><code>NOTIFY_DEV_ENDPOINTS</code></td><td><code>false</code> in <code>application.yml</code>; <strong>compose default is <code>true</code></strong></td><td>Exposes <code>/dev/messages</code>. Startup refuses it with a real provider.</td></tr>
+<tr><td><code>adera.notification.live-allowlist</code></td><td><code>NOTIFY_LIVE_ALLOWLIST</code></td><td>empty</td><td>Comma-separated recipients; when non-empty, <em>real</em> providers deliver only to these (applies to Kratos messages and partner notifications).</td></tr>
+<tr><td><code>adera.notification.limits.sms-per-hour / sms-per-day</code></td><td><code>LIMIT_SMS_PER_HOUR</code>, <code>LIMIT_SMS_PER_DAY</code></td><td><code>5</code>, <code>10</code></td><td>Per-recipient limits for Kratos SMS (counted from <code>send_log</code>).</td></tr>
+<tr><td><code>adera.notification.limits.email-per-hour / email-per-day</code></td><td><code>LIMIT_EMAIL_PER_HOUR</code>, <code>LIMIT_EMAIL_PER_DAY</code></td><td><code>10</code>, <code>20</code></td><td>Per-recipient limits for Kratos email.</td></tr>
+<tr><td><code>adera.notification.twilio.account-sid / auth-token / messaging-service-sid / phone-number</code></td><td><code>TWILIO_ACCOUNT_SID</code>, <code>TWILIO_AUTH_TOKEN</code>, <code>TWILIO_MESSAGING_SERVICE_SID</code>, <code>TWILIO_PHONE_NUMBER</code></td><td>empty (<code>base-url</code> defaults to <code>https://api.twilio.com</code>, settable only as a property)</td><td>Loaded from Infisical. <em>Secrets.</em> Needs the SID+token and either the messaging service SID or a number.</td></tr>
+<tr><td><code>adera.notification.resend.api-key / from-email / from-name</code></td><td><code>RESEND_API_KEY</code>, <code>RESEND_FROM_EMAIL</code>, <code>RESEND_FROM_NAME</code></td><td>empty, empty, <code>Adera</code></td><td>Loaded from Infisical. <em>api-key is a secret.</em></td></tr>
+<tr><td><code>adera.notification.mailpit.from-email / from-name</code></td><td><code>MAILPIT_FROM_EMAIL</code>, <code>MAILPIT_FROM_NAME</code></td><td><code>no-reply@adera.local</code>, <code>Adera</code></td><td>Sender shown in Mailpit.</td></tr>
+<tr><td><code>adera.partner.environment</code></td><td><code>ADERA_ENV</code></td><td><code>dev</code></td><td>The one environment of this deployment, <code>dev</code> or <code>prod</code> (stored as DEV/PROD); anything else stops the service starting. Keys of the other environment get 403 <code>wrong_environment</code>; <code>u_p_test_*</code> users are simulated in DEV and refused (422 <code>synthetic_user_not_allowed</code>) in PROD.</td></tr>
+<tr><td><code>adera.partner.workers-enabled</code></td><td><code>PARTNER_WORKERS_ENABLED</code></td><td><code>true</code></td><td>Turns the two background workers on/off.</td></tr>
+<tr><td><code>adera.partner.gateway-secret</code></td><td><code>GATEWAY_SECRET</code></td><td>empty (check disabled)</td><td>Must equal the gateway's <code>X-Gateway-Secret</code> (compose passes <code>USER_GATEWAY_SECRET</code>). <em>Secret.</em></td></tr>
+<tr><td><code>adera.partner.internal-secret</code></td><td><code>INTERNAL_API_SECRET</code></td><td>empty</td><td>Sent as <code>X-Internal-Secret</code> to registry-service and user-service. <em>Secret.</em></td></tr>
+<tr><td><code>adera.partner.registry-url</code></td><td><code>REGISTRY_URL</code></td><td><code>http://localhost:8087</code> (compose: <code>http://registry-service:8080</code>)</td><td>Where to ask about keys and app context.</td></tr>
+<tr><td><code>adera.partner.user-service-url</code></td><td><code>USER_SERVICE_URL</code></td><td><code>http://localhost:8086</code> (compose: <code>http://user-service:8080</code>)</td><td>Where to resolve aliases and read delivery context.</td></tr>
+<tr><td><code>adera.partner.signing-key-id</code></td><td><code>PARTNER_SIGNING_KEY_ID</code></td><td>empty (falls back to <code>adera-sig-1</code>)</td><td>Our key id; appears in <code>X-Adera-Key-Id</code> on responses and in the JWKS <code>kid</code>. From Infisical.</td></tr>
+<tr><td><code>adera.partner.signing-private-key-b64</code></td><td><code>PARTNER_SIGNING_PRIVATE_KEY_B64</code></td><td>empty (ephemeral key, dev only)</td><td>Base64 of a PKCS#8 RSA private key PEM. From Infisical. <em>Secret.</em></td></tr>
+<tr><td><code>adera.partner.max-skew-minutes</code></td><td><code>PARTNER_MAX_SKEW_MINUTES</code></td><td><code>5</code></td><td>Allowed clock difference for the request timestamp.</td></tr>
+<tr><td><code>adera.partner.allow-private-callbacks</code></td><td><code>PARTNER_ALLOW_PRIVATE_CALLBACKS</code></td><td><code>false</code> (dev <code>.env</code> has <code>true</code> for e2e only)</td><td>Allows http and private addresses for callbacks. Startup refuses it with any real provider.</td></tr>
+<tr><td><code>adera.partner.fcm-provider</code></td><td><code>FCM_PROVIDER</code></td><td><code>fake</code></td><td><code>fake</code> or <code>firebase</code>.</td></tr>
+<tr><td><code>adera.partner.firebase-service-account-b64</code></td><td><code>FIREBASE_SERVICE_ACCOUNT_B64</code></td><td>empty</td><td>Base64 of the Firebase service-account JSON (Infisical <code>/notification</code>). <em>Secret.</em></td></tr>
+<tr><td><code>adera.partner.firebase-credentials-path</code></td><td><code>FIREBASE_CREDENTIALS_PATH</code></td><td>empty</td><td>Alternative: path to the JSON file inside the container.</td></tr>
+<tr><td><code>INFISICAL_DOMAIN / PROJECT_ID / TOKEN / ENV / PATH</code></td><td>same names</td><td>domain from compose <code>http://infisical:8080</code>; env <code>dev</code>; path <code>/notification</code></td><td>Read by the post-processor only (not bound to a properties class).</td></tr>
+<tr><td><code>management.tracing.sampling.probability</code></td><td><code>TRACING_SAMPLE_RATE</code></td><td><code>1.0</code></td><td>Fraction of requests traced.</td></tr>
+<tr><td><code>management...otlp.endpoint</code></td><td><code>OTEL_TRACES_ENDPOINT</code></td><td><code>http://localhost:4318/v1/traces</code> (compose: collector)</td><td>Where traces are sent.</td></tr>
+</tbody></table></div>
+
+<h3 id="ns-endpoints">Endpoints in one line each</h3>
+<p>Full detail with real examples is in the <a href="08-endpoints.html">endpoint reference</a>: courier and dev endpoints in <a href="08d-internal-api.html">8d</a>, partner API in <a href="08c-partner-api.html">8c</a>, templates/delivery log in <a href="08b-staff-api.html">8b</a>, inbox in <a href="08a-user-api.html">8a</a>, JWKS and actuator in <a href="08f-operational.html">8f</a>.</p>
+
+<h3 id="ns-tests">Tests (48)</h3>
+<div class="table-wrap"><table>
+<thead><tr><th>Class</th><th>Type</th><th>Covers</th></tr></thead>
+<tbody>
+<tr><td><code>MaskingTest</code> (3)</td><td>unit</td><td>phone/email masking; hash is stable, case-insensitive and one-way</td></tr>
+<tr><td><code>GsmTextTest</code> (2)</td><td>unit</td><td>fancy punctuation replaced; plain and Amharic text untouched</td></tr>
+<tr><td><code>UrlGuardTest</code> (4)</td><td>unit</td><td>private/non-https callback targets refused; public https allowed; dev flag; retry delays double and permanent provider errors are not retried</td></tr>
+<tr><td><code>InfisicalEnvironmentPostProcessorTest</code> (4)</td><td>unit</td><td>parsing the API reply; no-op without settings; unreachable Infisical does not stop startup; lowest priority and overridable</td></tr>
+<tr><td><code>TwilioSmsProviderTest</code> (4), <code>ResendEmailProviderTest</code> (3)</td><td>unit, mocked HTTP</td><td>request formats (basic auth / bearer, messaging service vs number), HTTP errors become <code>DeliveryException</code> without leaking body or number, refuse to start without credentials</td></tr>
+<tr><td><code>NotificationDispatcherTest</code> (6)</td><td>unit</td><td>real provider sends and logs; dev provider kept for dev tools; hourly limit suppresses without calling the provider; allowlist blocks others on real providers only; failures logged and rethrown</td></tr>
+<tr><td><code>NotificationServiceApplicationTests</code> (6)</td><td>integration (Testcontainers Postgres)</td><td>SMS delivered/logged/visible to dev tools; send log never has the code or full number; 4th SMS suppressed but answers 200; invalid request rejected; email failure is 502; health up</td></tr>
+<tr><td><code>PartnerPlatformTests</code> (18)</td><td>integration</td><td>signature and clock checks; address allowlist; signed responses verifiable; staff endpoints need gateway + role; template validation; SMS flow and idempotent replay; email fallback; unreachable users; undeclared params and foreign templates; inactive/expired templates; limits (null = unlimited, 0 = none); capability gate; muted users; inbox + push; wrong-environment key refused (403 <code>wrong_environment</code>); synthetic users simulated in DEV and refused in PROD; signed callbacks retried until the partner answers</td></tr>
+<tr><td><code>EnvironmentMigrationTests</code> (2)</td><td>integration (Testcontainers Postgres)</td><td>migration V3 renames TEST/LIVE rows to DEV/PROD in notifications, usage counters and queued callbacks without losing any; the new CHECK constraints refuse the old names; ADERA_ENV must be dev or prod</td></tr>
+</tbody></table></div>
+
+<!-- ===================================================================== -->
+<h2 id="user-service">user-service</h2>
+<p><span class="badge ours">our code</span> <span class="badge built">built</span> Port 8086 (dev), database <code>users</code>, <code>services/user-service</code>. Package root <code>app.adera.user</code>.</p>
+
+<h3 id="us-responsibilities">Responsibilities</h3>
+<ol>
+<li><strong>The user record.</strong> Kratos owns identity, login and sessions; this service owns everything else about the person, keyed by the Kratos identity id (<strong>user id = Kratos identity id</strong>). Profile, language/market/timezone, optional location, free-form <code>extra</code> JSON, verification tier and status.</li>
+<li><strong>Avatars.</strong> Decode, centre-crop, resize (at most 512 px), flatten transparency, re-encode as JPEG, store in RustFS, hand out 60-minute signed links.</li>
+<li><strong>Devices and push tokens.</strong> One row per app installation with an FCM token.</li>
+<li><strong>Gateway session check.</strong> <code>/internal/auth/verify</code> turns Kratos' whoami into the <code>X-User-Id</code> header the gateway forwards.</li>
+<li><strong>Kratos registration webhook.</strong> Creates the profile row when an identity is created.</li>
+<li><strong>Logout.</strong> One call removes the push token and revokes the Kratos session (Kratos has no native-app logout hook).</li>
+<li><strong>Pseudonymous aliases and mute preferences.</strong> A different <code>u_p_...</code> id per user per app; per-app mute switches. Internal API for notification-service.</li>
+</ol>
+
+<svg class="diagram" viewBox="0 0 900 420" role="img" aria-label="user-service components">
+<title>user-service: components and who they call</title>
+<defs><marker id="ah-us" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z"/></marker></defs>
+<rect class="zone" x="215" y="14" width="500" height="390" rx="10"/>
+<text class="title" x="230" y="34">user-service (Spring Boot, :8080)</text>
+<rect class="box tool" x="20" y="70" width="150" height="54" rx="8"/><text class="title" x="95" y="94" text-anchor="middle">APISIX</text><text class="muted" x="95" y="112" text-anchor="middle">forward-auth + routes</text>
+<rect class="box tool" x="20" y="170" width="150" height="54" rx="8"/><text class="title" x="95" y="194" text-anchor="middle">Ory Kratos</text><text class="muted" x="95" y="212" text-anchor="middle">webhook, whoami, admin</text>
+<rect class="box ours" x="20" y="290" width="150" height="54" rx="8"/><text class="title" x="95" y="312" text-anchor="middle">notification-service</text><text class="muted" x="95" y="330" text-anchor="middle">internal API caller</text>
+
+<rect class="box ours" x="235" y="60" width="160" height="50" rx="8"/><text class="title" x="315" y="82" text-anchor="middle">GatewayAuthFilter</text><text class="muted" x="315" y="98" text-anchor="middle">gateway / internal secret</text>
+<rect class="box ours" x="425" y="60" width="270" height="50" rx="8"/><text class="title" x="560" y="82" text-anchor="middle">Controllers</text><text class="muted" x="560" y="98" text-anchor="middle">Profile, Device, Preference, Logout, Verify</text>
+<rect class="box ours" x="235" y="160" width="160" height="50" rx="8"/><text class="title" x="315" y="182" text-anchor="middle">VerifyController</text><text class="muted" x="315" y="198" text-anchor="middle">AfterRegistration, Internal</text>
+<rect class="box ours" x="425" y="160" width="270" height="50" rx="8"/><text class="title" x="560" y="182" text-anchor="middle">Services</text><text class="muted" x="560" y="198" text-anchor="middle">Profile, Avatar, Device, Alias, Preference</text>
+<rect class="box ours" x="235" y="260" width="160" height="50" rx="8"/><text class="title" x="315" y="282" text-anchor="middle">KratosClient</text>
+<rect class="box ours" x="425" y="260" width="270" height="50" rx="8"/><text class="title" x="560" y="282" text-anchor="middle">Repositories / S3AvatarStorage</text><text class="muted" x="560" y="298" text-anchor="middle">JPA, JdbcClient, AWS SDK v2 (path style)</text>
+
+<rect class="box store" x="760" y="250" width="120" height="50" rx="8"/><text class="title" x="820" y="272" text-anchor="middle">Postgres</text><text class="muted" x="820" y="289" text-anchor="middle">users</text>
+<rect class="box store" x="760" y="320" width="120" height="50" rx="8"/><text class="title" x="820" y="342" text-anchor="middle">RustFS</text><text class="muted" x="820" y="359" text-anchor="middle">adera-media</text>
+
+<path class="edge hot" marker-end="url(#ah-us)" d="M170 90H235"/>
+<path class="edge hot" marker-end="url(#ah-us)" d="M395 85H425"/>
+<path class="edge hot" marker-end="url(#ah-us)" d="M560 110V160"/>
+<path class="edge hot" marker-end="url(#ah-us)" d="M560 210V260"/>
+<path class="edge" marker-end="url(#ah-us)" d="M170 197H235"/>
+<path class="edge dash" marker-end="url(#ah-us)" d="M315 210V260"/>
+<path class="edge dash" marker-end="url(#ah-us)" d="M235 285H200V210H170"/>
+<path class="edge" marker-end="url(#ah-us)" d="M695 275H760"/>
+<path class="edge" marker-end="url(#ah-us)" d="M695 300L760 340"/>
+<path class="edge dash" marker-end="url(#ah-us)" d="M170 317H235V185"/>
+<text class="muted" x="240" y="400">Blue = our code. Dashed = calls to Kratos or internal-secret calls from notification-service.</text>
+</svg>
+
+<h3 id="us-packages">Packages and classes</h3>
+<div class="table-wrap"><table>
+<thead><tr><th>Package / class</th><th>What it does and why</th></tr></thead>
+<tbody>
+<tr><td><code>config</code>: <code>UserProperties</code>, <code>AppConfig</code></td><td>Typed <code>adera.user.*</code> properties (secrets, Kratos URLs, storage, avatar, extra limit); clock and prototype <code>RestClient.Builder</code>.</td></tr>
+<tr><td><code>auth</code>: <code>GatewayAuthFilter</code></td><td>Path-based trust. <code>/api/**</code> and <code>/internal/auth/verify</code> need <code>X-Gateway-Secret</code>; <code>/api/**</code> additionally needs a UUID <code>X-User-Id</code> (the gateway overwrites any client-sent value). <code>/internal/aliases*</code>, <code>/internal/users/*</code> and <code>/internal/devices/*</code> need <code>X-Internal-Secret</code> instead (the gateway never routes these). Failures are 401 <code>{"error":"unauthorized"}</code>. Health and the Kratos webhook are not covered.</td></tr>
+<tr><td><code>auth</code>: <code>VerifyController</code></td><td><code>GET /internal/auth/verify</code>: called by APISIX forward-auth. Asks Kratos whoami with the caller's <code>Authorization</code> or <code>Cookie</code>; 200 + <code>X-User-Id</code>, or 401. Kratos down is 503, not 401.</td></tr>
+<tr><td><code>auth</code>: <code>AfterRegistrationController</code></td><td><code>POST /internal/kratos/after-registration</code> (Kratos web_hook): creates the profile with a race-safe <code>INSERT ... ON CONFLICT DO NOTHING</code>; answers <code>created</code> or <code>exists</code>. No authentication: Kratos' hook config is static, and a secret would have to sit in <code>kratos.yml</code>.</td></tr>
+<tr><td><code>auth</code>: <code>LogoutController</code></td><td><code>POST /api/v1/me/logout</code>: removes the optional device (token or installation id) then calls Kratos <code>DELETE /self-service/logout/api</code> with the bearer token.</td></tr>
+<tr><td><code>auth</code>: <code>KratosClient</code>, <code>ApiExceptionHandler</code></td><td>whoami (public API), identity lookup (admin API: the trusted copy of email and phone), logout. <code>KratosUnavailableException</code> becomes 503 <code>identity_service_unavailable</code>. The handler also maps validation (400), bad JSON (400 <code>invalid_json</code>), too large (413), not found (404), DB uniqueness conflict (409 <code>conflict</code>).</td></tr>
+<tr><td><code>profile</code>: <code>ProfileController</code>, <code>ProfileService</code>, <code>ProfilePatch</code>, <code>LocationRequest</code>, <code>JsonMergePatch</code>, <code>ProfileResponse</code>, <code>AppUser</code>, <code>UserRepository</code></td><td>Get/patch profile, set/clear location, avatar upload/delete. <code>getOrCreate</code> is the safety net: if the webhook was lost, the profile is created from Kratos' admin API on first use, and <code>last_seen_at</code> is refreshed at most every 5 minutes. <code>ProfilePatch</code> rejects unknown fields and reports every problem at once. <code>JsonMergePatch</code> implements RFC 7386 for the <code>extra</code> column. Market is inferred from the phone prefix (<code>+1</code> gives <code>US</code>, otherwise <code>ET</code>).</td></tr>
+<tr><td><code>avatar</code>: <code>AvatarService</code>, <code>AvatarImageProcessor</code>, <code>AvatarStorage</code>, <code>S3AvatarStorage</code></td><td>Never trusts filename or content type: it decodes JPEG/PNG/GIF/BMP, rejects huge dimensions before decoding (12000 px side, 40 million pixels: decompression-bomb guard), centre-crops to a square, halves down to <code>size-px</code>, flattens alpha onto white, writes JPEG quality 0.85 with no metadata (drops EXIF GPS). Key <code>avatars/{userId}/{imageId}.jpg</code>; replacing deletes the previous object. Two S3 endpoints on purpose: internal for uploads, public for signed links (the host is part of the signature). Creates the bucket at startup, non-fatally.</td></tr>
+<tr><td><code>device</code>: <code>DeviceController</code>, <code>DeviceService</code>, <code>DeviceDtos</code>, <code>Device</code>, <code>DeviceRepository</code></td><td>Register/refresh (idempotent), list (token never echoed), remove. FCM tokens are unique and move to the current user if re-registered; with an installation id a rotated token replaces the old one.</td></tr>
+<tr><td><code>alias</code>: <code>AliasService</code>, <code>PreferenceController</code>, <code>PreferenceService</code></td><td><code>alias = "u_p_" + first 32 hex of HMAC-SHA256(ALIAS_HMAC_SECRET, userId + ":" + appId)</code>, stored in <code>app_user_alias</code> so it can be resolved. Startup fails if the HMAC secret is empty. Per-app mute switches (<code>muteInApp</code>, <code>muteSms</code>, <code>muteEmail</code>) at <code>/api/v1/me/apps/{appId}/preferences</code>.</td></tr>
+<tr><td><code>internal</code>: <code>InternalController</code></td><td>For other services: mint alias, resolve alias, delivery context (how to reach a user for an app; deleted or suspended users expose nothing), deactivate dead push token.</td></tr>
+</tbody></table></div>
+<p>user-service has no scheduled jobs and no Infisical loader. The only startup task is <code>S3AvatarStorage.run</code> (create the bucket).</p>
+
+<h3 id="us-config">Configuration properties</h3>
+<div class="table-wrap"><table>
+<thead><tr><th>Property</th><th>Env var</th><th>Default</th><th>Meaning</th></tr></thead>
+<tbody>
+<tr><td><code>spring.datasource.*</code></td><td><code>DB_URL</code>, <code>DB_USER</code>, <code>DB_PASSWORD</code></td><td><code>jdbc:postgresql://localhost:5432/users</code>, <code>users_svc</code>, empty</td><td>Postgres (compose: from <code>USER_DB_PASSWORD</code>). <em>Secret: password.</em></td></tr>
+<tr><td><code>spring.servlet.multipart.max-file-size / max-request-size</code></td><td>none</td><td><code>6MB</code> / <code>7MB</code></td><td>A little above the avatar limit, so our own 413 message wins.</td></tr>
+<tr><td><code>adera.user.gateway-secret</code></td><td><code>USER_GATEWAY_SECRET</code></td><td>empty (check disabled)</td><td>Must equal what APISIX sends in <code>X-Gateway-Secret</code>. <em>Secret.</em></td></tr>
+<tr><td><code>adera.user.internal-secret</code></td><td><code>INTERNAL_API_SECRET</code></td><td>empty</td><td>For <code>/internal/aliases|users|devices</code>. <em>Secret.</em></td></tr>
+<tr><td><code>adera.user.alias-hmac-secret</code></td><td><code>ALIAS_HMAC_SECRET</code></td><td>empty: <strong>startup fails</strong></td><td>Key for pseudonymous ids. <strong>Never change it after aliases were given to partners.</strong> <em>Secret.</em></td></tr>
+<tr><td><code>adera.user.kratos.public-url / admin-url</code></td><td><code>KRATOS_PUBLIC_URL</code>, <code>KRATOS_ADMIN_URL</code></td><td><code>http://localhost:4433</code>, <code>http://localhost:4434</code> (compose: <code>kratos:4433/4434</code>)</td><td>whoami and logout use public; identity lookup uses admin (internal network only).</td></tr>
+<tr><td><code>adera.user.storage.endpoint</code></td><td><code>STORAGE_ENDPOINT</code></td><td><code>http://localhost:9000</code> (compose: <code>http://rustfs:9000</code>)</td><td>How this service reaches RustFS.</td></tr>
+<tr><td><code>adera.user.storage.public-endpoint</code></td><td><code>STORAGE_PUBLIC_ENDPOINT</code></td><td><code>http://localhost:9000</code> (compose default <code>http://127.0.0.1:9000</code>)</td><td>Host used in signed links given to phones.</td></tr>
+<tr><td><code>adera.user.storage.bucket / region / presign-minutes</code></td><td><code>STORAGE_BUCKET</code>, <code>STORAGE_REGION</code>, <code>STORAGE_PRESIGN_MINUTES</code></td><td><code>adera-media</code>, <code>us-east-1</code>, <code>60</code></td><td>Bucket name, S3 region label, lifetime of signed URLs.</td></tr>
+<tr><td><code>adera.user.storage.access-key / secret-key</code></td><td><code>STORAGE_ACCESS_KEY</code>, <code>STORAGE_SECRET_KEY</code></td><td>empty: startup fails</td><td>RustFS credentials (compose maps <code>RUSTFS_ACCESS_KEY/SECRET_KEY</code>: the admin keys, a known limitation). <em>Secrets.</em></td></tr>
+<tr><td><code>adera.user.avatar.max-bytes</code></td><td><code>AVATAR_MAX_BYTES</code></td><td><code>5242880</code> (5 MiB)</td><td>Upload limit (413 above).</td></tr>
+<tr><td><code>adera.user.avatar.size-px</code></td><td><code>AVATAR_SIZE_PX</code></td><td><code>512</code></td><td>Output square size (never upscaled).</td></tr>
+<tr><td><code>adera.user.extra-max-bytes</code></td><td><code>EXTRA_MAX_BYTES</code></td><td><code>16384</code></td><td>Max size of the <code>extra</code> JSON (checked on the patch and again after the merge).</td></tr>
+<tr><td><code>management.tracing...</code>, <code>...otlp.endpoint</code></td><td><code>TRACING_SAMPLE_RATE</code>, <code>OTEL_TRACES_ENDPOINT</code></td><td><code>1.0</code>, <code>http://localhost:4318/v1/traces</code></td><td>Telemetry.</td></tr>
+</tbody></table></div>
+
+<h3 id="us-tests">Tests (54)</h3>
+<div class="table-wrap"><table>
+<thead><tr><th>Class</th><th>Type</th><th>Covers</th></tr></thead>
+<tbody>
+<tr><td><code>JsonMergePatchTest</code> (4), <code>ProfilePatchTest</code> (8)</td><td>unit</td><td>merge semantics (null removes, objects merge, arrays replace, inputs not mutated); validation: normalisation, null clears, unknown fields, every error at once, date of birth, extra size, name length</td></tr>
+<tr><td><code>AvatarImageProcessorTest</code> (7)</td><td>unit</td><td>crop + resize, no upscaling, transparency to white, EXIF GPS stripped, non-images and corrupt files rejected, huge dimensions rejected before decoding</td></tr>
+<tr><td><code>UserApiTests</code> (24)</td><td>integration (Testcontainers Postgres with jsonb)</td><td>gateway headers required; profile created on first use; market inference; Kratos-unknown identity 404; idempotent webhook; concurrent first requests; PATCH rules; <code>extra</code> merge persisted as jsonb; location; avatar upload/replace/reject; device register/rotate/move/remove; logout (and 503 when Kratos is down); verify endpoint</td></tr>
+<tr><td><code>GatewaySecretTests</code> (4)</td><td>integration</td><td>API without the secret rejected even with a valid user id; with it allowed; verify needs it; health stays open</td></tr>
+<tr><td><code>InternalApiTests</code> (7)</td><td>integration</td><td>aliases are pseudonymous, stable, per app, resolvable and not guessable; delivery context; suspended/deleted users expose nothing; mute; dead token deactivated; internal secret required</td></tr>
+</tbody></table></div>
+
+<!-- ===================================================================== -->
+<h2 id="registry-service">registry-service</h2>
+<p><span class="badge ours">our code</span> <span class="badge built">built</span> Port 8087 (dev), database <code>registry</code>, <code>services/registry-service</code>. Package root <code>app.adera.registry</code>.</p>
+
+<h3 id="rs-responsibilities">Responsibilities</h3>
+<ol>
+<li><strong>The mini-app registry.</strong> Each mini app: identity, localized name/description, logo, brand colour, categories, markets, publisher and support contacts, entry URL, allowed origins, status (<code>DRAFT, LIVE, PAUSED, KILLED</code>), priority, ratings.</li>
+<li><strong>What an app may do.</strong> Capabilities (granted/denied/suspended per app), payment settings, per-channel notification limits, per-environment allowed server addresses.</li>
+<li><strong>Partner keys.</strong> Register a partner's PUBLIC RSA key (or generate a pair once, for DEV work); revoke; at most 5 active keys per environment (DEV and PROD are counted separately; new key ids are <code>ak_dev_...</code> / <code>ak_prod_...</code>).</li>
+<li><strong>Staff.</strong> Roles <code>VIEWER, ADMIN, SUPER_ADMIN</code>. The role lives in Kratos <code>metadata_public.role</code> (writable only through the admin API) and is mirrored in table <code>staff</code> for listing and status. The first super admin is bootstrapped from <code>BOOTSTRAP_SUPER_ADMIN_EMAIL</code>.</li>
+<li><strong>Staff gate for the gateway.</strong> <code>/internal/staff/verify</code>: valid session, active staff, <code>aal2</code> (authenticator app done) gives <code>X-Staff-Id</code> and <code>X-Staff-Role</code>.</li>
+<li><strong>Catalog for users.</strong> LIVE apps with permissions, anonymous reviews and ratings, "report this app".</li>
+<li><strong>Moderation and audit.</strong> Hide reviews, work through reports, append-only audit of every staff change.</li>
+<li><strong>Internal API for notification-service:</strong> partner key lookup and app context.</li>
+</ol>
+
+<svg class="diagram" viewBox="0 0 900 420" role="img" aria-label="registry-service components">
+<title>registry-service: components and who they call</title>
+<defs><marker id="ah-rs" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z"/></marker></defs>
+<rect class="zone" x="215" y="14" width="500" height="390" rx="10"/>
+<text class="title" x="230" y="34">registry-service (Spring Boot, :8080)</text>
+<rect class="box tool" x="20" y="70" width="150" height="54" rx="8"/><text class="title" x="95" y="94" text-anchor="middle">APISIX</text><text class="muted" x="95" y="112" text-anchor="middle">staff + user routes</text>
+<rect class="box tool" x="20" y="190" width="150" height="54" rx="8"/><text class="title" x="95" y="214" text-anchor="middle">Ory Kratos</text><text class="muted" x="95" y="232" text-anchor="middle">whoami, admin API</text>
+<rect class="box ours" x="20" y="310" width="150" height="54" rx="8"/><text class="title" x="95" y="332" text-anchor="middle">notification-service</text><text class="muted" x="95" y="350" text-anchor="middle">keys + app context</text>
+
+<rect class="box ours" x="235" y="60" width="160" height="50" rx="8"/><text class="title" x="315" y="82" text-anchor="middle">TrustFilter</text><text class="muted" x="315" y="98" text-anchor="middle">gateway / internal secret</text>
+<rect class="box ours" x="425" y="60" width="270" height="50" rx="8"/><text class="title" x="560" y="82" text-anchor="middle">Controllers</text><text class="muted" x="560" y="98" text-anchor="middle">App, Key, Staff, Review, Audit, Public</text>
+<rect class="box ours" x="235" y="160" width="160" height="50" rx="8"/><text class="title" x="315" y="182" text-anchor="middle">StaffVerify</text><text class="muted" x="315" y="198" text-anchor="middle">Controller, Internal</text>
+<rect class="box ours" x="425" y="160" width="270" height="50" rx="8"/><text class="title" x="560" y="182" text-anchor="middle">Services</text><text class="muted" x="560" y="198" text-anchor="middle">App, AppConfig, PartnerKey, Staff, Review, Audit</text>
+<rect class="box ours" x="235" y="260" width="160" height="50" rx="8"/><text class="title" x="315" y="282" text-anchor="middle">KratosClient</text>
+<rect class="box ours" x="425" y="260" width="270" height="50" rx="8"/><text class="title" x="560" y="282" text-anchor="middle">Repositories / S3ObjectStorage</text><text class="muted" x="560" y="298" text-anchor="middle">JPA, JdbcClient, AWS SDK v2</text>
+
+<rect class="box store" x="760" y="250" width="120" height="50" rx="8"/><text class="title" x="820" y="272" text-anchor="middle">Postgres</text><text class="muted" x="820" y="289" text-anchor="middle">registry</text>
+<rect class="box store" x="760" y="320" width="120" height="50" rx="8"/><text class="title" x="820" y="342" text-anchor="middle">RustFS</text><text class="muted" x="820" y="359" text-anchor="middle">adera-media</text>
+
+<path class="edge hot" marker-end="url(#ah-rs)" d="M170 90H235"/>
+<path class="edge hot" marker-end="url(#ah-rs)" d="M395 85H425"/>
+<path class="edge hot" marker-end="url(#ah-rs)" d="M560 110V160"/>
+<path class="edge hot" marker-end="url(#ah-rs)" d="M560 210V260"/>
+<path class="edge dash" marker-end="url(#ah-rs)" d="M315 210V260"/>
+<path class="edge" marker-end="url(#ah-rs)" d="M235 285H200V217H170"/>
+<path class="edge" marker-end="url(#ah-rs)" d="M695 275H760"/>
+<path class="edge" marker-end="url(#ah-rs)" d="M695 300L760 340"/>
+<path class="edge dash" marker-end="url(#ah-rs)" d="M170 337H260V210"/>
+<text class="muted" x="240" y="400">Blue = our code. Dashed = lookups (internal secret) and Kratos calls.</text>
+</svg>
+
+<h3 id="rs-packages">Packages and classes</h3>
+<div class="table-wrap"><table>
+<thead><tr><th>Package / class</th><th>What it does and why</th></tr></thead>
+<tbody>
+<tr><td><code>config</code>: <code>RegistryProperties</code>, <code>AppConfig</code></td><td>Typed <code>adera.registry.*</code>; clock, prototype builder.</td></tr>
+<tr><td><code>auth</code>: <code>TrustFilter</code></td><td>By path: <code>/admin/api/**</code> needs gateway secret + UUID <code>X-Staff-Id</code> + valid <code>X-Staff-Role</code>; <code>/api/**</code> needs gateway secret + UUID <code>X-User-Id</code>; <code>/internal/staff/verify</code> needs the gateway secret; any other <code>/internal/**</code> needs <code>X-Internal-Secret</code> (the gateway secret does not substitute). Health/actuator are open. Warns at startup if a secret is empty.</td></tr>
+<tr><td><code>auth</code>: <code>StaffVerifyController</code></td><td><code>GET /internal/staff/verify</code>, the gateway's forward-auth target. 401 <code>unauthorized</code> (no or invalid session), 403 <code>mfa_required</code> (Kratos answered 403 or the session is aal1 while <code>ADMIN_REQUIRE_AAL2</code> is true), 403 <code>not_staff</code> (no role, not in <code>staff</code>, or <code>DISABLED</code>). On success 200 with headers <code>X-Staff-Id</code>, <code>X-Staff-Role</code>.</td></tr>
+<tr><td><code>auth</code>: <code>KratosClient</code>, <code>Role</code></td><td>whoami (public API, mapping 401/403/2xx to INVALID/MFA_REQUIRED/VALID), find identity by email, create staff identity (<code>schema_id: default</code>, <code>traits.email</code>, <code>metadata_public.role</code>), set or clear role, revoke all sessions (admin API). <code>Role</code> ranks VIEWER 1 &lt; ADMIN 2 &lt; SUPER_ADMIN 3; <code>require()</code> throws 403 <code>insufficient_role</code>.</td></tr>
+<tr><td><code>common</code>: <code>Errors</code>, <code>ApiExceptionHandler</code>, <code>Cidrs</code>, <code>ClientIp</code>, <code>Environment</code></td><td>Exception-to-status mapping (400 <code>validation_failed</code> with <code>fields</code>, 400 <code>invalid_request</code>, 401, 403 with code, 404 <code>not_found</code>, 409 with code and details, 413 <code>file_too_large</code>, 503 <code>identity_service_unavailable</code>). <code>Cidrs</code> normalises IPs and ranges, never resolves hostnames. <code>ClientIp</code> prefers the gateway's <code>X-Client-IP</code> (for the audit log). <code>Environment</code> is <code>DEV</code> or <code>PROD</code>; the deployment's own value comes from <code>ADERA_ENV</code> (<code>adera.registry.environment</code>, default dev; another value stops the service starting). <code>dashboard</code>: <code>SystemController</code> answers <code>GET /admin/api/v1/system</code> with <code>{"environment":"DEV"}</code> for any staff role.</td></tr>
+<tr><td><code>app</code>: <code>AppAdminController</code>, <code>AppService</code>, <code>AppPatch</code>, <code>AppViews</code>, <code>MiniApp</code></td><td>Staff CRUD for mini apps. Create makes both environments with empty allowed-address lists (nothing can call until staff add addresses). The slug is permanent. DRAFT to LIVE needs a logo and a support email (409 <code>not_ready_for_live</code>). Reviving a KILLED app needs SUPER_ADMIN. Logo upload at most 2 MiB, resized to at most 512 px, stored as PNG at <code>apps/{id}/logo/{imageId}.png</code>.</td></tr>
+<tr><td><code>app</code>: <code>AppConfigService</code>, <code>AppConfigRepository</code>, <code>Capability</code></td><td>Capabilities, payment settings, notification limits, environments. Granting a notify capability inserts default limits if none exist (see <a href="10-reference.html#capabilities">capability catalog</a>). Capabilities flagged <em>reason required</em> need an English reason of at least 10 characters (shown to users verbatim). <code>/0</code> ranges are refused for PROD. DEV and PROD lists can both be filled; only the deployment's own is used.</td></tr>
+<tr><td><code>app</code>: <code>AppPublicController</code></td><td>Catalog for signed-in users: only LIVE apps, optional <code>market</code> filter, permissions with reasons, anonymous reviews, one editable review per user, "report".</td></tr>
+<tr><td><code>key</code>: <code>KeyAdminController</code>, <code>PartnerKeyService</code>, <code>PemKeys</code>, <code>PartnerKey</code></td><td>Register a PUBLIC key (<code>-----BEGIN PUBLIC KEY-----</code>, RSA, at least 2048 bits; a private key is refused with a clear message), or <code>/generate</code> a 3072-bit pair and return the private half <strong>once</strong>. Key id <code>ak_&lt;env&gt;_&lt;24 hex&gt;</code>. Fingerprint is SHA-256 of the DER public key. Revoke is idempotent. A key is usable if ACTIVE and not expired.</td></tr>
+<tr><td><code>review</code>: <code>ReviewAdminController</code>, <code>ReviewService</code>, <code>AppReview</code>, <code>AppReport</code></td><td>Moderation. Reviews 1 to 5 stars, comment at most 2000 chars; hidden reviews do not count toward the rating (<code>refreshRating</code>). A user's repeated report while one is OPEN returns the existing one. Report reasons <code>SPAM, SCAM, INAPPROPRIATE, BROKEN, OTHER</code>.</td></tr>
+<tr><td><code>staff</code>: <code>StaffController</code>, <code>StaffService</code>, <code>StaffBootstrap</code>, <code>Staff</code></td><td>List/add/change staff (SUPER_ADMIN only). Adding an email creates the Kratos identity if the person never signed in, otherwise grants the role on the existing identity. Rules: nobody can demote or disable themselves (409 <code>cannot_demote_self</code>) and the last active super admin cannot be removed (409 <code>last_super_admin</code>). Disabling clears the role in Kratos and revokes every session. <code>StaffBootstrap</code> runs in a background thread: up to 20 attempts, 3 s apart, to create the first super admin if none is active.</td></tr>
+<tr><td><code>audit</code>: <code>AuditService</code>, <code>AuditController</code>, <code>Actor</code></td><td>Every change by staff is appended to <code>audit_event</code> (actor, role, action, target, meta, client IP). Read by ADMIN and above, newest first, optional target filter.</td></tr>
+<tr><td><code>internal</code>: <code>InternalController</code></td><td><code>GET /internal/partner-keys/{keyId}</code> and <code>GET /internal/apps/{appId}/context?environment=</code>. The key lookup also returns <code>activeHere</code> and <code>deploymentEnvironment</code> (<code>usable</code> still means not revoked or expired). The context answers always for this deployment's environment: the <code>environment</code> parameter is optional and asking for the other one is <code>403 wrong_environment</code>. DEV works for any app that is not KILLED (so partners can integrate early); PROD only when the app status is LIVE, otherwise <code>denyReason</code> is <code>app_draft|app_paused|app_killed</code>.</td></tr>
+<tr><td><code>storage</code>: <code>ObjectStorage</code>, <code>S3ObjectStorage</code>, <code>LogoImageProcessor</code></td><td>Same RustFS pattern as user-service (path style, checksums only when required, two endpoints, bucket created at startup). Logos keep transparency and aspect ratio and are never upscaled.</td></tr>
+</tbody></table></div>
+
+<h3 id="rs-config">Configuration properties</h3>
+<div class="table-wrap"><table>
+<thead><tr><th>Property</th><th>Env var</th><th>Default</th><th>Meaning</th></tr></thead>
+<tbody>
+<tr><td><code>spring.datasource.*</code></td><td><code>DB_URL</code>, <code>DB_USER</code>, <code>DB_PASSWORD</code></td><td><code>jdbc:postgresql://localhost:5432/registry</code>, <code>registry_svc</code>, empty</td><td>Postgres (compose: from <code>REGISTRY_DB_PASSWORD</code>). <em>Secret: password.</em></td></tr>
+<tr><td><code>spring.servlet.multipart.max-file-size / max-request-size</code></td><td>none</td><td><code>4MB</code> / <code>5MB</code></td><td>Upper bound for uploads; the logo limit below is stricter.</td></tr>
+<tr><td><code>adera.registry.gateway-secret</code></td><td><code>GATEWAY_SECRET</code></td><td>empty (check disabled, warning logged)</td><td>Compose passes <code>USER_GATEWAY_SECRET</code>. <em>Secret.</em></td></tr>
+<tr><td><code>adera.registry.internal-secret</code></td><td><code>INTERNAL_API_SECRET</code></td><td>empty</td><td>For <code>/internal/apps/**</code> and <code>/internal/partner-keys/**</code>. <em>Secret.</em></td></tr>
+<tr><td><code>adera.registry.require-aal2</code></td><td><code>ADMIN_REQUIRE_AAL2</code></td><td><code>true</code></td><td>Staff must have completed the authenticator-app step. Do not set false outside local experiments.</td></tr>
+<tr><td><code>adera.registry.bootstrap-super-admin-email</code></td><td><code>BOOTSTRAP_SUPER_ADMIN_EMAIL</code></td><td>empty (no bootstrap)</td><td>Created as SUPER_ADMIN at startup if no active super admin exists. See <a href="09-guides.html">Guides</a> for changing it.</td></tr>
+<tr><td><code>adera.registry.kratos.public-url / admin-url</code></td><td><code>KRATOS_PUBLIC_URL</code>, <code>KRATOS_ADMIN_URL</code></td><td><code>http://localhost:4433</code>, <code>http://localhost:4434</code></td><td>whoami; identity/role management.</td></tr>
+<tr><td><code>adera.registry.storage.*</code></td><td><code>STORAGE_ENDPOINT</code>, <code>STORAGE_PUBLIC_ENDPOINT</code>, <code>STORAGE_BUCKET</code>, <code>STORAGE_ACCESS_KEY</code>, <code>STORAGE_SECRET_KEY</code>, <code>STORAGE_REGION</code>, <code>STORAGE_PRESIGN_MINUTES</code></td><td>as in user-service (<code>adera-media</code>, <code>us-east-1</code>, <code>60</code>)</td><td>RustFS access for logos. <em>Keys are secrets.</em></td></tr>
+<tr><td><code>adera.registry.logo.max-bytes</code></td><td><code>LOGO_MAX_BYTES</code></td><td><code>2097152</code> (2 MiB)</td><td>Logo upload limit (413 above).</td></tr>
+<tr><td><code>adera.registry.logo.max-px</code></td><td><code>LOGO_MAX_PX</code></td><td><code>512</code></td><td>Longest side of the stored logo.</td></tr>
+<tr><td>telemetry</td><td><code>TRACING_SAMPLE_RATE</code>, <code>OTEL_TRACES_ENDPOINT</code></td><td><code>1.0</code>, <code>http://localhost:4318/v1/traces</code></td><td>As the other services.</td></tr>
+</tbody></table></div>
+
+<h3 id="rs-tests">Tests (50)</h3>
+<div class="table-wrap"><table>
+<thead><tr><th>Class</th><th>Type</th><th>Covers</th></tr></thead>
+<tbody>
+<tr><td><code>AppPatchTest</code> (7), <code>CidrsTest</code> (4), <code>PemKeysTest</code> (4), <code>LogoImageProcessorTest</code> (5)</td><td>unit</td><td>field validation and normalisation (slug permanent, languages, http only for local entry URLs); CIDR normalising/no DNS/match-everything detection; accepts public keys, refuses private keys, weak keys and garbage; logo shrink/no upscale/transparency/corrupt/huge</td></tr>
+<tr><td><code>RegistryApiTests</code> (24)</td><td>integration (Testcontainers Postgres, mocked Kratos)</td><td>role rules (viewer read-only, only super admin manages staff); missing staff headers rejected; app lifecycle and validation; going LIVE needs logo + support email; logo processing; capability reasons and default limits; limits and payment validation; allowed addresses; key registration, one-time generate, 5-key cap, revoke; internal context; user catalog; reviews and ratings; reports; audit; staff add/disable; last super admin and self-demotion; staff verify (aal2, customers, disabled staff, Kratos down is 503); health</td></tr>
+<tr><td><code>EnvironmentTests</code> (3)</td><td>integration (a deployment started with ADERA_ENV=prod)</td><td>GET /admin/api/v1/system for any role; the context endpoint answers for PROD only and refuses DEV with 403 wrong_environment; PROD usable only while the app is LIVE (paused, killed and draft refused); key info says activeHere; old names LIVE/TEST refused</td></tr>
+<tr><td><code>EnvironmentMigrationTests</code> (1)</td><td>integration (Testcontainers Postgres)</td><td>migration V2 renames TEST/LIVE rows (app_environment, partner_key) to DEV/PROD, keeps every row and the old key ids, and adds the CHECK constraints</td></tr>
+<tr><td><code>TrustAndBootstrapTests</code> (6)</td><td>integration</td><td>admin and user API need the gateway secret; internal API needs the internal secret and the gateway secret does not substitute; staff verify only for the gateway; health open; first super admin created from the environment</td></tr>
+</tbody></table></div>
+
+<h2 id="notes">Notes and rough edges seen while documenting</h2>
+<ul>
+<li><code>NOTIFY_DEV_ENDPOINTS</code> defaults to <code>false</code> in <code>application.yml</code> but to <code>true</code> in <code>docker-compose.yml</code>; the compose default is what runs locally.</li>
+<li>Duplicated helpers across services (<code>Cidrs</code>, trust filters) are intentional (independent projects) but must be kept in step by hand.</li>
+<li>The services do not authenticate <code>/actuator/*</code>; this is fine only because the gateway does not route it.</li>
+</ul>
+
+<div class="pager"><a class="prev" href="03-tools.html"><small>Previous</small>3. Tools</a><a class="next" href="05-communication.html"><small>Next</small>5. How it communicates</a></div>
+<p class="footer">Adera backend documentation &middot; last verified 2026-10-25 &middot; <a href="../index.html">contents</a></p>
+</main>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

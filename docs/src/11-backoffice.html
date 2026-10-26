@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>11. Backoffice | Adera docs</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+<button id="menu-btn" type="button" aria-label="Toggle menu">Menu</button>
+<a class="brand" href="../index.html">Adera docs</a>
+<span class="spacer"></span>
+<a href="../index.html">Contents</a>
+<button id="theme-btn" type="button" aria-label="Toggle light or dark theme">Theme</button>
+</header>
+<div class="layout">
+<nav class="sidebar" aria-label="Sections">
+<ul><li><a href="../index.html" class="">Home / contents</a></li></ul>
+<h4>Sections</h4><ul>
+<li><a href="01-overview.html">1. Overview</a>
+</li>
+<li><a href="02-setup.html">2. Setup and running</a>
+</li>
+<li><a href="03-tools.html">3. Tools</a>
+</li>
+<li><a href="04-services.html">4. Services</a>
+</li>
+<li><a href="05-communication.html">5. How it communicates</a>
+</li>
+<li><a href="06-security.html">6. Security model</a>
+</li>
+<li><a href="07-data.html">7. Data</a>
+</li>
+<li><a href="08-endpoints.html">8. Endpoint reference</a>
+</li>
+<li><a href="09-guides.html">9. Guides</a>
+</li>
+<li><a href="10-reference.html">10. Reference</a>
+</li>
+<li><a href="11-backoffice.html" class=current>11. Backoffice (staff dashboard)</a>
+</li>
+<li><a href="12-backoffice-guide.html">12. Backoffice guide (staff manual)</a>
+</li>
+<li><a href="13-sample-data.html">13. Sample data (test scenarios)</a>
+</li>
+</ul>
+<h4>Endpoints</h4><ul>
+<li><a href="08a-user-api.html">8a. End-user API</a>
+</li>
+<li><a href="08b-staff-api.html">8b. Staff / dashboard API</a>
+</li>
+<li><a href="08c-partner-api.html">8c. Partner API</a>
+</li>
+<li><a href="08d-internal-api.html">8d. Internal API</a>
+</li>
+<li><a href="08e-kratos-flows.html">8e. Kratos flows</a>
+</li>
+<li><a href="08f-operational.html">8f. Operational endpoints</a>
+</li>
+</ul>
+</nav>
+<main>
+<h1>11. Backoffice (staff dashboard)</h1>
+<p class="lead">A plain, detailed React dashboard for Adera staff: mini apps, moderation, users, notifications, staff, audit log and system health. Built with Refine and Ant Design (default theme). It lives in <code>backoffice/</code>, is served by the gateway at <a href="http://127.0.0.1:9080/backoffice/">http://127.0.0.1:9080/backoffice/</a> and talks only to the staff API (<a href="08b-staff-api.html">8b</a>) and the Kratos flows (<a href="08e-kratos-flows.html">8e</a>).</p>
+
+<div class="callout why"><span class="label">Operator's manual</span><p>This page is the technical overview (screens, API calls, configuration, tests). For step-by-step instructions written for staff (signing in, every field, a mini app from zero to LIVE, "why didn't my notification arrive?", recipes) read <a href="12-backoffice-guide.html">12. Backoffice guide</a>.</p></div>
+
+<section><h2 id="what">What it is</h2>
+<ul><li><strong>Static files only.</strong> A node build produces HTML, JavaScript and CSS; nginx serves them. There is no backend of its own, no database and no secrets in the files. Everything shown comes from the staff-protected API.</li>
+<li><strong>Same origin.</strong> The page, the admin API (<code>/admin/api/v1</code>) and Kratos (<code>/kratos</code>) are all behind the gateway at port 9080, so there is no CORS to configure.</li>
+<li><strong>The server is the authority.</strong> The role-aware UI only hides or disables what the server would refuse (VIEWER read-only, ADMIN writes, SUPER_ADMIN manages staff). Every refusal the server still sends is shown in plain words.</li>
+<li><strong>Session handling.</strong> The aal2 session token is kept in memory and in <code>sessionStorage</code> (gone when the tab closes; never <code>localStorage</code>) and sent as <code>Authorization: Bearer</code>. A 401 sends you to the login page with a message; 403 <code>mfa_required</code> goes to the authenticator step; 403 <code>not_staff</code> signs you out and says the account is not an active staff member.</li></ul></section>
+
+<section><h2 id="run">Run it</h2>
+<pre><code>docker compose up -d --build backoffice apisix   # production-like, then open http://127.0.0.1:9080/backoffice/
+cd backoffice &amp;&amp; npm install &amp;&amp; npm run dev       # hot reload at http://localhost:5173/backoffice/ (proxies /admin, /kratos to the gateway)
+npm run build                                       # type-check and build dist/
+npm test                                            # unit tests
+npm run smoke                                       # live API smoke test against the running stack
+bash tests/ui/run.sh                                # browser walk-through (Playwright in a throw-away container)</code></pre>
+<p>Details are in <code>backoffice/README.md</code>.</p></section>
+
+<section><h2 id="login">Login</h2>
+<ol><li>Enter the staff email. The dashboard starts a Kratos native login flow and submits the email; Kratos sends a 6-digit code (valid 5 minutes) through notification-service. In the dev stack the email goes to Mailpit (<a href="http://127.0.0.1:8025">http://127.0.0.1:8025</a>) and the page says so while dev hints are on.</li>
+<li>Enter the code. First time for this account: scan the QR code (or type the secret, or open the <code>otpauth://</code> link) in an authenticator app and enter the first code to enrol. After that: authenticator code only.</li>
+<li>The result is an aal2 token. The top bar shows your email and role; <strong>Sign out</strong> revokes the session at Kratos and clears the tab's storage.</li></ol>
+<p>Only active staff can use the dashboard: a signed-in account that is not an active staff member gets 403 <code>not_staff</code> on every admin call and the dashboard signs it out with that message. The first super admin is created from <code>BOOTSTRAP_SUPER_ADMIN_EMAIL</code> when no super admin exists (flagged on the Staff screen).</p>
+<div class="callout warn"><span class="label">Gateway rule</span><p>The gateway allows 10 login-step submits per minute per IP (<code>429</code>), and Kratos refuses an authenticator code it has already accepted, so a second sign-in within the same 30-second window must wait for the next code. The page explains both. Native flows have no cookies, so the gateway removes the <code>Origin</code> header from <code>POST /kratos/self-service/*</code>: Kratos otherwise refuses a native flow submitted by a browser's <code>fetch()</code> ("The HTTP Request Header included the Origin key").</p></div></section>
+
+<section><h2 id="roles">Roles</h2><div class="table-wrap"><table><thead><tr><th>Role</th><th>Can do</th></tr></thead><tbody><tr><td>VIEWER</td><td>Read everything the dashboard shows. Users: email and phone masked, no gender, date of birth or extra values. No audit log. No writes (buttons hidden or disabled; the server answers 403 <code>insufficient_role</code> if tried).</td></tr><tr><td>ADMIN</td><td>Everything a viewer can, plus all changes to apps, capabilities, limits, addresses, keys, payment settings, templates, moderation and user status; reads the audit log and unmasked user data.</td></tr><tr><td>SUPER_ADMIN</td><td>Everything an admin can, plus staff management and reviving a KILLED app.</td></tr></tbody></table></div></section>
+
+<section><h2 id="screens">Screens and the API calls they make</h2>
+<p>Paths are relative to <code>/admin/api/v1</code> unless they start with <code>/kratos</code> or <code>/backoffice</code>. Errors are always the shape <code>{"error": code, ...}</code>; validation errors carry <code>fields</code>, which the forms show next to the inputs. Destructive actions (status changes, key revoke, user suspend or delete, staff deactivate, logo removal) ask for confirmation.</p><div class="table-wrap"><table><thead><tr><th>Screen</th><th>Route</th><th>Who</th><th>What it shows and does</th><th>API calls</th></tr></thead><tbody><tr><td>Login</td><td><code>/backoffice/login</code></td><td>Anyone</td><td>Three steps in one page: work email, emailed 6-digit code, authenticator code. First sign-in of an account shows the TOTP secret as text, an <code>otpauth://</code> link and a QR code to enrol. Later sign-ins ask for the authenticator code only. The page shows who is signed in and the role afterwards (top bar), a hint that the code is in Mailpit when dev hints are on, and clear messages for a wrong or expired code, a code Kratos has already seen, and the gateway limit of 10 login submits per minute (429).</td><td>Kratos native flow through the gateway: GET /kratos/self-service/login/api, POST /kratos/self-service/login?flow=... (method code: identifier, then code), GET /kratos/self-service/settings/api and POST ...settings?flow=... (method totp, enrol), GET /kratos/self-service/login/api?aal=aal2 and POST (method totp), GET /kratos/sessions/whoami, DELETE /kratos/self-service/logout/api; then GET /admin/api/v1/me for the role.</td></tr><tr><td>Dashboard</td><td><code>/</code></td><td>Any role</td><td>Mini apps by status, notifications (all time, last 24 hours, by status), users (total, active, suspended, new in 7 days), open reports, hidden and recent reviews, draft apps with what each still lacks for LIVE, latest notifications and (admin and up) latest audit events. Every number links to its screen.</td><td>GET /admin/api/v1/dashboard, GET /notification/stats, GET /users/stats, GET /reports?status=OPEN&size=8, GET /notification/notifications?limit=8, GET /audit?limit=8 (ADMIN and up).</td></tr><tr><td>Mini apps (list)</td><td><code>/apps</code></td><td>Any role (create: ADMIN)</td><td>Table with status filter, search (slug, names, publisher, categories), priority column, and a Create button. Create form validates required fields in the browser and shows the server's <code>validation_failed.fields</code> next to the matching inputs.</td><td>GET /apps?status= (the status filter is sent to the server; the search box filters the returned list in the browser), POST /apps.</td></tr><tr><td>Mini app detail</td><td><code>/apps/:id</code></td><td>Any role (changes: ADMIN)</td><td>Header with name, slug, status and a plain-language line saying what the status means. A button for every other status (DRAFT, LIVE, PAUSED, KILLED), each with a confirm dialog; reviving a KILLED app is SUPER_ADMIN only. Going LIVE without logo or support email shows the server's readiness message. Tabs below.</td><td>GET /apps/{id}, POST /apps/{id}/status.</td></tr><tr><td>... tab General</td><td></td><td>ADMIN to edit</td><td>Every field: names and descriptions in English, Amharic and Oromo, publisher, support email and phone, website, privacy and terms URLs, entry URL, allowed origins (type one and press Enter, at most 10), brand colour, priority, categories, markets, extra JSON. Only changed fields are sent. Logo upload and remove (the screen allows PNG, JPEG or WebP, but the server accepts only JPEG, PNG, GIF or BMP, so WebP is refused; it re-encodes to PNG, at most 512 px, 2 MiB).</td><td>PATCH /apps/{id}, POST /apps/{id}/logo (multipart), DELETE /apps/{id}/logo.</td></tr><tr><td>... tab Capabilities</td><td></td><td>ADMIN to change</td><td>The capability catalog for this app with its state (GRANTED, DENIED, SUSPENDED, or not set). An English reason of at least 10 characters is required only to GRANT a capability marked "reason required" (the user.*, location.*, pay.request ones); notify.* and user.basic need none. Descriptions explain what each capability lets a mini app do.</td><td>GET /capabilities, PUT /apps/{id}/capabilities/{key} (state, reason).</td></tr><tr><td>... tab Notification limits</td><td></td><td>ADMIN to change</td><td>Per channel (SMS, EMAIL, IN_APP): max per user per day, max per day, max distinct users per day, max total. Empty = unlimited, 0 = none allowed; the screen explains both beside each field.</td><td>PUT /apps/{id}/notification-limits/{channel}.</td></tr><tr><td>... tab Environments and IPs</td><td></td><td>ADMIN to change</td><td>Two editable cards, DEV and PROD (both can be filled in): allowed partner server addresses (CIDR or single IP, one per line, max 50). The list shown after saving is what the server stored (a single address becomes <code>/32</code>). An empty list says nothing can call yet. <code>/0</code> is refused for PROD. The card of the environment this deployment runs (<code>ADERA_ENV</code>) is tagged "ACTIVE on this deployment"; the other says "stored, not used here" with a note, because a deployment is exactly one environment.</td><td>GET /system, PUT /apps/{id}/environments/{DEV|PROD} (allowedCidrs).</td></tr><tr><td>... tab Partner keys</td><td></td><td>ADMIN to change</td><td>Lists keys with environment (DEV or PROD, tagged "active here" or "not active here") and status. The environment is chosen with a DEV/PROD radio; making a key for the environment this deployment does not run is allowed but shows a warning notice (such a key is refused with <code>wrong_environment</code> here). Register a PUBLIC key by pasting its PEM; or generate a key pair (for DEV work): the private key is shown once, with a copy button, a download button and a warning, and the dialog cannot be closed until the staff member ticks that they saved it. Revoke (confirm dialog).</td><td>POST /apps/{id}/keys, POST /apps/{id}/keys/generate, DELETE /apps/{id}/keys/{keyId}.</td></tr><tr><td>... tab Payment</td><td></td><td>ADMIN to change</td><td>Payment settings of the app (stored only; payments are not built yet).</td><td>PUT /apps/{id}/payment-settings (read from GET /apps/{id}).</td></tr><tr><td>... tab Templates</td><td></td><td>ADMIN to change</td><td>Templates of the app: list, create (key, kind, parameters, per-language content with a live check that every <code>{param}</code> is declared), edit, activate and deactivate, expiry. Template changes are not written to the audit log.</td><td>GET /notification/templates?appId=, POST /notification/templates, PATCH /notification/templates/{id}.</td></tr><tr><td>... tab Notification log</td><td></td><td>Any role</td><td>Filtered log of this app (status, channel, environment, kind), click a row for the detail with every delivery attempt and callback.</td><td>GET /notification/notifications?appId=..., GET /notification/notifications/{id}.</td></tr><tr><td>... tab Usage</td><td></td><td>Any role</td><td>Today's usage against each limit, for DEV or PROD (defaults to this deployment's environment). Today means the current UTC day.</td><td>GET /notification/usage?appId=&amp;environment=.</td></tr><tr><td>... tabs Reviews, Reports, Audit</td><td></td><td>Any role (Audit: ADMIN)</td><td>Moderation tables pinned to this app, and the audit log filtered to this app's id.</td><td>GET /apps/{id}/reviews or /reviews?appId=, GET /reports?appId=, GET /audit?target={id}.</td></tr><tr><td>Moderation</td><td><code>/moderation</code></td><td>Any role (actions: ADMIN)</td><td>Two tabs, reviews and reports across all apps. Hide or show a review; mark a report REVIEWED or DISMISSED. Reports do not change the app by themselves.</td><td>GET /reviews, PATCH /reviews/{id}, GET /reports, PATCH /reports/{id}.</td></tr><tr><td>Users</td><td><code>/users, /users/:id</code></td><td>Any role (status: ADMIN)</td><td>Searchable, paged list (phone, email, name or id; status filter). Detail: profile, extra JSON, location summary, device counts and platforms (no push tokens), alias count, mute preferences per app, status history in the audit log. Suspend, reactivate and mark deleted with a required reason and a confirm dialog. VIEWER sees masked contact data; a banner says so.</td><td>GET /users?q=&amp;status=&amp;page=&amp;size=, GET /users/{id}, POST /users/{id}/status, GET /audit?target={id}&amp;action=user.</td></tr><tr><td>Notifications</td><td><code>/notifications, /notifications/:id</code></td><td>Any role</td><td>The global delivery log across apps with filters (status, channel, environment, kind) and paging (the API also accepts appId, from and to; the screen has no app or date filter); detail shows attempts and callbacks. Message values are never shown.</td><td>GET /notification/notifications, GET /notification/notifications/{id}.</td></tr><tr><td>Staff</td><td><code>/staff</code></td><td>SUPER_ADMIN</td><td>Table of staff with role and status; the bootstrap account (first super admin) is flagged. Add by email and role, change role, deactivate and reactivate. The server's refusals are shown as they are: <code>last_super_admin</code> (cannot remove the last super admin) and the rule against changing your own account.</td><td>GET /staff, POST /staff, PATCH /staff/{id}.</td></tr><tr><td>Audit log</td><td><code>/audit</code></td><td>ADMIN and up</td><td>Filter by actor, action prefix, target type, target id and date range; expand a row for the full details; targets link to the app or user.</td><td>GET /audit with actor, action, targetType, target, from, to, limit, offset.</td></tr><tr><td>System</td><td><code>/system</code></td><td>Any role</td><td>Links to Grafana, Prometheus, Mailpit, Infisical, RabbitMQ and the RustFS console (from the dashboard's config, empty hides a link). Service health: the dashboard server probes registry, user, notification, Kratos, Prometheus, Grafana, Loki, Mailpit and Infisical on the internal network and shows UP or DOWN. Read-only capability catalog and an error-code glossary.</td><td>GET /backoffice/api/health/{name} (staff-only), GET /capabilities.</td></tr></tbody></table></div></section>
+
+<section><h2 id="config">Configuration</h2>
+<p>Nothing is baked into the image. At start the container writes <code>/backoffice/config.json</code> from environment variables (set in <code>docker-compose.yml</code>, override in the repo-root <code>.env</code>). The file is public: no secrets.</p><div class="table-wrap"><table><thead><tr><th>Variable</th><th>Meaning</th><th>Dev default</th></tr></thead><tbody><tr><td>BACKOFFICE_DEV_HINTS</td><td>Show development hints (the email code is in Mailpit). Follows <code>NOTIFY_DEV_ENDPOINTS</code>. Must be <code>false</code> in production.</td><td>true</td></tr><tr><td>BACKOFFICE_MAILPIT_URL</td><td>Mailpit link (hint and System page)</td><td>http://127.0.0.1:8025</td></tr><tr><td>BACKOFFICE_GRAFANA_URL, _PROMETHEUS_URL, _INFISICAL_URL, _RABBITMQ_URL, _RUSTFS_CONSOLE_URL</td><td>Links on the System page; an empty value hides the link</td><td>http://127.0.0.1:3001, :9090, :8080, :15672, :9001</td></tr></tbody></table></div></section>
+
+<section><h2 id="gateway">Gateway routes added for it</h2><div class="table-wrap"><table><thead><tr><th>Route</th><th>Paths</th><th>Priority</th><th>Protection</th><th>Upstream</th></tr></thead><tbody><tr><td><code>backoffice-static</code></td><td><code>/backoffice</code>, <code>/backoffice/*</code></td><td>10</td><td>none (public files)</td><td>backoffice nginx</td></tr><tr><td><code>backoffice-health</code></td><td><code>/backoffice/api/health/*</code></td><td>30</td><td>staff forward-auth</td><td>backoffice nginx (probes the services on the internal network)</td></tr><tr><td><code>admin-users</code></td><td><code>/admin/api/v1/users</code>, <code>/users/*</code></td><td>30</td><td>staff forward-auth, X-Gateway-Secret, X-Client-IP</td><td>user-service</td></tr><tr><td><code>kratos-self-service-submit</code></td><td><code>POST /kratos/self-service/*</code></td><td>20</td><td>10 per minute per IP; <code>Origin</code> header removed</td><td>Kratos public</td></tr></tbody></table></div>
+<p>Everything else under <code>/admin/api/v1/*</code> keeps going to registry-service (priority 20) and <code>/admin/api/v1/notification/*</code> to notification-service (30).</p></section>
+
+<section><h2 id="tests">Tests</h2>
+<ul><li><strong>Unit (Vitest):</strong> session handling (memory plus sessionStorage), API client error mapping (401, 403 mfa_required and not_staff, 429, validation fields, 204), Kratos flow handling, role gating, form payloads.</li>
+<li><strong>Live smoke</strong> (<code>npm run smoke</code>, <code>backoffice/tests/live/</code>): the dashboard's own API client against the running stack with a real staff session: login, apps, keys, templates, VIEWER masking, staff, audit filters, health probes.</li>
+<li><strong>Browser walk-through</strong> (<code>bash backoffice/tests/ui/run.sh</code>): Playwright in a throw-away container clicks through login, every app tab, moderation, users, notifications, staff, audit, system, sign-out and session expiry, saving screenshots.</li>
+<li><strong>Backend:</strong> user-service <code>AdminUsersTests</code> and <code>MaskingTest</code>; registry-service <code>BackofficeApiTests</code> and <code>TrustAndBootstrapTests</code>; gateway checks in <code>tests/e2e/admin_users.py</code>.</li></ul></section>
+
+<section><h2 id="notes">Notes and limits</h2>
+<ul><li>The app list returns all apps at once and the search box filters them in the browser; fine for hundreds of apps, to be paged server-side later.</li>
+<li>Payment settings are stored but payments are not built yet.</li>
+<li>Staff accounts are created by email; a new staff member signs in with the emailed code and enrols an authenticator on first use.</li>
+<li>Audit rows are never deleted by the dashboard; suspended or deleted users are refused at the gateway, and cannot receive notifications (delivery context <code>reachable: false</code>).</li></ul></section>
+
+<div class="pager"><a class="prev" href="10-reference.html"><small>Previous</small>10. Reference</a><a class="next" href="12-backoffice-guide.html"><small>Next</small>12. Backoffice guide</a></div>
+<p class="footer">Adera backend documentation &middot; last verified 2026-10-25 &middot; <a href="../index.html">contents</a></p>
+</main>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

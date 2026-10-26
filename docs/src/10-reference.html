@@ -1,0 +1,512 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>10. Reference | Adera docs</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+<button id="menu-btn" type="button" aria-label="Toggle menu">Menu</button>
+<a class="brand" href="../index.html">Adera docs</a>
+<span class="spacer"></span>
+<a href="../index.html">Contents</a>
+<button id="theme-btn" type="button" aria-label="Toggle light or dark theme">Theme</button>
+</header>
+<div class="layout">
+<nav class="sidebar" aria-label="Sections">
+<ul><li><a href="../index.html" class="">Home / contents</a></li></ul>
+<h4>Sections</h4><ul>
+<li><a href="01-overview.html">1. Overview</a>
+</li>
+<li><a href="02-setup.html">2. Setup and running</a>
+</li>
+<li><a href="03-tools.html">3. Tools</a>
+</li>
+<li><a href="04-services.html">4. Services</a>
+</li>
+<li><a href="05-communication.html">5. How it communicates</a>
+</li>
+<li><a href="06-security.html">6. Security model</a>
+</li>
+<li><a href="07-data.html">7. Data</a>
+</li>
+<li><a href="08-endpoints.html">8. Endpoint reference</a>
+</li>
+<li><a href="09-guides.html">9. Guides</a>
+</li>
+<li><a href="10-reference.html" class=current>10. Reference</a>
+<ul><li><a href="#env-vars">Environment variables</a></li><li><a href="#capabilities">Capability catalog and default limits</a></li><li><a href="#glossary-status">Status and state glossaries</a></li><li><a href="#error-codes">Error-code index</a></li><li><a href="#glossary">Glossary of terms</a></li><li><a href="#not-built">Not built yet, and changelog</a></li></ul>
+</li>
+<li><a href="11-backoffice.html">11. Backoffice (staff dashboard)</a>
+</li>
+<li><a href="12-backoffice-guide.html">12. Backoffice guide (staff manual)</a>
+</li>
+<li><a href="13-sample-data.html">13. Sample data (test scenarios)</a>
+</li>
+</ul>
+<h4>Endpoints</h4><ul>
+<li><a href="08a-user-api.html">8a. End-user API</a>
+</li>
+<li><a href="08b-staff-api.html">8b. Staff / dashboard API</a>
+</li>
+<li><a href="08c-partner-api.html">8c. Partner API</a>
+</li>
+<li><a href="08d-internal-api.html">8d. Internal API</a>
+</li>
+<li><a href="08e-kratos-flows.html">8e. Kratos flows</a>
+</li>
+<li><a href="08f-operational.html">8f. Operational endpoints</a>
+</li>
+</ul>
+</nav>
+<main>
+<h1>10. Reference</h1>
+<p class="lead">Lookup tables: environment variables, the capability catalog, status glossaries, the error-code index, a glossary of terms, and what is not built yet. Everything here was read from the code and compose files (2026-10-25); no secret values appear.</p>
+
+<ul>
+<li><a href="#env-vars">Environment variables</a></li>
+<li><a href="#capabilities">Capability catalog and default limits</a></li>
+<li><a href="#glossary-status">Status and state glossaries</a></li>
+<li><a href="#error-codes">Error-code index</a></li>
+<li><a href="#glossary">Glossary of terms</a></li>
+<li><a href="#not-built">Not built yet, and changelog</a></li>
+</ul>
+
+<!-- ============================================================= -->
+<h2 id="env-vars">Environment variables</h2>
+<p>Where a variable is set: <strong>.env</strong> = repo-root <code>.env</code> (gitignored; compose reads it); <strong>compose</strong> = fixed in <code>docker-compose.yml</code>; <strong>Infisical</strong> = project <code>Adera</code>, environment <code>dev</code>, folder shown; <strong>default</strong> = the value in the service's <code>application.yml</code>. "Secret" means the value must never be printed or committed. Service-specific property names and meanings are in <a href="04-services.html">Services</a>.</p>
+<p>Lessons that apply to every row: <code>docker compose restart</code> does <strong>not</strong> re-read compose <code>environment</code>; after changing <code>.env</code> or compose use <code>docker compose up -d &lt;service&gt;</code>. See <a href="02-setup.html#troubleshooting">troubleshooting</a>.</p>
+
+<h3 id="env-platform">Platform and tools (read by compose, Postgres, Redis, RabbitMQ, Infisical, Kratos, APISIX, Grafana, RustFS)</h3>
+<div class="table-wrap"><table>
+<thead><tr><th>Variable</th><th>Default</th><th>Required</th><th>Secret</th><th>Meaning</th><th>Set in</th></tr></thead>
+<tbody>
+<tr><td><code>POSTGRES_USER</code></td><td>none (<code>.env.example</code> shows <code>adera_admin</code>)</td><td>yes</td><td>no</td><td>Postgres admin login (also used by the healthcheck and by <code>docker compose exec postgres psql</code>)</td><td>.env</td></tr>
+<tr><td><code>POSTGRES_PASSWORD</code></td><td>none</td><td>yes</td><td>yes</td><td>Admin password</td><td>.env</td></tr>
+<tr><td><code>KRATOS_DB_PASSWORD</code>, <code>USER_DB_PASSWORD</code>, <code>NOTIFICATION_DB_PASSWORD</code>, <code>REGISTRY_DB_PASSWORD</code>, <code>INFISICAL_DB_PASSWORD</code></td><td>none</td><td>yes</td><td>yes</td><td>Passwords of the per-service logins <code>kratos</code>, <code>users_svc</code>, <code>notif_svc</code>, <code>registry_svc</code>, <code>infisical</code>. Used by <code>infra/postgres/init-databases.sh</code> only on the <em>first</em> start of an empty volume; changing them later does not change the roles</td><td>.env</td></tr>
+<tr><td><code>REDIS_ADMIN_PASSWORD</code>, <code>INFISICAL_REDIS_PASSWORD</code>, <code>APISIX_REDIS_PASSWORD</code></td><td>none</td><td>yes</td><td>yes</td><td>Passwords of the Redis ACL users <code>admin</code>, <code>infisical</code>, <code>apisix</code> (built by <code>infra/redis/entrypoint.sh</code> at start)</td><td>.env</td></tr>
+<tr><td><code>RABBITMQ_ADMIN_USER</code>, <code>RABBITMQ_ADMIN_PASSWORD</code></td><td>none</td><td>yes</td><td>password yes</td><td>Broker admin (management UI, setup script)</td><td>.env</td></tr>
+<tr><td><code>USER_SVC_RABBIT_PASSWORD</code>, <code>NOTIFICATION_SVC_RABBIT_PASSWORD</code></td><td>none</td><td>yes (for setup)</td><td>yes</td><td>AMQP users <code>user_svc</code>, <code>notification_svc</code> in vhost <code>adera</code>; not used by any service yet</td><td>.env</td></tr>
+<tr><td><code>INFISICAL_ENCRYPTION_KEY</code>, <code>INFISICAL_AUTH_SECRET</code></td><td>none</td><td>yes</td><td>yes</td><td>Infisical's own bootstrap secrets. <strong>Back them up off this machine</strong>; losing the encryption key makes every stored secret unreadable</td><td>.env</td></tr>
+<tr><td><code>INFISICAL_DOMAIN</code>, <code>INFISICAL_PROJECT_ID</code>, <code>INFISICAL_IDENTITY_ID</code>, <code>INFISICAL_TOKEN</code></td><td><code>.env.example</code>: domain <code>http://localhost:8080</code></td><td>for the loader and the CLI</td><td>token yes</td><td>CLI/loader access (machine identity <code>adera-local-dev</code>, Token Auth, expires 2026-11-23). compose hard-codes <code>INFISICAL_DOMAIN=http://infisical:8080</code> for notification-service and passes the project id and token</td><td>.env</td></tr>
+<tr><td><code>KRATOS_SECRETS_COOKIE</code>, <code>KRATOS_SECRETS_CIPHER</code></td><td>none</td><td>yes</td><td>yes</td><td>Kratos cookie signing and cipher keys (compose maps them to <code>SECRETS_COOKIE</code>, <code>SECRETS_CIPHER</code>)</td><td>.env</td></tr>
+<tr><td><code>GRAFANA_ADMIN_PASSWORD</code></td><td>none</td><td>yes</td><td>yes</td><td>Grafana user <code>admin</code></td><td>.env</td></tr>
+<tr><td><code>RUSTFS_ACCESS_KEY</code>, <code>RUSTFS_SECRET_KEY</code></td><td>none</td><td>yes</td><td>yes</td><td>RustFS admin keys; also used by user-service and registry-service as <code>STORAGE_ACCESS_KEY/SECRET_KEY</code> (should become a bucket-scoped key)</td><td>.env</td></tr>
+<tr><td><code>USER_GATEWAY_SECRET</code></td><td>none</td><td>yes</td><td>yes</td><td>The shared secret APISIX sends as <code>X-Gateway-Secret</code>. Passed to APISIX, user-service (<code>USER_GATEWAY_SECRET</code>), registry-service and notification-service (as <code>GATEWAY_SECRET</code>)</td><td>.env</td></tr>
+<tr><td><code>INTERNAL_API_SECRET</code></td><td>none</td><td>yes</td><td>yes</td><td>Service-to-service secret (<code>X-Internal-Secret</code>) for the three services</td><td>.env</td></tr>
+<tr><td><code>ALIAS_HMAC_SECRET</code></td><td>none</td><td>yes (user-service refuses to start without)</td><td>yes</td><td>Key for pseudonymous ids. Never change once partners have aliases</td><td>.env</td></tr>
+<tr><td><code>BOOTSTRAP_SUPER_ADMIN_EMAIL</code></td><td>empty</td><td>for the first install</td><td>personal data</td><td>Email of the first super admin (created at registry-service start if none active)</td><td>.env (set); compose passes <code>${BOOTSTRAP_SUPER_ADMIN_EMAIL:-}</code></td></tr>
+<tr><td><code>ADERA_ENV</code></td><td><code>dev</code></td><td>no</td><td>no</td><td>The one environment this deployment is (dev or prod); another value stops the service starting</td><td>.env via compose (<code>${ADERA_ENV:-dev}</code>), see <code>.env.example</code></td></tr>
+<tr><td><code>ADMIN_REQUIRE_AAL2</code></td><td><code>true</code></td><td>no</td><td>no</td><td>Require the authenticator-app step for staff</td><td>not in .env; compose default <code>true</code></td></tr>
+<tr><td><code>STORAGE_PUBLIC_ENDPOINT</code></td><td><code>http://127.0.0.1:9000</code></td><td>no</td><td>no</td><td>Host used in signed image links (user-service and registry-service)</td><td>not in .env; compose default</td></tr>
+<tr><td><code>FIREBASE_SERVICE_ACCOUNT_B64</code></td><td>empty</td><td>only for real push</td><td>yes</td><td>Listed in <code>.env</code>/<code>.env.example</code>, but docker-compose does <em>not</em> pass it to notification-service; the service reads it from Infisical <code>/notification</code> (not present there yet)</td><td>Infisical (planned); .env placeholder unused</td></tr>
+</tbody></table></div>
+
+<h3 id="env-notification">notification-service</h3>
+<div class="table-wrap"><table>
+<thead><tr><th>Variable</th><th>Default</th><th>Required</th><th>Secret</th><th>Meaning</th><th>Set in</th></tr></thead>
+<tbody>
+<tr><td><code>DB_URL</code>, <code>DB_USER</code>, <code>DB_PASSWORD</code></td><td><code>jdbc:postgresql://localhost:5432/notification</code>, <code>notif_svc</code>, empty</td><td>yes</td><td>password</td><td>Database</td><td>compose (password from .env)</td></tr>
+<tr><td><code>SMTP_HOST</code>, <code>SMTP_PORT</code></td><td><code>localhost</code>, <code>1025</code></td><td>dev</td><td>no</td><td>Mailpit SMTP</td><td>compose (<code>mailpit</code>, <code>1025</code>)</td></tr>
+<tr><td><code>SMS_PROVIDER</code></td><td><code>console</code></td><td>no</td><td>no</td><td><code>console</code> | <code>twilio</code></td><td>.env via compose <code>${SMS_PROVIDER:-console}</code></td></tr>
+<tr><td><code>EMAIL_PROVIDER</code></td><td><code>mailpit</code></td><td>no</td><td>no</td><td><code>mailpit</code> | <code>resend</code></td><td>.env via compose</td></tr>
+<tr><td><code>ADERA_ENV</code></td><td><code>dev</code></td><td>no</td><td>no</td><td>The one environment this deployment is (dev or prod); partner keys of the other get 403 <code>wrong_environment</code></td><td>.env via compose (same value as registry-service)</td></tr>
+<tr><td><code>NOTIFY_DEV_ENDPOINTS</code></td><td>app <code>false</code>; compose <code>true</code></td><td>no</td><td>no</td><td>Expose <code>/dev/messages</code>; startup refuses it with a real provider</td><td>.env via compose</td></tr>
+<tr><td><code>NOTIFY_LIVE_ALLOWLIST</code></td><td>empty</td><td>no</td><td>personal data</td><td>Comma-separated recipients allowed on real providers</td><td>.env via compose</td></tr>
+<tr><td><code>LIMIT_SMS_PER_HOUR</code>, <code>LIMIT_SMS_PER_DAY</code>, <code>LIMIT_EMAIL_PER_HOUR</code>, <code>LIMIT_EMAIL_PER_DAY</code></td><td><code>5</code>, <code>10</code>, <code>10</code>, <code>20</code></td><td>no</td><td>no</td><td>Per-recipient limits for Kratos messages</td><td>default (not in compose)</td></tr>
+<tr><td><code>MAILPIT_FROM_EMAIL</code>, <code>MAILPIT_FROM_NAME</code></td><td><code>no-reply@adera.local</code>, <code>Adera</code></td><td>no</td><td>no</td><td>Dev sender</td><td>default</td></tr>
+<tr><td><code>TWILIO_ACCOUNT_SID</code>, <code>TWILIO_AUTH_TOKEN</code>, <code>TWILIO_MESSAGING_SERVICE_SID</code>, <code>TWILIO_PHONE_NUMBER</code></td><td>empty</td><td>with <code>SMS_PROVIDER=twilio</code></td><td>yes</td><td>Twilio credentials (SID+token and a messaging service SID or a number)</td><td>Infisical <code>/notification</code></td></tr>
+<tr><td><code>RESEND_API_KEY</code>, <code>RESEND_FROM_EMAIL</code>, <code>RESEND_FROM_NAME</code></td><td>empty, empty, <code>Adera</code></td><td>with <code>EMAIL_PROVIDER=resend</code></td><td>key yes</td><td>Resend key and sender</td><td>Infisical <code>/notification</code></td></tr>
+<tr><td><code>PARTNER_SIGNING_KEY_ID</code>, <code>PARTNER_SIGNING_PRIVATE_KEY_B64</code></td><td>empty (id falls back to <code>adera-sig-1</code>; key ephemeral)</td><td>required with real SMS/email</td><td>key yes</td><td>Our response/callback signing key</td><td>Infisical <code>/notification</code></td></tr>
+<tr><td><code>GATEWAY_SECRET</code>, <code>INTERNAL_API_SECRET</code></td><td>empty (check disabled)</td><td>yes in practice</td><td>yes</td><td>Trust secrets (see platform table)</td><td>compose from .env</td></tr>
+<tr><td><code>REGISTRY_URL</code>, <code>USER_SERVICE_URL</code></td><td><code>http://localhost:8087</code>, <code>http://localhost:8086</code></td><td>yes</td><td>no</td><td>Upstream services</td><td>compose (<code>http://registry-service:8080</code>, <code>http://user-service:8080</code>)</td></tr>
+<tr><td><code>PARTNER_WORKERS_ENABLED</code></td><td><code>true</code></td><td>no</td><td>no</td><td>Run delivery and callback workers</td><td>default</td></tr>
+<tr><td><code>PARTNER_MAX_SKEW_MINUTES</code></td><td><code>5</code></td><td>no</td><td>no</td><td>Allowed clock skew for signed requests</td><td>default</td></tr>
+<tr><td><code>PARTNER_ALLOW_PRIVATE_CALLBACKS</code></td><td><code>false</code></td><td>no</td><td>no</td><td>Dev/e2e only; refused with a real provider</td><td>.env via compose (dev .env: <code>true</code>)</td></tr>
+<tr><td><code>FCM_PROVIDER</code></td><td><code>fake</code></td><td>no</td><td>no</td><td><code>fake</code> | <code>firebase</code></td><td>compose default (<code>${FCM_PROVIDER:-fake}</code>); not in .env</td></tr>
+<tr><td><code>FIREBASE_SERVICE_ACCOUNT_B64</code> / <code>FIREBASE_CREDENTIALS_PATH</code></td><td>empty</td><td>with <code>FCM_PROVIDER=firebase</code></td><td>yes</td><td>Firebase credentials (base64 JSON, or file path)</td><td>Infisical <code>/notification</code></td></tr>
+<tr><td><code>INFISICAL_DOMAIN</code>, <code>INFISICAL_PROJECT_ID</code>, <code>INFISICAL_TOKEN</code>, <code>INFISICAL_ENV</code>, <code>INFISICAL_PATH</code></td><td>env <code>dev</code>, path <code>/notification</code></td><td>to load secrets</td><td>token yes</td><td>Where the loader reads secrets from</td><td>compose</td></tr>
+<tr><td><code>TRACING_SAMPLE_RATE</code>, <code>OTEL_TRACES_ENDPOINT</code></td><td><code>1.0</code>, <code>http://localhost:4318/v1/traces</code></td><td>no</td><td>no</td><td>Traces</td><td>compose sets the endpoint only</td></tr>
+</tbody></table></div>
+
+<h3 id="env-user">user-service</h3>
+<div class="table-wrap"><table>
+<thead><tr><th>Variable</th><th>Default</th><th>Required</th><th>Secret</th><th>Meaning</th><th>Set in</th></tr></thead>
+<tbody>
+<tr><td><code>DB_URL</code>, <code>DB_USER</code>, <code>DB_PASSWORD</code></td><td><code>jdbc:postgresql://localhost:5432/users</code>, <code>users_svc</code>, empty</td><td>yes</td><td>password</td><td>Database</td><td>compose (password from .env)</td></tr>
+<tr><td><code>KRATOS_PUBLIC_URL</code>, <code>KRATOS_ADMIN_URL</code></td><td><code>http://localhost:4433</code>, <code>http://localhost:4434</code></td><td>yes</td><td>no</td><td>Kratos APIs</td><td>compose (<code>http://kratos:4433/4434</code>)</td></tr>
+<tr><td><code>STORAGE_ENDPOINT</code>, <code>STORAGE_PUBLIC_ENDPOINT</code></td><td><code>http://localhost:9000</code> both</td><td>yes</td><td>no</td><td>RustFS (internal / for signed links)</td><td>compose (<code>http://rustfs:9000</code>; public defaults to <code>http://127.0.0.1:9000</code>)</td></tr>
+<tr><td><code>STORAGE_ACCESS_KEY</code>, <code>STORAGE_SECRET_KEY</code></td><td>empty (startup fails)</td><td>yes</td><td>yes</td><td>RustFS keys</td><td>compose from <code>RUSTFS_*</code></td></tr>
+<tr><td><code>STORAGE_BUCKET</code>, <code>STORAGE_REGION</code>, <code>STORAGE_PRESIGN_MINUTES</code></td><td><code>adera-media</code>, <code>us-east-1</code>, <code>60</code></td><td>no</td><td>no</td><td>Bucket, region label, signed link lifetime</td><td>default</td></tr>
+<tr><td><code>USER_GATEWAY_SECRET</code></td><td>empty (check disabled)</td><td>yes in practice</td><td>yes</td><td>Must match APISIX</td><td>compose from .env</td></tr>
+<tr><td><code>INTERNAL_API_SECRET</code></td><td>empty</td><td>yes in practice</td><td>yes</td><td>For <code>/internal/aliases|users|devices</code></td><td>compose from .env</td></tr>
+<tr><td><code>ALIAS_HMAC_SECRET</code></td><td>empty (startup fails)</td><td>yes</td><td>yes</td><td>Alias key</td><td>compose from .env</td></tr>
+<tr><td><code>AVATAR_MAX_BYTES</code>, <code>AVATAR_SIZE_PX</code>, <code>EXTRA_MAX_BYTES</code></td><td><code>5242880</code>, <code>512</code>, <code>16384</code></td><td>no</td><td>no</td><td>Upload and JSON limits</td><td>default</td></tr>
+<tr><td><code>TRACING_SAMPLE_RATE</code>, <code>OTEL_TRACES_ENDPOINT</code></td><td><code>1.0</code>, <code>http://localhost:4318/v1/traces</code></td><td>no</td><td>no</td><td>Traces</td><td>compose sets the endpoint</td></tr>
+</tbody></table></div>
+
+<h3 id="env-registry">registry-service</h3>
+<div class="table-wrap"><table>
+<thead><tr><th>Variable</th><th>Default</th><th>Required</th><th>Secret</th><th>Meaning</th><th>Set in</th></tr></thead>
+<tbody>
+<tr><td><code>DB_URL</code>, <code>DB_USER</code>, <code>DB_PASSWORD</code></td><td><code>jdbc:postgresql://localhost:5432/registry</code>, <code>registry_svc</code>, empty</td><td>yes</td><td>password</td><td>Database</td><td>compose (password from <code>REGISTRY_DB_PASSWORD</code>)</td></tr>
+<tr><td><code>GATEWAY_SECRET</code>, <code>INTERNAL_API_SECRET</code></td><td>empty (checks disabled, warning)</td><td>yes in practice</td><td>yes</td><td>Trust secrets</td><td>compose from .env</td></tr>
+<tr><td><code>BOOTSTRAP_SUPER_ADMIN_EMAIL</code></td><td>empty</td><td>first install</td><td>personal data</td><td>First super admin</td><td>.env via compose</td></tr>
+<tr><td><code>ADMIN_REQUIRE_AAL2</code></td><td><code>true</code></td><td>no</td><td>no</td><td>Staff need the authenticator step</td><td>compose default</td></tr>
+<tr><td><code>KRATOS_PUBLIC_URL</code>, <code>KRATOS_ADMIN_URL</code></td><td>localhost:4433 / 4434</td><td>yes</td><td>no</td><td>Kratos APIs</td><td>compose</td></tr>
+<tr><td><code>STORAGE_ENDPOINT</code>, <code>STORAGE_PUBLIC_ENDPOINT</code>, <code>STORAGE_ACCESS_KEY</code>, <code>STORAGE_SECRET_KEY</code>, <code>STORAGE_BUCKET</code>, <code>STORAGE_REGION</code>, <code>STORAGE_PRESIGN_MINUTES</code></td><td>as user-service</td><td>yes</td><td>keys yes</td><td>RustFS for logos</td><td>compose / default</td></tr>
+<tr><td><code>LOGO_MAX_BYTES</code>, <code>LOGO_MAX_PX</code></td><td><code>2097152</code>, <code>512</code></td><td>no</td><td>no</td><td>Logo limits</td><td>default</td></tr>
+<tr><td><code>TRACING_SAMPLE_RATE</code>, <code>OTEL_TRACES_ENDPOINT</code></td><td><code>1.0</code>, localhost collector</td><td>no</td><td>no</td><td>Traces</td><td>compose sets the endpoint</td></tr>
+</tbody></table></div>
+
+<h3 id="env-tests">Variables used by the e2e scripts</h3>
+<p><code>tests/e2e/*.py</code> read <code>.env</code> themselves (for example RustFS keys for <code>s3tool.py</code>) and keep a per-staff TOTP state file in <code>tests/e2e/.staff-totp-&lt;email&gt;.json</code> (gitignored, mode 0600; it is a secret, do not share it). Scripts that need staff use a temporary account from <code>tests/e2e/tempstaff.py</code> (removed afterwards), never the bootstrap account; <code>ADERA_STAFF_EMAIL</code> selects a real account instead.</p>
+
+<!-- ============================================================= -->
+<h2 id="capabilities">Capability catalog and default limits</h2>
+<p>Capabilities are what staff may <em>allow</em> a mini app to ask for (<code>Capability</code> enum in registry-service; list at <code>GET /admin/api/v1/capabilities</code>). Granting is the admin gate; the per-user consent gate arrives with the frontend bridge (not built). Each app-capability pair has a state <code>GRANTED</code>, <code>DENIED</code> or <code>SUSPENDED</code>. A capability marked <em>reason required</em> cannot be granted without an English reason of at least 10 characters, which is shown to users verbatim in the consent sheet.</p>
+<div class="table-wrap"><table>
+<thead><tr><th>Key</th><th>Description</th><th>Reason required</th><th>Unlocks channel</th></tr></thead>
+<tbody>
+<tr><td><code>user.basic</code></td><td>Pseudonymous id and display name</td><td>no</td><td>none</td></tr>
+<tr><td><code>user.full_name</code></td><td>The user's first and last name</td><td>yes</td><td>none</td></tr>
+<tr><td><code>user.contact</code></td><td>The user's phone number and email</td><td>yes</td><td>none</td></tr>
+<tr><td><code>user.address</code></td><td>One saved address the user picks</td><td>yes</td><td>none</td></tr>
+<tr><td><code>location.coarse</code></td><td>City-level location</td><td>yes</td><td>none</td></tr>
+<tr><td><code>location.fine</code></td><td>Precise location, foreground only</td><td>yes</td><td>none</td></tr>
+<tr><td><code>pay.request</code></td><td>Ask the user to pay (currencies and limits in payment settings)</td><td>yes</td><td>none</td></tr>
+<tr><td><code>notify.inapp</code></td><td>Send in-app notifications (inbox + push)</td><td>no</td><td><code>IN_APP</code></td></tr>
+<tr><td><code>notify.sms</code></td><td>Send SMS (costs money; capped)</td><td>no</td><td><code>SMS</code></td></tr>
+<tr><td><code>notify.email</code></td><td>Send email</td><td>no</td><td><code>EMAIL</code></td></tr>
+</tbody></table></div>
+<p>Only the three <code>notify.*</code> capabilities are enforced by code today (notification-service). The others are stored and shown in the public catalog as permissions but nothing consumes them yet (the frontend bridge and payments are <a href="#not-built">not built</a>).</p>
+
+<h3 id="default-limits">Default notification limits</h3>
+<p>When <code>notify.*</code> is <strong>GRANTED</strong> and the app has no limit row for that channel yet, registry-service inserts these defaults (<code>AppConfigService.defaultLimit</code>). Staff change them per app with <code>PUT /admin/api/v1/apps/{id}/notification-limits/{channel}</code>. <code>null</code> means unlimited, <code>0</code> means none. Counting is per UTC day (the lifetime total is never reset). An app can hold limits for a channel without the capability, but delivery still requires the capability.</p>
+<div class="table-wrap"><table>
+<thead><tr><th>Channel</th><th><code>maxPerUserPerDay</code></th><th><code>maxPerDay</code></th><th><code>maxDistinctUsersPerDay</code></th><th><code>maxTotal</code></th></tr></thead>
+<tbody>
+<tr><td><code>SMS</code></td><td>3</td><td>100</td><td>100</td><td>1000</td></tr>
+<tr><td><code>EMAIL</code></td><td>5</td><td>500</td><td>500</td><td>10000</td></tr>
+<tr><td><code>IN_APP</code></td><td>20</td><td>10000</td><td>10000</td><td>null (unlimited)</td></tr>
+</tbody></table></div>
+<div class="table-wrap"><table>
+<thead><tr><th>Limit</th><th>Meaning</th><th>Error when hit</th></tr></thead>
+<tbody>
+<tr><td><code>maxPerUserPerDay</code></td><td>Messages to the same user on this channel today</td><td>429 <code>quota_exceeded</code> with <code>limit: "max_per_user_per_day"</code></td></tr>
+<tr><td><code>maxPerDay</code></td><td>All messages on this channel today</td><td><code>max_per_day</code></td></tr>
+<tr><td><code>maxDistinctUsersPerDay</code></td><td>Different users reached on this channel today (checked only when the target user has not been sent to today)</td><td><code>max_distinct_users_per_day</code></td></tr>
+<tr><td><code>maxTotal</code></td><td>Lifetime messages on this channel</td><td><code>max_total</code></td></tr>
+</tbody></table></div>
+<p>Check order in <code>UsageService.reserve</code>: <code>max_total</code>, then <code>max_per_user_per_day</code>, <code>max_per_day</code>, <code>max_distinct_users_per_day</code>. Counters are per app, environment (DEV and PROD separately) and channel. A refused request is rolled back and uses no quota. A muted user's request is stored as SUPPRESSED and also uses no quota.</p>
+<h3 id="other-limits">Other fixed limits (from code)</h3>
+<div class="table-wrap"><table>
+<thead><tr><th>Limit</th><th>Value</th><th>Where</th></tr></thead>
+<tbody>
+<tr><td>Partner request body</td><td>64 KiB (413 <code>request_too_large</code>)</td><td><code>PartnerAuthFilter</code></td></tr>
+<tr><td><code>externalId</code></td><td>1 to 100 chars of <code>A-Za-z0-9._:-</code></td><td><code>NotificationAcceptor</code></td></tr>
+<tr><td>Partner <code>userId</code></td><td><code>u_p_</code> + 1 to 60 of <code>A-Za-z0-9_</code></td><td><code>NotificationAcceptor</code></td></tr>
+<tr><td><code>data</code></td><td>JSON object, at most 2048 bytes</td><td><code>NotificationAcceptor</code></td></tr>
+<tr><td><code>callbackUrl</code></td><td>at most 500 chars; http(s) accepted at request time, but only public https on 443/8443 is called (see SSRF guard)</td><td><code>NotificationAcceptor</code>, <code>UrlGuard</code></td></tr>
+<tr><td><code>ttlSeconds</code></td><td>60 to 604800, default 86400</td><td><code>NotificationAcceptor</code></td></tr>
+<tr><td>Template params</td><td>at most 10; name 1 to 30 chars; <code>maxLength</code> 1 to 500 (default 100)</td><td><code>TemplateRules</code></td></tr>
+<tr><td>Template text lengths</td><td>title 100, body 1000, sms 320, emailSubject 150, emailHtml 20000</td><td><code>TemplateRules</code></td></tr>
+<tr><td>Active partner keys</td><td>5 per app and environment</td><td><code>PartnerKeyService</code></td></tr>
+<tr><td>Allowed server addresses</td><td>at most 50 per environment; <code>/0</code> allowed for DEV, refused for PROD</td><td><code>AppConfigService</code></td></tr>
+<tr><td>Review comment / report details</td><td>2000 chars each</td><td><code>ReviewService</code></td></tr>
+<tr><td>Avatar upload</td><td>5 MiB, output 512 px JPEG</td><td>user-service</td></tr>
+<tr><td>Logo upload</td><td>2 MiB, longest side 512 px, PNG</td><td>registry-service</td></tr>
+<tr><td><code>extra</code> JSON (user and app)</td><td>16384 bytes</td><td>user-service, <code>AppPatch</code></td></tr>
+<tr><td>FCM token</td><td>at most 4096 chars</td><td><code>DeviceDtos</code></td></tr>
+<tr><td>Gateway limits (per client IP per 60 s)</td><td>Kratos POST self-service 10; other Kratos 120; avatar 20; <code>/api/v1/me/**</code>, <code>/api/v1/apps/**</code>, <code>/admin/api/v1/**</code> 300; partner <code>/v1/*</code> 600; JWKS 120; Kratos admin blocked (403)</td><td><code>infra/apisix/apisix.yaml</code></td></tr>
+</tbody></table></div>
+
+<!-- ============================================================= -->
+<h2 id="glossary-status">Status and state glossaries</h2>
+
+<h3 id="status-notification">Partner notification statuses (<code>notification.status</code>)</h3>
+<div class="table-wrap"><table>
+<thead><tr><th>Status</th><th>Final?</th><th>Meaning</th></tr></thead>
+<tbody>
+<tr><td><code>QUEUED</code></td><td>no</td><td>Accepted (HTTP 202), waiting for the delivery worker.</td></tr>
+<tr><td><code>PROCESSING</code></td><td>no</td><td>A worker claimed it (60-second lock). If the worker dies the claim expires and it is retried.</td></tr>
+<tr><td><code>RETRYING</code></td><td>no</td><td>A temporary failure; will be tried again at <code>next_attempt_at</code>.</td></tr>
+<tr><td><code>SENT</code></td><td>yes</td><td>Handed to the provider (SMS/email) or written to the inbox (+ push attempted). For a synthetic <code>u_p_test_*</code> user in DEV it means "simulated".</td></tr>
+<tr><td><code>FAILED</code></td><td>yes</td><td>Permanent provider error (bad number, rejected sender) or 8 attempts used (<code>reason</code> starts with <code>max_attempts:</code>).</td></tr>
+<tr><td><code>UNREACHABLE</code></td><td>yes</td><td>User deleted/suspended at delivery time, or no phone / no email on file.</td></tr>
+<tr><td><code>SUPPRESSED</code></td><td>yes</td><td>The user muted the app or channel (<code>recipient_opted_out</code>), or the live allowlist excluded the recipient (<code>not_allowlisted</code>). Muted-at-request is answered 200, not as an error.</td></tr>
+<tr><td><code>EXPIRED</code></td><td>yes</td><td>The next attempt would fall after <code>ttlSeconds</code>.</td></tr>
+</tbody></table></div>
+<p>A callback (<code>notification.status</code> event) is queued whenever a notification reaches a final status and a <code>callbackUrl</code> was given.</p>
+
+<h3 id="reason-codes">Reason and attempt codes</h3>
+<div class="table-wrap"><table>
+<thead><tr><th>Where</th><th>Values</th></tr></thead>
+<tbody>
+<tr><td><code>notification.reason</code></td><td><code>expired</code>, <code>recipient_opted_out</code>, <code>user_unreachable</code>, <code>no_phone</code>, <code>no_email</code>, <code>not_allowlisted</code>, <code>user_directory_unavailable</code>, <code>twilio_http_&lt;status&gt;</code>, <code>resend_http_&lt;status&gt;</code>, <code>twilio_unreachable</code>, <code>resend_unreachable</code>, <code>mailpit_unreachable</code>, <code>max_attempts:&lt;reason&gt;</code></td></tr>
+<tr><td><code>notification_attempt.outcome</code></td><td><code>OK</code>, <code>TRANSIENT</code>, <code>PERMANENT</code>, <code>SKIPPED</code></td></tr>
+<tr><td><code>notification_attempt.error_code</code></td><td>as above plus <code>sandbox</code> (provider name for synthetic <code>u_p_test_*</code> users in DEV), <code>token_unregistered</code>, <code>push_unavailable</code>, <code>no_devices</code></td></tr>
+<tr><td><code>notification_attempt.provider</code></td><td><code>console</code>, <code>twilio</code>, <code>mailpit</code>, <code>resend</code>, <code>fake</code>, <code>fcm</code>, <code>sandbox</code></td></tr>
+<tr><td><code>callback.status</code></td><td><code>PENDING</code>, <code>PROCESSING</code>, <code>DELIVERED</code>, <code>FAILED</code>; <code>last_error</code>: <code>http_&lt;status&gt;</code>, <code>unreachable</code>, <code>interrupted</code>, or an SSRF-guard code (<code>invalid_url</code>, <code>scheme_not_https</code>, <code>port_not_allowed</code>, <code>host_not_resolvable</code>, <code>address_not_public</code>)</td></tr>
+</tbody></table></div>
+
+<h3 id="status-sendlog">Kratos message send log (<code>send_log.status</code>)</h3>
+<div class="table-wrap"><table>
+<thead><tr><th>Status</th><th>Meaning</th></tr></thead>
+<tbody>
+<tr><td><code>SENT</code></td><td>Provider accepted it (console/Mailpit count as sent). Courier response <code>{"status":"sent","provider":"..."}</code>.</td></tr>
+<tr><td><code>FAILED</code></td><td>Provider error; the HTTP answer to Kratos is 502 so Kratos retries. <code>error_code</code> holds the short code.</td></tr>
+<tr><td><code>SUPPRESSED</code></td><td>Per-recipient limit reached (<code>rate_limited</code>); answer 200.</td></tr>
+<tr><td><code>SKIPPED</code></td><td>Real provider and the recipient is not on the allowlist (<code>not_allowlisted</code>); answer 200.</td></tr>
+</tbody></table></div>
+<p>Channels are <code>SMS</code> and <code>EMAIL</code> here; partner notifications add <code>IN_APP</code>.</p>
+
+<h3 id="status-app">Mini-app statuses (<code>mini_app.status</code>)</h3>
+<div class="table-wrap"><table>
+<thead><tr><th>Status</th><th>Meaning</th><th>Visible to users</th><th>works in DEV</th><th>works in PROD</th></tr></thead>
+<tbody>
+<tr><td><code>DRAFT</code></td><td>Being set up (default)</td><td>no</td><td>yes</td><td>no (<code>app_draft</code>)</td></tr>
+<tr><td><code>LIVE</code></td><td>Published; needs a logo and support email to enter</td><td>yes</td><td>yes</td><td>yes</td></tr>
+<tr><td><code>PAUSED</code></td><td>Temporarily off</td><td>no</td><td>yes</td><td>no (<code>app_paused</code>)</td></tr>
+<tr><td><code>KILLED</code></td><td>Emergency stop; only a SUPER_ADMIN can revive it</td><td>no</td><td>no (<code>app_killed</code>)</td><td>no (<code>app_killed</code>)</td></tr>
+</tbody></table></div>
+<p>Registry answers to notification-service are cached about 15 seconds, so a status change takes up to that long to bite.</p>
+
+<h3 id="status-env">Environments</h3>
+<p>A deployment is exactly one environment, set by <code>ADERA_ENV=dev|prod</code> (default dev); the dev deployment is DEV, the prod deployment is PROD, and they never co-exist. Staff can store allowed addresses and register keys for both, but only the one that matches the deployment is active: a key of the other environment is refused with <code>403 wrong_environment</code>. <code>DEV</code>: works for any app that is not KILLED; the dev providers (console SMS, Mailpit, fake push) are the sandbox, and the synthetic users <code>u_p_test_*</code> (<code>u_p_test_unreachable</code>, <code>u_p_test_muted</code>) are simulated, nothing sent. <code>PROD</code>: the app status must be LIVE; synthetic users are refused (<code>422 synthetic_user_not_allowed</code>). Each environment has its own keys, allowed addresses and usage counters. This is separate from the app status above.</p>
+
+<h3 id="status-key">Partner key states</h3>
+<div class="table-wrap"><table>
+<thead><tr><th>State</th><th>Meaning</th></tr></thead>
+<tbody>
+<tr><td><code>ACTIVE</code></td><td>Stored status. Usable unless <code>expires_at</code> has passed.</td></tr>
+<tr><td>(expired)</td><td>Not a stored status: <code>ACTIVE</code> with a past <code>expires_at</code>. Calls fail with <code>key_revoked_or_expired</code>.</td></tr>
+<tr><td><code>REVOKED</code></td><td>Revoked by staff (<code>revoked_at</code> set). Irreversible; register a new key. Calls fail with <code>key_revoked_or_expired</code> within about 15 s.</td></tr>
+</tbody></table></div>
+<p>Key ids look like <code>ak_dev_&lt;24 hex&gt;</code> / <code>ak_prod_&lt;24 hex&gt;</code> (keys made before the rename keep <code>ak_test_</code> / <code>ak_live_</code>); the algorithm is <code>RS256</code>; at most 5 ACTIVE keys per app and environment.</p>
+
+<h3 id="status-roles">Staff roles and status</h3>
+<div class="table-wrap"><table>
+<thead><tr><th>Role</th><th>Rank</th><th>May do</th></tr></thead>
+<tbody>
+<tr><td><code>VIEWER</code></td><td>1</td><td>Read apps, reviews, reports, templates, delivery log, usage; <code>GET /admin/api/v1/me</code></td></tr>
+<tr><td><code>ADMIN</code></td><td>2</td><td>Everything a viewer can, plus change apps, capabilities, limits, addresses, payment settings, keys, templates, moderate reviews and reports, read the audit log</td></tr>
+<tr><td><code>SUPER_ADMIN</code></td><td>3</td><td>Everything, plus manage staff, and revive a KILLED app</td></tr>
+</tbody></table></div>
+<p>Staff status: <code>ACTIVE</code> or <code>DISABLED</code> (disabling clears the Kratos role and revokes all sessions). A higher rank includes everything below it. All staff calls also need an aal2 session while <code>ADMIN_REQUIRE_AAL2</code> is true.</p>
+
+<h3 id="status-other">Other enumerations</h3>
+<div class="table-wrap"><table>
+<thead><tr><th>Thing</th><th>Values</th></tr></thead>
+<tbody>
+<tr><td>Template <code>kind</code></td><td><code>DIRECT</code> (SMS, else email) | <code>IN_APP</code> (inbox + push). The partner never picks the channel.</td></tr>
+<tr><td>Template <code>category</code></td><td><code>TRANSACTIONAL</code> | <code>REMINDER</code> | <code>PROMOTIONAL</code></td></tr>
+<tr><td>Template usability</td><td><code>active</code> flag, optional <code>validFrom</code> and <code>expiresAt</code>; reasons <code>template_inactive</code>, <code>template_not_yet_valid</code>, <code>template_expired</code>. Content languages <code>en</code>, <code>am</code>, <code>om</code>; text keys <code>title</code>, <code>body</code>, <code>sms</code>, <code>emailSubject</code>, <code>emailHtml</code>. The version number rises when content or params change.</td></tr>
+<tr><td>App capability state</td><td><code>GRANTED</code> | <code>DENIED</code> | <code>SUSPENDED</code></td></tr>
+<tr><td>Notification limit channel</td><td><code>SMS</code> | <code>EMAIL</code> | <code>IN_APP</code></td></tr>
+<tr><td>Payment currencies</td><td><code>ETB</code>, <code>USD</code></td></tr>
+<tr><td>Markets</td><td><code>ET</code>, <code>US</code> (app markets default <code>["ET"]</code>; a user's market defaults to <code>ET</code>, <code>US</code> if the phone starts with <code>+1</code>)</td></tr>
+<tr><td>Languages</td><td><code>am</code>, <code>en</code>, <code>om</code></td></tr>
+<tr><td>Review status</td><td><code>VISIBLE</code> | <code>HIDDEN</code> (hidden reviews do not count toward the rating)</td></tr>
+<tr><td>Report status / reasons</td><td>status <code>OPEN</code> | <code>REVIEWED</code> | <code>DISMISSED</code>; reasons <code>SPAM</code>, <code>SCAM</code>, <code>INAPPROPRIATE</code>, <code>BROKEN</code>, <code>OTHER</code></td></tr>
+<tr><td>User <code>status</code></td><td><code>ACTIVE</code> | <code>SUSPENDED</code> | <code>DELETED</code>. Only ACTIVE users (with <code>deleted_at</code> null) are reachable for partners. No endpoint sets SUSPENDED or DELETED yet.</td></tr>
+<tr><td>User <code>verification_tier</code></td><td><code>CONTACT</code> (code sent to phone/email, the default) | <code>ID</code> (identity document checked) | <code>PROVIDER</code> (a service provider). Only CONTACT is ever set today.</td></tr>
+<tr><td>User <code>gender</code></td><td><code>MALE</code>, <code>FEMALE</code>, <code>OTHER</code>, <code>PREFER_NOT_TO_SAY</code></td></tr>
+<tr><td>Device <code>platform</code></td><td><code>ANDROID</code>, <code>IOS</code>, <code>WEB</code></td></tr>
+<tr><td>Mute switches (per user per app)</td><td><code>muteInApp</code>, <code>muteSms</code>, <code>muteEmail</code> (all default false)</td></tr>
+<tr><td>Session assurance</td><td><code>aal1</code> (one factor: emailed code) | <code>aal2</code> (plus authenticator app)</td></tr>
+<tr><td>Delivery modes</td><td>SMS <code>console</code> | <code>twilio</code>; email <code>mailpit</code> | <code>resend</code>; push <code>fake</code> | <code>firebase</code></td></tr>
+</tbody></table></div>
+
+<!-- ============================================================= -->
+<h2 id="error-codes">Error-code index</h2>
+<p>Application errors are <code>{"error": "&lt;code&gt;", ...details}</code>. This index was built from the exception handlers and every throw site in the three services. Statuses returned by the gateway itself (429, 403 for blocked admin, 503 from forward-auth) and by Kratos are listed at the end. Examples with real bodies are in the endpoint reference.</p>
+
+<h3 id="errors-common">Cross-cutting (several services)</h3>
+<div class="table-wrap"><table>
+<thead><tr><th>Code</th><th>HTTP</th><th>Service</th><th>When</th></tr></thead>
+<tbody>
+<tr><td><code>account_suspended</code></td><td>403</td><td>user (gateway verify)</td><td>The user is SUSPENDED by staff: any <code>/api/v1/me*</code> call is refused at the gateway, also with a fresh session. Reversed by staff.</td></tr>
+<tr><td><code>account_deleted</code></td><td>403</td><td>user (gateway verify)</td><td>The user was marked DELETED by staff (final).</td></tr>
+<tr><td><code>user_deleted</code></td><td>409</td><td>user (staff API)</td><td>Staff tried to change the status of a DELETED user.</td></tr>
+<tr><td><code>audit_unavailable</code></td><td>503</td><td>user (staff API)</td><td>The audit entry for a user status change could not be written; the change was rolled back.</td></tr>
+<tr><td><code>unauthorized</code></td><td>401</td><td>all three</td><td>A trust filter rejected the call: missing/wrong <code>X-Gateway-Secret</code> or <code>X-Internal-Secret</code>, or missing/invalid <code>X-User-Id</code> / <code>X-Staff-Id</code> / <code>X-Staff-Role</code>. Also a missing required header in registry and notification handlers. In normal use this means someone bypassed the gateway.</td></tr>
+<tr><td><code>validation_failed</code></td><td>400</td><td>user, registry, notification (partner/admin)</td><td>Well-formed JSON with unacceptable content; <code>fields</code> maps each field name to a message (all problems reported at once).</td></tr>
+<tr><td><code>invalid_json</code></td><td>400</td><td>user-service</td><td>The body is not parseable JSON.</td></tr>
+<tr><td><code>invalid_request</code></td><td>400</td><td>registry, notification (partner/admin)</td><td>Unreadable body, wrong type for a path/query parameter (for example a non-UUID id), or a binding problem.</td></tr>
+<tr><td><code>not_found</code></td><td>404</td><td>all three</td><td>Unknown id, or not yours (registry: app, key, review, report, staff; user: profile/identity/alias/user; notification: notification, template, inbox item).</td></tr>
+<tr><td><code>file_too_large</code></td><td>413</td><td>user, registry</td><td>Avatar over 5 MiB (user-service) or logo over 2 MiB (registry-service), or the multipart limits.</td></tr>
+<tr><td><code>conflict</code></td><td>409</td><td>user, registry</td><td>A database uniqueness violation not covered by a specific code (for example another account already owns this email or phone).</td></tr>
+<tr><td><code>identity_service_unavailable</code></td><td>503</td><td>user, registry</td><td>Kratos could not be reached or answered 5xx. Deliberately 503, not 401: the session may be fine.</td></tr>
+<tr><td><code>service_unavailable</code></td><td>503</td><td>notification</td><td>registry-service or user-service could not be reached; partners should retry later.</td></tr>
+</tbody></table></div>
+
+<h3 id="errors-user">user-service</h3>
+<div class="table-wrap"><table>
+<thead><tr><th>Code</th><th>HTTP</th><th>When</th></tr></thead>
+<tbody>
+<tr><td><code>validation_failed</code></td><td>400</td><td>Profile patch (unknown field, bad gender/language/market/timezone/date, name too long, <code>extra</code> not an object or too large), location (bad country code, one coordinate only, nothing given), avatar (no file, unsupported or corrupt image, dimensions too large), device (blank token, missing platform, over-long field, remove with neither token nor installation id), mute preferences (unknown field, non-boolean), logout without a bearer token (<code>fields.Authorization</code>).</td></tr>
+<tr><td>(empty body)</td><td>401</td><td><code>GET /internal/auth/verify</code> (called by the gateway) for a missing or invalid session. No JSON body by design.</td></tr>
+<tr><td><code>not_found</code></td><td>404</td><td>Kratos has no such identity (<code>GET /me</code> for a valid-looking id), unknown alias, unknown user in <code>delivery-context</code>.</td></tr>
+</tbody></table></div>
+
+<h3 id="errors-registry">registry-service</h3>
+<div class="table-wrap"><table>
+<thead><tr><th>Code</th><th>HTTP</th><th>When</th></tr></thead>
+<tbody>
+<tr><td><code>insufficient_role</code></td><td>403</td><td>The staff role is too low for the action (for example a VIEWER changing anything; only SUPER_ADMIN manages staff).</td></tr>
+<tr><td><code>not_staff</code></td><td>403</td><td>(from <code>/internal/staff/verify</code>, visible to the client through the gateway) a valid session whose identity has no role, is not in <code>staff</code>, or is <code>DISABLED</code>. Customers get this.</td></tr>
+<tr><td><code>mfa_required</code></td><td>403</td><td>(forward-auth) the session is not aal2: either Kratos refused whoami because an authenticator app is enrolled but not used in this session, or the session is aal1 while <code>ADMIN_REQUIRE_AAL2</code> is true.</td></tr>
+<tr><td><code>only_super_admin_can_revive_killed_app</code></td><td>403</td><td>Setting a KILLED app to any other status as ADMIN.</td></tr>
+<tr><td><code>slug_taken</code></td><td>409</td><td>Creating an app whose slug exists.</td></tr>
+<tr><td><code>not_ready_for_live</code></td><td>409</td><td>Setting LIVE without a logo and/or <code>supportEmail</code>; <code>missing</code> lists them, comma separated.</td></tr>
+<tr><td><code>too_many_active_keys</code></td><td>409</td><td>Registering or generating a sixth ACTIVE key in an environment; <code>max</code> is 5.</td></tr>
+<tr><td><code>cannot_demote_self</code></td><td>409</td><td>A super admin lowering or disabling themselves.</td></tr>
+<tr><td><code>last_super_admin</code></td><td>409</td><td>Removing or disabling the last active super admin.</td></tr>
+<tr><td><code>validation_failed</code></td><td>400</td><td>App fields (slug format, English name required, brand colour <code>#RRGGBB</code>, markets, categories, languages, priority 0 to 100000, URLs https, <code>extra</code> size), capability (unknown key, bad state, missing or short English reason), limits (not whole numbers &gt;= 0 or null), environment (bad name, bad CIDR, more than 50, <code>/0</code> on PROD), payment settings (currencies, min greater than max), keys (private key sent, not PEM, under 2048 bits, expiry in the past, label over 100), logo file problems, review rating not 1 to 5, report reason, status values, staff email/role/status.</td></tr>
+<tr><td><code>identity_service_unavailable</code></td><td>503</td><td>Also when creating/updating a staff identity in Kratos fails (including Kratos rejecting a duplicate), not only when it is down.</td></tr>
+</tbody></table></div>
+
+<h3 id="errors-notification-courier">notification-service: Kratos courier and dev endpoints</h3>
+<div class="table-wrap"><table>
+<thead><tr><th>Code</th><th>HTTP</th><th>When</th></tr></thead>
+<tbody>
+<tr><td><code>delivery_failed</code> (with <code>code</code>)</td><td>502</td><td>The provider failed: <code>twilio_http_&lt;status&gt;</code>, <code>twilio_unreachable</code>, <code>resend_http_&lt;status&gt;</code>, <code>resend_unreachable</code>, <code>mailpit_unreachable</code>. 502 on purpose, so Kratos keeps the message and retries.</td></tr>
+<tr><td>Spring default body <code>{"timestamp","status":400,"error":"Bad Request","path"}</code></td><td>400</td><td>A courier request body that fails validation (<code>to</code>/<code>body</code> or <code>recipient</code>/<code>subject</code> blank). Verified 2026-10-25 against the running service. This is the one place that does not use the <code>{"error": code}</code> shape (no handler for bean-validation failures on this path).</td></tr>
+<tr><td><code>invalid_request</code></td><td>400</td><td>The courier body is not valid JSON.</td></tr>
+<tr><td>200 with <code>status</code> <code>suppressed</code> / <code>skipped</code></td><td>200</td><td>Not an error: per-recipient limit reached, or recipient not on the live allowlist. Kratos must not retry.</td></tr>
+</tbody></table></div>
+
+<h3 id="errors-partner">notification-service: partner API (<code>/v1/*</code>)</h3>
+<div class="table-wrap"><table>
+<thead><tr><th>Code</th><th>HTTP</th><th>When</th></tr></thead>
+<tbody>
+<tr><td><code>request_too_large</code></td><td>413</td><td>Body over 64 KiB.</td></tr>
+<tr><td><code>missing_signature</code></td><td>401</td><td>One of <code>X-Adera-Key-Id</code>, <code>X-Adera-Timestamp</code>, <code>X-Adera-Signature</code> absent or blank.</td></tr>
+<tr><td><code>invalid_timestamp</code></td><td>401</td><td>Timestamp is not an integer.</td></tr>
+<tr><td><code>stale_timestamp</code></td><td>401</td><td>Timestamp more than <code>PARTNER_MAX_SKEW_MINUTES</code> (5) from our clock.</td></tr>
+<tr><td><code>unknown_key</code></td><td>401</td><td>Registry has no such key id.</td></tr>
+<tr><td><code>key_revoked_or_expired</code></td><td>401</td><td>Key REVOKED or past <code>expires_at</code>.</td></tr>
+<tr><td><code>invalid_signature</code></td><td>401</td><td>Signature does not verify over the canonical string (wrong method/path/query/body/timestamp, or wrong private key).</td></tr>
+<tr><td><code>unknown_app</code></td><td>401</td><td>The key's app no longer exists in the registry.</td></tr>
+<tr><td><code>app_draft</code>, <code>app_paused</code>, <code>app_killed</code> (fallback <code>app_not_active</code>)</td><td>403</td><td>App status does not allow calls (see app status table: DEV works unless KILLED, PROD needs LIVE).</td></tr>
+<tr><td><code>ip_not_allowed</code></td><td>403</td><td>Caller address not inside the app's allowed CIDRs for this environment (new apps start with an empty list, so nothing can call).</td></tr>
+<tr><td><code>capability_not_granted</code> (with <code>capability</code>)</td><td>403</td><td>Template needs a channel whose <code>notify.*</code> capability is not GRANTED.</td></tr>
+<tr><td><code>validation_failed</code> (with <code>fields</code>)</td><td>400</td><td>Unknown field; bad <code>externalId</code>, <code>userId</code>, <code>templateId</code>, <code>params</code>, <code>data</code>, <code>callbackUrl</code>, <code>ttlSeconds</code>.</td></tr>
+<tr><td><code>invalid_request</code></td><td>400</td><td>Body is not a JSON object.</td></tr>
+<tr><td><code>not_found</code></td><td>404</td><td><code>GET /v1/notifications/{externalId}</code> with an unknown id (for this app and environment).</td></tr>
+<tr><td><code>template_not_found</code></td><td>404</td><td>Template id unknown or belongs to another app.</td></tr>
+<tr><td><code>external_id_reused</code></td><td>409</td><td>Same <code>externalId</code> with a different request (the request hash differs). The same request again is a 200 replay.</td></tr>
+<tr><td><code>wrong_environment</code></td><td>403</td><td>The key belongs to the other environment than this deployment (DEV key on a PROD deployment or the reverse); checked after the signature verifies. The registry's internal context endpoint gives the same code when asked for the other environment.</td></tr>
+<tr><td><code>synthetic_user_not_allowed</code></td><td>422</td><td>A <code>u_p_test_*</code> user on a PROD deployment (synthetic users exist in DEV only).</td></tr>
+<tr><td><code>user_unreachable</code></td><td>422</td><td>Alias unknown, user deleted or suspended, or no usable channel (all look the same on purpose).</td></tr>
+<tr><td><code>template_inactive</code>, <code>template_not_yet_valid</code>, <code>template_expired</code></td><td>422</td><td>Template switched off, before <code>validFrom</code>, or past <code>expiresAt</code>.</td></tr>
+<tr><td><code>param_invalid</code> (with <code>fields</code>)</td><td>422</td><td>Value not declared, missing required, too long, control characters, link-like text where links are not allowed, or wrong type.</td></tr>
+<tr><td><code>quota_exceeded</code> (with <code>limit</code>, <code>channel</code>)</td><td>429</td><td><code>max_per_user_per_day</code>, <code>max_per_day</code>, <code>max_distinct_users_per_day</code> or <code>max_total</code>.</td></tr>
+<tr><td><code>service_unavailable</code></td><td>503</td><td>Registry or user-service unreachable; retry.</td></tr>
+</tbody></table></div>
+<p>Not errors: 202 <code>QUEUED</code> accepted; 200 with <code>"replayed": true</code>; 200 with status <code>SUPPRESSED</code> (the user muted the app, not revealed as an error).</p>
+<p><strong>Doc vs code:</strong> <code>docs/PARTNER_API.md</code> does not list <code>invalid_timestamp</code>, <code>unknown_app</code>, <code>request_too_large</code>, <code>template_not_yet_valid</code>, the exact 403 codes <code>app_draft|app_paused|app_killed</code> (it says "app not active in this environment"), or <code>template_not_found</code> (it says "404 template not yours / unknown").</p>
+
+<h3 id="errors-notification-admin">notification-service: staff and inbox</h3>
+<div class="table-wrap"><table>
+<thead><tr><th>Code</th><th>HTTP</th><th>When</th></tr></thead>
+<tbody>
+<tr><td><code>unauthorized</code></td><td>401</td><td>Gateway secret missing/wrong, or <code>X-Staff-Id</code>/<code>X-Staff-Role</code> (admin) or <code>X-User-Id</code> (inbox) missing/invalid.</td></tr>
+<tr><td><code>insufficient_role</code></td><td>403</td><td>VIEWER creating or editing a template.</td></tr>
+<tr><td><code>template_code_taken</code></td><td>409</td><td>A template with this <code>code</code> already exists for the app.</td></tr>
+<tr><td><code>validation_failed</code></td><td>400</td><td>Template fields: unknown/immutable field (<code>code</code>, <code>kind</code>, <code>appId</code> cannot change), bad code format, kind, category, params, content (unsupported language, unknown text key, too long, undeclared <code>{placeholder}</code>, missing English body, IN_APP without English title), dates, unknown <code>appId</code> (<code>no such mini app</code>).</td></tr>
+<tr><td><code>not_found</code></td><td>404</td><td>Template, notification, or inbox item not found (an inbox item that is not yours is also 404).</td></tr>
+</tbody></table></div>
+
+<h3 id="errors-gateway">Gateway and Kratos statuses seen by clients</h3>
+<div class="table-wrap"><table>
+<thead><tr><th>Status</th><th>Source</th><th>When</th></tr></thead>
+<tbody>
+<tr><td>429</td><td>APISIX <code>limit-count</code></td><td>Per-client-IP limit exceeded on a route (see limits table above). The counters live in Redis.</td></tr>
+<tr><td>403 <code>{"error":"forbidden"}</code></td><td>APISIX <code>mocking</code></td><td>Any <code>/kratos/admin/*</code> path.</td></tr>
+<tr><td>503</td><td>APISIX <code>forward-auth</code></td><td>The auth service (user-service or registry-service) could not be reached, or Kratos was down (<code>status_on_error: 503</code>).</td></tr>
+<tr><td>401 / 403</td><td>forward-auth upstream</td><td>The verify endpoint's answer is returned to the client as is: 401 for no/invalid session, and for staff routes 403 <code>not_staff</code> or <code>mfa_required</code>.</td></tr>
+<tr><td>Kratos flow errors (400, 403, 404, 410, 422)</td><td>Ory Kratos</td><td>Flow expired (410), invalid code or number (400 with UI messages), no such account at login, aal2 required (403). See <a href="08e-kratos-flows.html">Kratos flows</a> and the spec <code>docs/kratos-openapi-v26.2.0.json</code>.</td></tr>
+</tbody></table></div>
+
+<!-- ============================================================= -->
+<h2 id="glossary">Glossary of terms</h2>
+<dl class="meta">
+<dt>aal1 / aal2</dt><dd>Kratos "authenticator assurance level". aal1 = one factor (an emailed or texted code). aal2 = a second factor too (authenticator-app code, TOTP). Staff need aal2.</dd>
+<dt>Alias (pseudonymous id)</dt><dd><code>u_p_&lt;32 hex&gt;</code>: the id a partner sees for a user. Different for every app, derived with HMAC from a server secret, resolvable only through our table. See <a href="06-security.html#aliases">Security</a>.</dd>
+<dt>Allowed addresses / CIDR</dt><dd>The server IPs or ranges (per environment, DEV or PROD) a partner may call from. A request from elsewhere is <code>ip_not_allowed</code>.</dd>
+<dt>APISIX</dt><dd>The API gateway; the app's only entry point (port 9080).</dd>
+<dt>Audit event</dt><dd>An append-only record of a staff change in <code>registry.audit_event</code>.</dd>
+<dt>Callback</dt><dd>A signed HTTP POST from us to the partner's <code>callbackUrl</code> when a notification reaches a final status.</dd>
+<dt>Capability</dt><dd>A permission staff can grant an app (read user name, send SMS, ...). See the catalog above.</dd>
+<dt>Courier (Kratos)</dt><dd>Kratos' component that sends messages. Here it posts to notification-service instead of sending itself.</dd>
+<dt>Delivery context</dt><dd>What notification-service learns from user-service about one user for one app: reachable?, language, phone, email, push tokens, mute switches.</dd>
+<dt>Dev mode / real mode</dt><dd>Dev: SMS to the console log, email to Mailpit, fake push, dev endpoints on. Real: Twilio, Resend, Firebase. See <a href="02-setup.html#delivery-modes">delivery modes</a>.</dd>
+<dt>externalId</dt><dd>The partner's own unique id for a notification: idempotency key and lookup reference.</dd>
+<dt>Forward-auth</dt><dd>An APISIX plugin that asks another service "may this request pass?" before forwarding. The answer's headers (<code>X-User-Id</code>, <code>X-Staff-Id</code>, <code>X-Staff-Role</code>) are copied onto the forwarded request.</dd>
+<dt>Gateway secret (<code>X-Gateway-Secret</code>)</dt><dd>Shared secret proving a request came through APISIX. Services reject <code>/api</code> and <code>/admin/api</code> calls without it.</dd>
+<dt>Idempotency-Key (callback)</dt><dd>The callback row id, sent as a header so the partner can de-duplicate retries.</dd>
+<dt>Infisical</dt><dd>Self-hosted secrets manager holding API keys (Twilio, Resend, our signing key).</dd>
+<dt>Internal secret (<code>X-Internal-Secret</code>)</dt><dd>Shared secret for service-to-service calls (<code>/internal/**</code>). The gateway never routes those paths.</dd>
+<dt>JWKS</dt><dd>JSON Web Key Set at <code>/.well-known/jwks.json</code>: our public signing key, so partners can verify responses and callbacks.</dd>
+<dt>Kratos identity id = user id</dt><dd>The Ory Kratos identity UUID is used as the user id everywhere (user-service <code>app_user.id</code>, staff <code>identity_id</code>).</dd>
+<dt>Mini app</dt><dd>A partner service shown inside the Adera super app, registered in registry-service.</dd>
+<dt>Mute</dt><dd>A user's per-app choice to stop in-app, SMS or email messages. Partners are never told; the notification is simply SUPPRESSED.</dd>
+<dt>RS256 / ADERA-SIG-1</dt><dd>RSA signature with SHA-256 over our canonical string. The signing scheme for partner requests, responses and callbacks.</dd>
+<dt>Environment (DEV / PROD)</dt><dd>What a deployment is (<code>ADERA_ENV</code>); keys and allowed addresses are stored per environment but only the deployment's own is active. See environments above.</dd>
+<dt>Session token</dt><dd>The Kratos session token the native app sends as <code>Authorization: Bearer ...</code>; valid 30 days.</dd>
+<dt>SSRF guard</dt><dd><code>UrlGuard</code>: stops a partner-supplied callback URL from reaching our internal network.</dd>
+<dt>Template</dt><dd>An admin-approved message with declared values; partners cannot send free text.</dd>
+<dt>TOTP</dt><dd>Time-based one-time password from an authenticator app (6 digits, 30 s window). Kratos refuses to accept the same code twice.</dd>
+<dt>Verification tier</dt><dd>How strongly a user is verified: CONTACT, ID, PROVIDER.</dd>
+<dt>Webhook (registration)</dt><dd>Kratos' non-blocking call to user-service after sign-up, creating the profile row.</dd>
+</dl>
+
+<!-- ============================================================= -->
+<h2 id="not-built">Not built yet, and changelog</h2>
+<h3 id="not-built-list">Not built yet</h3>
+<p>Verified against the code on 2026-10-25 (sources: <code>docs/SETUP.md</code> sections 12 and 13, the notes kept with the project, and a read of the services).</p>
+<div class="table-wrap"><table>
+<thead><tr><th>Item</th><th>State</th><th>Detail</th></tr></thead>
+<tbody>
+<tr><td>React/Refine dashboard</td><td><span class="badge built">built</span></td><td>The backoffice at <code>/backoffice/</code> (<a href="11-backoffice.html">11</a>, operator's manual <a href="12-backoffice-guide.html">12</a>). Known gaps are listed in <a href="12-backoffice-guide.html#cannot">12, section 7</a>.</td></tr>
+<tr><td>Frontend bridge and per-user consent</td><td><span class="badge notyet">not built</span></td><td>Capabilities are only an admin gate; nothing mints aliases for users yet (the internal <code>POST /internal/aliases</code> has no public caller) and nothing reads capabilities for user data.</td></tr>
+<tr><td>Payments</td><td><span class="badge notyet">not built</span></td><td>Only <code>pay.request</code> and payment settings are stored.</td></tr>
+<tr><td>Real push (FCM)</td><td><span class="badge partial">code done, not enabled</span></td><td><code>FirebaseFcmProvider</code> exists; needs an Adera Firebase service account in Infisical (<code>FIREBASE_SERVICE_ACCOUNT_B64</code>) and <code>FCM_PROVIDER=firebase</code>. Today <code>fake</code>.</td></tr>
+<tr><td>Real SMS / email sending</td><td><span class="badge partial">built, untested live</span></td><td>Twilio and Resend are implemented and tested against mocked HTTP; the real-mode startup was verified; one real email was delivered; no real SMS yet. Twilio US sender to Ethiopia failed (error 21612); an Ethiopian route is unresolved.</td></tr>
+<tr><td>RabbitMQ events</td><td><span class="badge notyet">not used</span></td><td>Broker, vhost <code>adera</code> and two users exist; no service connects. Planned: <code>user.created</code>, <code>device.registered</code>, <code>device.removed</code>. Permissions are wide (<code>.*</code>) and should be narrowed.</td></tr>
+<tr><td>Anti-enumeration "continue" endpoint</td><td><span class="badge notyet">not built</span></td><td>Kratos answers differently for known and unknown identifiers at login.</td></tr>
+<tr><td>Account linking</td><td><span class="badge notyet">not built</span></td><td>Phone and email logins are separate identities and separate <code>app_user</code> rows.</td></tr>
+<tr><td>Account deletion</td><td><span class="badge notyet">not built</span></td><td>Must delete the Kratos identity, anonymise the profile, delete avatar files and device tokens (store requirement). Staff can set the user status <code>DELETED</code> in the backoffice, which blocks the account and partner delivery, but nothing is erased and the Kratos identity stays.</td></tr>
+<tr><td>Auth on <code>/internal/kratos/*</code> (notification-service), <code>/internal/kratos/after-registration</code> (user-service), <code>/dev/messages</code>, actuator</td><td><span class="badge notyet">not built</span></td><td>Protected only by network placement. Add a shared-secret header where Kratos allows it.</td></tr>
+<tr><td>Bucket-scoped RustFS key</td><td><span class="badge notyet">not built</span></td><td>user-service and registry-service use the admin keys.</td></tr>
+<tr><td>Avatar formats HEIC/WebP; malware/NSFW scanning</td><td><span class="badge notyet">not built</span></td><td>The app should convert to JPEG before upload.</td></tr>
+<tr><td>Production deployment</td><td><span class="badge notyet">deferred</span></td><td>HTTPS proxy, real client IP for rate limits, public Kratos/RustFS URLs, Infisical migration/backups, trace sampling, Postgres/Redis exporters, narrowing RabbitMQ, Universal Auth for Infisical. Checklist in <code>docs/SETUP.md</code> section 12.</td></tr>
+<tr><td>Delivery-status tracking for Kratos messages (provider receipts)</td><td><span class="badge notyet">declined</span></td><td>Explicitly declined for now.</td></tr>
+</tbody></table></div>
+
+<h3 id="changelog">Changelog</h3>
+<p>There is no git history in the repository, so dates below come from file modification times and the project notes, and are approximate to the day.</p>
+<div class="table-wrap"><table>
+<thead><tr><th>Date</th><th>Milestone</th></tr></thead>
+<tbody>
+<tr><td>2026-10-24 to 2026-10-25</td><td>Infrastructure steps: Postgres with per-service logins (<code>init-databases.sh</code>), Redis with ACL users and noeviction, RabbitMQ with vhost <code>adera</code>, Mailpit, self-hosted Infisical.</td></tr>
+<tr><td>2026-10-25 (early hours)</td><td>Ory Kratos (passwordless email/phone one-time code, 30-day sessions), APISIX gateway in standalone mode, Prometheus and Grafana, Loki + Alloy, Tempo + OTel Collector (<code>infra/*</code> last changed 00:09 to 00:47). Kratos OpenAPI spec saved to <code>docs/</code>.</td></tr>
+<tr><td>2026-10-25</td><td><code>notification-service</code> v1: Kratos HTTP courier, console/Twilio SMS, Mailpit/Resend email, send log, rate limits, Infisical loader, startup safety check (migration <code>V1__send_log.sql</code>). First real email delivered; Twilio US to Ethiopia failed.</td></tr>
+<tr><td>2026-10-25</td><td>RustFS (S3-compatible storage, bucket <code>adera-media</code>) and <code>user-service</code> v1: profile, location, <code>extra</code> JSON, avatar, devices and FCM tokens, Kratos webhook and gateway verify (<code>V1__users_and_devices.sql</code>); <code>tests/e2e/journey.py</code> (29 checks).</td></tr>
+<tr><td>2026-10-25</td><td><code>registry-service</code> (mini apps, capabilities, limits, allowed addresses, partner keys, staff roles with email code + TOTP, reviews, reports, audit; <code>V1__registry.sql</code>); <code>user-service</code> aliases and mute preferences (<code>V2__aliases_and_preferences.sql</code>); partner notification platform inside <code>notification-service</code> (<code>V2__partner_platform.sql</code>): RSA-signed <code>/v1</code> API, admin-approved templates, workers with retries, signed callbacks, quotas, inbox; <code>tests/e2e/staff.py</code> and <code>partner.py</code> (38 checks); 48/54/50 automated tests.</td></tr>
+<tr><td>2026-10-25</td><td>HTML documentation written under <code>docs/</code> (this site).</td></tr>
+<tr><td>2026-10-25</td><td>Backoffice (<code>backoffice/</code>, React + Refine + Ant Design, served at <code>/backoffice/</code>) and the staff endpoints it needed: dashboard counts, users (list, search, detail, status; user-service), cross-app notification and review lists, notification stats, audit filters; gateway routes <code>admin-users</code>, <code>backoffice-static</code>, <code>backoffice-health</code>; the gateway removes <code>Origin</code> from Kratos submits so browsers can use the native login flow. See <a href="11-backoffice.html">section 11</a>.</td></tr>
+<tr><td>2026-10-25</td><td>Backoffice guide: <a href="12-backoffice-guide.html">section 12</a>, a staff operator's manual written from the code (roles and masking, sign-in with troubleshooting, every screen and field, mini-app lifecycle tutorial, "why didn't my notification arrive?", recipes, current limits). Test counts at that date: notification-service 50, registry-service 56, user-service 65 (from <code>target/surefire-reports</code>); backoffice 65 unit and 21 live smoke tests; <code>partner.py</code> 38, <code>journey.py</code> 29, <code>admin_users.py</code> 13 checks. Also corrected <a href="11-backoffice.html">section 11</a> where it differed from the code (status buttons, channels, filters, logo formats) and the stale "dashboard not built" row above.</td></tr>
+</tbody></table></div>
+
+<div class="pager"><a class="prev" href="09-guides.html"><small>Previous</small>9. Guides</a><a class="next" href="../index.html"><small>Back to</small>Home / contents</a></div>
+<p class="footer">Adera backend documentation &middot; last verified 2026-10-25 &middot; <a href="../index.html">contents</a></p>
+</main>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

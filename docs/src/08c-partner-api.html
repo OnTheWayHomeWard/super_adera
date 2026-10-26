@@ -1,0 +1,421 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>8c. Partner API | Adera docs</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+<button id="menu-btn" type="button" aria-label="Toggle menu">Menu</button>
+<a class="brand" href="../index.html">Adera docs</a>
+<span class="spacer"></span>
+<a href="../index.html">Contents</a>
+<button id="theme-btn" type="button" aria-label="Toggle light or dark theme">Theme</button>
+</header>
+<div class="layout">
+<nav class="sidebar" aria-label="Sections">
+<ul><li><a href="../index.html" class="">Home / contents</a></li></ul>
+<h4>Sections</h4><ul>
+<li><a href="01-overview.html">1. Overview</a>
+</li>
+<li><a href="02-setup.html">2. Setup and running</a>
+</li>
+<li><a href="03-tools.html">3. Tools</a>
+</li>
+<li><a href="04-services.html">4. Services</a>
+</li>
+<li><a href="05-communication.html">5. How it communicates</a>
+</li>
+<li><a href="06-security.html">6. Security model</a>
+</li>
+<li><a href="07-data.html">7. Data</a>
+</li>
+<li><a href="08-endpoints.html">8. Endpoint reference</a>
+</li>
+<li><a href="09-guides.html">9. Guides</a>
+</li>
+<li><a href="10-reference.html">10. Reference</a>
+</li>
+<li><a href="11-backoffice.html">11. Backoffice (staff dashboard)</a>
+</li>
+<li><a href="12-backoffice-guide.html">12. Backoffice guide (staff manual)</a>
+</li>
+<li><a href="13-sample-data.html">13. Sample data (test scenarios)</a>
+</li>
+</ul>
+<h4>Endpoints</h4><ul>
+<li><a href="08a-user-api.html">8a. End-user API</a>
+</li>
+<li><a href="08b-staff-api.html">8b. Staff / dashboard API</a>
+</li>
+<li><a href="08c-partner-api.html" class=current>8c. Partner API</a>
+<ul><li><a href="#how-it-works">How the partner API works</a></li><li><a href="#templates">Templates</a></li><li><a href="#notifications">Notifications</a></li><li><a href="#callback">The callback Adera sends you</a></li><li><a href="#statuses">Notification statuses</a></li></ul>
+</li>
+<li><a href="08d-internal-api.html">8d. Internal API</a>
+</li>
+<li><a href="08e-kratos-flows.html">8e. Kratos flows</a>
+</li>
+<li><a href="08f-operational.html">8f. Operational endpoints</a>
+</li>
+</ul>
+</nav>
+<main>
+<h1>8c. Partner API</h1>
+<p class="lead">How a mini app's server sends notifications to Adera users and reads the result: four signed endpoints, the signed callback Adera sends back, the statuses, and every error.</p>
+
+<section>
+<h2 id="how-it-works">How the partner API works</h2>
+<ul>
+<li><strong>Base URL:</strong> <code>$BASE</code> = <code>http://127.0.0.1:9080</code> in development; the real address will be the public API host.</li>
+<li><strong>Setup by staff first</strong> (<a href="08b-staff-api.html">staff API</a>): the app is created, granted <code>notify.sms</code> / <code>notify.email</code> / <code>notify.inapp</code>, given limits, your server addresses for the environment (DEV and PROD can both be filled in), your <em>public</em> key and its approved templates. You receive a <strong>key id</strong> and template ids. Guide: <a href="09-guides.html#register-app">register a mini app</a>.</li>
+<li><strong>Signing:</strong> sign every request with your private key (ADERA-SIG-1, RS256). Full rules, a worked example and runnable shell and Python code are in <a href="06-security.html#signing">Security</a>. In these examples <code>$KEY_ID</code>, <code>$TS</code> and <code>$SIG</code> are the three header values that code produces.</li>
+<li><strong>User ids:</strong> you address a user by their <em>pseudonymous id for your app</em> (<code>u_p_...</code>), never by phone or email. You never choose the channel: the template kind and the user's data decide.</li>
+<li><strong>Environments:</strong> every deployment is exactly one environment, DEV or PROD (<code>ADERA_ENV</code>). Use the DEV key against the dev deployment and the PROD key against the prod deployment; a key of the other environment gets <code>403 wrong_environment</code>. DEV works for any app that is not killed; PROD only while the app status is LIVE. There is no separate simulated sandbox: the dev deployment's providers (console SMS, Mailpit, fake push) are the sandbox. Only users named <code>u_p_test_&lt;anything&gt;</code> are synthetic and simulated in DEV (nothing sent; <code>u_p_test_unreachable</code> is <code>422 user_unreachable</code>, <code>u_p_test_muted</code> is <code>200 SUPPRESSED</code>); in PROD they are refused with <code>422 synthetic_user_not_allowed</code>.</li>
+<li><strong>Idempotency:</strong> <code>externalId</code> is your own unique id for the message. The same request again returns <code>200</code> with <code>"replayed": true</code>; the same id with different content is <code>409 external_id_reused</code>. Safe to retry after a timeout.</li>
+<li><strong>Delivery is asynchronous.</strong> <code>202 QUEUED</code> means accepted; the final result arrives by callback (or poll the status endpoint).</li>
+<li><strong>Error shape:</strong> <code>{"error":"&lt;code&gt;"}</code> plus details (<code>fields</code>, <code>limit</code>, <code>capability</code>).</li>
+</ul>
+<h3 id="common-errors">Errors every partner endpoint can return</h3>
+<div class="table-wrap"><table><thead><tr><th>Status</th><th><code>error</code></th><th>When it happens</th></tr></thead><tbody><tr><td>401</td><td><code>missing_signature</code></td><td>One of <code>X-Adera-Key-Id</code>, <code>X-Adera-Timestamp</code>, <code>X-Adera-Signature</code> is absent.</td></tr><tr><td>401</td><td><code>invalid_timestamp</code> / <code>stale_timestamp</code></td><td>Timestamp not an integer, or more than 5 minutes from our clock.</td></tr><tr><td>401</td><td><code>unknown_key</code> / <code>key_revoked_or_expired</code></td><td>No such key id; or the key was revoked or has expired.</td></tr><tr><td>401</td><td><code>invalid_signature</code></td><td>The signature does not verify: wrong key, or body, path or timestamp differ from what was signed.</td></tr><tr><td>403</td><td><code>wrong_environment</code></td><td>The key belongs to the other environment than this deployment (checked after the signature verifies).</td></tr><tr><td>403</td><td><code>app_draft</code> / <code>app_paused</code> / <code>app_killed</code></td><td>On a PROD deployment the app must be LIVE; on a DEV deployment any app that is not killed works.</td></tr><tr><td>403</td><td><code>ip_not_allowed</code></td><td>The caller's address is not in this environment's allowed list, or the list is empty.</td></tr><tr><td>413</td><td><code>request_too_large</code></td><td>Body over 64 KB.</td></tr><tr><td>429</td><td>(gateway body)</td><td>More than 600 requests in 60 s from this IP.</td></tr><tr><td>503</td><td><code>service_unavailable</code></td><td>A dependency (registry-service or user-service) is down; retry later.</td></tr></tbody></table></div><p>Real examples:</p><pre class="out nocopy"><code>No signature headers:
+HTTP 401  {"error": "missing_signature"}</code></pre>
+<pre class="out nocopy"><code>Body changed after signing:
+request body: {"externalId": "job-1002", "userId": "u_p_16cb43ded02e8b0474264dab14651897", "templateId": "a382808f-1175-4eb3-8129-dd61aa75634a", "params": {"name": "Abebe"}, "callbackUrl": "http://172.18.0.1:38593/adera/hook", "ttlSeconds": 3600, "data": {"jobId": "1001"}}
+HTTP 401  {"error": "invalid_signature"}</code></pre>
+<pre class="out nocopy"><code>Timestamp an hour old:
+request body: {"externalId": "job-1003", "userId": "u_p_16cb43ded02e8b0474264dab14651897", "templateId": "a382808f-1175-4eb3-8129-dd61aa75634a", "params": {"name": "Abebe"}, "callbackUrl": "http://172.18.0.1:38593/adera/hook", "ttlSeconds": 3600, "data": {"jobId": "1001"}}
+HTTP 401  {"error": "stale_timestamp"}</code></pre>
+<pre class="out nocopy"><code>Unknown key id:
+request body: {"externalId": "job-1004", "userId": "u_p_16cb43ded02e8b0474264dab14651897", "templateId": "a382808f-1175-4eb3-8129-dd61aa75634a", "params": {"name": "Abebe"}, "callbackUrl": "http://172.18.0.1:38593/adera/hook", "ttlSeconds": 3600, "data": {"jobId": "1001"}}
+HTTP 401  {"error": "unknown_key"}</code></pre>
+<pre class="out nocopy"><code>Revoked key:
+HTTP 401  {"error": "key_revoked_or_expired"}</code></pre>
+<pre class="out nocopy"><code>PROD key on a prod deployment while the app is PAUSED:
+HTTP 403  {"error": "app_paused"}</code></pre>
+<pre class="out nocopy"><code>PROD key on a dev deployment (or the reverse):
+HTTP 403  {"error": "wrong_environment"}</code></pre>
+<div class="callout warn"><span class="label">Caches</span><p>Adera caches key and app configuration for about 15 seconds. After staff change allowed addresses, capabilities, app status or revoke a key, expect up to 15 seconds before the partner API reflects it.</p></div>
+</section>
+
+<section><h2 id="templates">Templates</h2>
+<details class="endpoint" id="ep-partner-get-v1-templates"><summary><span class="method m-get">GET</span><span class="path">/v1/templates</span><span class="sum">List my templates</span></summary><div class="body">
+<dl class="meta"><dt>Audience</dt><dd>A mini app's server (partner)</dd><dt>Client path</dt><dd><code>/v1/templates</code> through the gateway</dd><dt>Internal path</dt><dd>same path on notification-service :8080</dd><dt>Auth</dt><dd><strong>No login.</strong> Headers <code>X-Adera-Key-Id</code>, <code>X-Adera-Timestamp</code>, <code>X-Adera-Signature</code> (ADERA-SIG-1, see <a href="06-security.html#signing">Security</a>), and the caller's IP must be on the app's allowed list for this deployment's environment (the key must belong to it).</dd><dt>Rate limit</dt><dd>600 per 60 s per client IP (gateway route <code>partner-api</code>), plus the per-app quotas</dd><dt>Answers are signed</dt><dd>Every response, errors included, carries <code>X-Adera-Key-Id</code>, <code>X-Adera-Timestamp</code>, <code>X-Adera-Signature</code> made with Adera's key (public key at <a href="08f-operational.html">/.well-known/jwks.json</a>).</dd><dt>Implemented in</dt><dd><code>services/notification-service/src/main/java/app/adera/notification/partner/template/PartnerTemplateController.java</code></dd></dl>
+<h4>Purpose</h4><p>The templates staff approved for your app, so you know what you may send, what values each needs and what each message looks like. Partners cannot create or edit templates.</p>
+<h4>Request parameters</h4><p>None.</p>
+<h4>Example request</h4><pre><code>curl -sS -i -X GET "$BASE/v1/templates" \
+  -H "X-Adera-Key-Id: $KEY_ID" \
+  -H "X-Adera-Timestamp: $TS" \
+  -H "X-Adera-Signature: $SIG"</code></pre>
+<h4>Example response</h4><pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+X-Request-Id: e277d99e-2c01-4574-ac93-cbc6b7a5b1c5
+X-Adera-Key-Id: adera-sig-202610
+X-Adera-Timestamp: 1792908443
+X-Adera-Signature: bqvGmfHMLXDVNC21fEot9nmM... (base64 RS256 signature)
+
+[
+  {
+    "id": "a382808f-1175-4eb3-8129-dd61aa75634a",
+    "appId": "41548c1e-b03e-412a-bbbe-1e46343505b9",
+    "code": "job-accepted",
+    "kind": "DIRECT",
+    "category": "TRANSACTIONAL",
+    "params": [
+      {
+        "name": "name",
+        "required": true,
+        "maxLength": 30,
+        "allowLinks": false
+      }
+    ],
+    "content": {
+      "en": {
+        "sms": "Hi {name}, your Adera job was accepted. Thank you!",
+        "body": "Hi {name}, your job was accepted",
+        "emailSubject": "Job accepted"
+      }
+    },
+    "active": true,
+    "validFrom": null,
+    "expiresAt": null,
+    "version": 2,
+    "usableNow": true,
+    "unusableReason": null,
+    "createdAt": "2026-10-25T06:06:25.690700Z",
+    "updatedAt": "2026-10-25T06:06:26.713146Z"
+  },
+  {
+    "id": "462f0772-a2db-4820-b34e-c52f1e4747da",
+    "appId": "41548c1e-b03e-412a-bbbe-1e46343505b9",
+    "code": "promo-spring",
+    "kind": "DIRECT",
+    "category": "PROMOTIONAL",
+    "params": [
+      {
+        "name": "code",
+        "required": true,
+        "maxLength": 12,
+        "allowLinks": false
+      }
+    ],
+    "content": {
+      "en": {
+        "body": "Spring offer {code}"
+      }
+    },
+    "active": false,
+    "validFrom": "2027-03-01T00:00:00Z",
+    "expiresAt": "2027-04-01T00:00:00Z",
+    "version": 1,
+    "usableNow": false,
+    "unusableReason": "template_inactive",
+    "createdAt": "2026-10-25T06:06:26.572173Z",
+    "updatedAt": "2026-10-25T06:06:26.572173Z"
+  }
+]</code></pre><p class="masked">(list shortened to the first 2 of 3 items)</p>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th><code>error</code></th><th>When it happens</th></tr></thead><tbody><tr><td>200</td><td>-</td><td>OK (includes inactive and not-yet-valid templates; <code>usableNow</code> tells which can be sent).</td></tr><tr><td>401</td><td><code>missing_signature</code></td><td>One of <code>X-Adera-Key-Id</code>, <code>X-Adera-Timestamp</code>, <code>X-Adera-Signature</code> is absent.</td></tr><tr><td>401</td><td><code>invalid_timestamp</code> / <code>stale_timestamp</code></td><td>Timestamp not an integer, or more than 5 minutes from our clock.</td></tr><tr><td>401</td><td><code>unknown_key</code> / <code>key_revoked_or_expired</code></td><td>No such key id; or the key was revoked or has expired.</td></tr><tr><td>401</td><td><code>invalid_signature</code></td><td>The signature does not verify: wrong key, or body, path or timestamp differ from what was signed.</td></tr><tr><td>403</td><td><code>wrong_environment</code></td><td>The key belongs to the other environment than this deployment.</td></tr><tr><td>403</td><td><code>app_draft</code> / <code>app_paused</code> / <code>app_killed</code></td><td>PROD needs the app to be LIVE; DEV works unless the app is killed.</td></tr><tr><td>403</td><td><code>ip_not_allowed</code></td><td>The caller's address is not in this environment's allowed list, or the list is empty.</td></tr></tbody></table></div>
+<h4>How to use it</h4><ul><li>Cache the list; call it again when a send is refused with <code>422 template_inactive</code> or <code>template_expired</code>.</li><li><code>params</code> says which values you must provide (<code>required</code>), their maximum length and whether links are allowed.</li></ul>
+</div></details>
+<details class="endpoint" id="ep-partner-get-v1-templates-id"><summary><span class="method m-get">GET</span><span class="path">/v1/templates/{id}</span><span class="sum">Read one template</span></summary><div class="body">
+<dl class="meta"><dt>Audience</dt><dd>A mini app's server (partner)</dd><dt>Client path</dt><dd><code>/v1/templates/{id}</code> through the gateway</dd><dt>Internal path</dt><dd>same path on notification-service :8080</dd><dt>Auth</dt><dd><strong>No login.</strong> Headers <code>X-Adera-Key-Id</code>, <code>X-Adera-Timestamp</code>, <code>X-Adera-Signature</code> (ADERA-SIG-1, see <a href="06-security.html#signing">Security</a>), and the caller's IP must be on the app's allowed list for this deployment's environment (the key must belong to it).</dd><dt>Rate limit</dt><dd>600 per 60 s per client IP (gateway route <code>partner-api</code>), plus the per-app quotas</dd><dt>Answers are signed</dt><dd>Every response, errors included, carries <code>X-Adera-Key-Id</code>, <code>X-Adera-Timestamp</code>, <code>X-Adera-Signature</code> made with Adera's key (public key at <a href="08f-operational.html">/.well-known/jwks.json</a>).</dd><dt>Implemented in</dt><dd><code>services/notification-service/src/main/java/app/adera/notification/partner/template/PartnerTemplateController.java</code></dd></dl>
+<h4>Purpose</h4><p>One of your own templates. A template of another app is reported as not found.</p>
+<h4>Request parameters</h4><div class="table-wrap"><table><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why it exists</th></tr></thead><tbody><tr><td>id</td><td>path</td><td>UUID</td><td>yes</td><td>Template id from the list.</td><td>Identifies the template.</td></tr></tbody></table></div>
+<h4>Example request</h4><pre><code>curl -sS -i -X GET "$BASE/v1/templates/$TEMPLATE_ID" \
+  -H "X-Adera-Key-Id: $KEY_ID" \
+  -H "X-Adera-Timestamp: $TS" \
+  -H "X-Adera-Signature: $SIG"</code></pre>
+<h4>Example response</h4><pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+X-Request-Id: a6ba63cd-9a53-42e1-bcc7-85ac41e22db2
+X-Adera-Key-Id: adera-sig-202610
+X-Adera-Timestamp: 1792908443
+X-Adera-Signature: Li/IJGEOiZ9Jv7rR16UvJ6j7... (base64 RS256 signature)
+
+{
+  "id": "a382808f-1175-4eb3-8129-dd61aa75634a",
+  "appId": "41548c1e-b03e-412a-bbbe-1e46343505b9",
+  "code": "job-accepted",
+  "kind": "DIRECT",
+  "category": "TRANSACTIONAL",
+  "params": [
+    {
+      "name": "name",
+      "required": true,
+      "maxLength": 30,
+      "allowLinks": false
+    }
+  ],
+  "content": {
+    "en": {
+      "sms": "Hi {name}, your Adera job was accepted. Thank you!",
+      "body": "Hi {name}, your job was accepted",
+      "emailSubject": "Job accepted"
+    }
+  },
+  "active": true,
+  "validFrom": null,
+  "expiresAt": null,
+  "version": 2,
+  "usableNow": true,
+  "unusableReason": null,
+  "createdAt": "2026-10-25T06:06:25.690700Z",
+  "updatedAt": "2026-10-25T06:06:26.713146Z"
+}</code></pre>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th><code>error</code></th><th>When it happens</th></tr></thead><tbody><tr><td>200</td><td>-</td><td>OK.</td></tr><tr><td>404</td><td><code>template_not_found</code></td><td>Not a template of your app, or unknown.</td></tr><tr><td>400</td><td><code>invalid_request</code></td><td>id is not a UUID.</td></tr><tr><td>401</td><td><code>missing_signature</code></td><td>One of <code>X-Adera-Key-Id</code>, <code>X-Adera-Timestamp</code>, <code>X-Adera-Signature</code> is absent.</td></tr><tr><td>401</td><td><code>invalid_timestamp</code> / <code>stale_timestamp</code></td><td>Timestamp not an integer, or more than 5 minutes from our clock.</td></tr><tr><td>401</td><td><code>unknown_key</code> / <code>key_revoked_or_expired</code></td><td>No such key id; or the key was revoked or has expired.</td></tr><tr><td>401</td><td><code>invalid_signature</code></td><td>The signature does not verify: wrong key, or body, path or timestamp differ from what was signed.</td></tr><tr><td>403</td><td><code>wrong_environment</code></td><td>The key belongs to the other environment than this deployment.</td></tr><tr><td>403</td><td><code>app_draft</code> / <code>app_paused</code> / <code>app_killed</code></td><td>PROD needs the app to be LIVE; DEV works unless the app is killed.</td></tr><tr><td>403</td><td><code>ip_not_allowed</code></td><td>The caller's address is not in this environment's allowed list, or the list is empty.</td></tr></tbody></table></div>
+<h4>Real error responses</h4><pre class="out nocopy"><code>Unknown template:
+HTTP 404  {"error": "template_not_found"}</code></pre>
+<pre class="out nocopy"><code>Not a UUID:
+HTTP 400  {"error": "invalid_request"}</code></pre>
+</div></details>
+</section>
+<section><h2 id="notifications">Notifications</h2>
+<details class="endpoint" id="ep-partner-post-v1-notifications"><summary><span class="method m-post">POST</span><span class="path">/v1/notifications</span><span class="sum">Send a notification to a user</span></summary><div class="body">
+<dl class="meta"><dt>Audience</dt><dd>A mini app's server (partner)</dd><dt>Client path</dt><dd><code>/v1/notifications</code> through the gateway</dd><dt>Internal path</dt><dd>same path on notification-service :8080</dd><dt>Auth</dt><dd><strong>No login.</strong> Headers <code>X-Adera-Key-Id</code>, <code>X-Adera-Timestamp</code>, <code>X-Adera-Signature</code> (ADERA-SIG-1, see <a href="06-security.html#signing">Security</a>), and the caller's IP must be on the app's allowed list for this deployment's environment (the key must belong to it).</dd><dt>Rate limit</dt><dd>600 per 60 s per client IP (gateway route <code>partner-api</code>), plus the per-app quotas</dd><dt>Answers are signed</dt><dd>Every response, errors included, carries <code>X-Adera-Key-Id</code>, <code>X-Adera-Timestamp</code>, <code>X-Adera-Signature</code> made with Adera's key (public key at <a href="08f-operational.html">/.well-known/jwks.json</a>).</dd><dt>Implemented in</dt><dd><code>services/notification-service/src/main/java/app/adera/notification/partner/delivery/PartnerNotificationController.java, NotificationAcceptor.java</code></dd></dl>
+<h4>Purpose</h4><p>Asks Adera to reach one user with one of your approved templates. Adera validates the request <em>synchronously</em> (signature, address, template, values, user, channel, quota) and stores it as <code>QUEUED</code>; a background worker delivers it and reports the result by callback.</p>
+<p><strong>Channel choice (you never name it):</strong> an <code>IN_APP</code> template goes to the user's inbox plus a push (needs <code>notify.inapp</code>). A <code>DIRECT</code> template goes by SMS if the user has a phone number and your app has <code>notify.sms</code>; otherwise by email if the user has an email and your app has <code>notify.email</code>.</p>
+<p><strong>Why a user can be silently suppressed:</strong> if the user muted your app for that channel the answer is <code>200</code> with status <code>SUPPRESSED</code> and reason <code>recipient_opted_out</code>, not an error, so you cannot learn which users muted you in a way that identifies them as an error pattern.</p>
+<h4>Request parameters</h4><div class="table-wrap"><table><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why it exists</th></tr></thead><tbody><tr><td>externalId</td><td>body</td><td>string</td><td>yes</td><td>1-100 chars of letters, digits, <code>. _ : -</code>. Unique per app and environment.</td><td>Your own id for this message: makes the call idempotent and is how you look it up.</td></tr><tr><td>userId</td><td>body</td><td>string</td><td>yes</td><td><code>u_p_</code> followed by 1-60 letters, digits or <code>_</code>; the user's id <em>for your app</em>.</td><td>Pseudonymous id: you never see real ids, phone numbers or emails.</td></tr><tr><td>templateId</td><td>body</td><td>UUID</td><td>yes</td><td>One of your templates, active and within its validity window.</td><td>Which approved message to send.</td></tr><tr><td>params</td><td>body</td><td>object</td><td>per template</td><td>Keys are exactly the template's declared params; values are text, number or boolean; each within its <code>maxLength</code>, no control characters, no links unless allowed.</td><td>The only variable parts of the message.</td></tr><tr><td>callbackUrl</td><td>body</td><td>string</td><td>no</td><td>Up to 500 chars. Accepted if it starts with <code>http://</code> or <code>https://</code>, but <strong>delivery of the callback requires https, port 443 or 8443 and a public address</strong> (see <a href="06-security.html#ssrf">SSRF guard</a>).</td><td>Where to POST the final status.</td></tr><tr><td>ttlSeconds</td><td>body</td><td>integer</td><td>no (86400)</td><td>60 to 604800.</td><td>How long Adera keeps trying before the message expires (<code>EXPIRED</code>).</td></tr><tr><td>data</td><td>body</td><td>object</td><td>no</td><td>JSON object, at most 2048 bytes.</td><td>Extra key-values delivered with an in-app notification and its push (for example a deep link).</td></tr></tbody></table></div>
+<h4>Example request</h4><pre><code>curl -sS -i -X POST "$BASE/v1/notifications" \
+  -H "X-Adera-Key-Id: $KEY_ID" \
+  -H "X-Adera-Timestamp: $TS" \
+  -H "X-Adera-Signature: $SIG" \
+  -H 'Content-Type: application/json' \
+  --data-binary '{"externalId":"job-1001","userId":"u_p_16cb43ded02e8b0474264dab14651897","templateId":"$TEMPLATE_ID","params":{"name":"Abebe"},"callbackUrl":"http://172.18.0.1:38593/adera/hook","ttlSeconds":3600,"data":{"jobId":"1001"}}'</code></pre>
+<h4>Example response</h4><pre class="out"><code>HTTP/1.1 202 Accepted
+Content-Type: application/json
+X-Request-Id: 36c4367d-bdff-4574-9add-33dd67df6a34
+X-Adera-Key-Id: adera-sig-202610
+X-Adera-Timestamp: 1792908444
+X-Adera-Signature: x7nBri755/qU0kloUZNJTY2Y... (base64 RS256 signature)
+
+{
+  "notificationId": "6bfb3f59-a8c6-4033-bcc0-b5a6562776e4",
+  "externalId": "job-1001",
+  "status": "QUEUED",
+  "channel": "SMS",
+  "environment": "DEV",
+  "createdAt": "2026-10-25T06:07:24.229445Z",
+  "expiresAt": "2026-10-25T07:07:24.169175Z"
+}</code></pre>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th><code>error</code></th><th>When it happens</th></tr></thead><tbody><tr><td>202</td><td>-</td><td>Accepted and queued (<code>status: QUEUED</code>).</td></tr><tr><td>200</td><td>-</td><td>A replay of an earlier identical request (<code>replayed: true</code>, current status), or the user muted your app (<code>SUPPRESSED</code>).</td></tr><tr><td>400</td><td><code>validation_failed</code></td><td>A malformed field; <code>fields</code> lists every problem. Unknown fields are rejected.</td></tr><tr><td>400</td><td><code>invalid_request</code></td><td>The body is not valid JSON.</td></tr><tr><td>403</td><td><code>capability_not_granted</code></td><td>Your app lacks the needed capability; the <code>capability</code> detail names it.</td></tr><tr><td>404</td><td><code>template_not_found</code></td><td>templateId is not a template of your app.</td></tr><tr><td>409</td><td><code>external_id_reused</code></td><td>This <code>externalId</code> was used for a different request.</td></tr><tr><td>422</td><td><code>synthetic_user_not_allowed</code></td><td>A <code>u_p_test_*</code> user on a PROD deployment (synthetic users exist in DEV only).</td></tr><tr><td>422</td><td><code>user_unreachable</code></td><td>Unknown, deleted or suspended user, or the user has neither a usable phone nor email: all look the same on purpose.</td></tr><tr><td>422</td><td><code>param_invalid</code></td><td>Values do not fit the template; <code>fields</code> says which and why (required, longer than N, links not allowed, not a parameter of this template, control characters).</td></tr><tr><td>422</td><td><code>template_inactive</code> / <code>template_not_yet_valid</code> / <code>template_expired</code></td><td>The template cannot be used right now.</td></tr><tr><td>429</td><td><code>quota_exceeded</code></td><td>A limit would be exceeded; <code>limit</code> is <code>max_per_user_per_day</code>, <code>max_per_day</code>, <code>max_distinct_users_per_day</code> or <code>max_total</code>. A refused request uses no quota.</td></tr><tr><td>401</td><td><code>missing_signature</code></td><td>One of <code>X-Adera-Key-Id</code>, <code>X-Adera-Timestamp</code>, <code>X-Adera-Signature</code> is absent.</td></tr><tr><td>401</td><td><code>invalid_timestamp</code> / <code>stale_timestamp</code></td><td>Timestamp not an integer, or more than 5 minutes from our clock.</td></tr><tr><td>401</td><td><code>unknown_key</code> / <code>key_revoked_or_expired</code></td><td>No such key id; or the key was revoked or has expired.</td></tr><tr><td>401</td><td><code>invalid_signature</code></td><td>The signature does not verify: wrong key, or body, path or timestamp differ from what was signed.</td></tr><tr><td>403</td><td><code>wrong_environment</code></td><td>The key belongs to the other environment than this deployment.</td></tr><tr><td>403</td><td><code>app_draft</code> / <code>app_paused</code> / <code>app_killed</code></td><td>PROD needs the app to be LIVE; DEV works unless the app is killed.</td></tr><tr><td>403</td><td><code>ip_not_allowed</code></td><td>The caller's address is not in this environment's allowed list, or the list is empty.</td></tr><tr><td>413</td><td><code>request_too_large</code></td><td>Body over 64 KB.</td></tr><tr><td>503</td><td><code>service_unavailable</code></td><td>A dependency (registry-service or user-service) is down; retry later.</td></tr></tbody></table></div>
+<h4>Real error responses</h4><pre class="out nocopy"><code>Same request again (replay):
+request body: {"externalId": "job-1001", "userId": "u_p_16cb43ded02e8b0474264dab14651897", "templateId": "a382808f-1175-4eb3-8129-dd61aa75634a", "params": {"name": "Abebe"}, "callbackUrl": "http://172.18.0.1:38593/adera/hook", "ttlSeconds": 3600, "data": {"jobId": "1001"}}
+HTTP 200  {"notificationId": "6bfb3f59-a8c6-4033-bcc0-b5a6562776e4", "externalId": "job-1001", "status": "QUEUED", "channel": "SMS", "environment": "DEV", "createdAt": "2026-10-25T06:07:24.229445Z", "expiresAt": "2026-10-25T07:07:24.169175Z", "replayed": true}</code></pre>
+<pre class="out nocopy"><code>Same externalId, different content:
+request body: {"externalId": "job-1001", "userId": "u_p_16cb43ded02e8b0474264dab14651897", "templateId": "a382808f-1175-4eb3-8129-dd61aa75634a", "params": {"name": "Other"}, "callbackUrl": "http://172.18.0.1:38593/adera/hook", "ttlSeconds": 3600, "data": {"jobId": "1001"}}
+HTTP 409  {"error": "external_id_reused"}</code></pre>
+<pre class="out nocopy"><code>Empty body:
+request body: {}
+HTTP 400  {"error": "validation_failed", "fields": {"externalId": "required: your own unique id, 1-100 chars of letters, digits and . _ : -", "userId": "required: the user's id for your app (starts with u_p_)", "templateId": "required: the id of one of your templates (GET /v1/templates)"}}</code></pre>
+<pre class="out nocopy"><code>Several bad fields:
+request body: {"externalId": "bad id!", "userId": "someone", "templateId": "x", "params": [], "callbackUrl": "ftp://x", "ttlSeconds": 5, "data": "x", "colour": 1}
+HTTP 400  {"error": "validation_failed", "fields": {"colour": "unknown field", "externalId": "required: your own unique id, 1-100 chars of letters, digits and . _ : -", "userId": "required: the user's id for your app (starts with u_p_)", "templateId": "required: the id of one of your templates (GET /v1/templates)", "params": "must be an object of the template's values", "data": "must be a JSON object of at most 2048 bytes", "callbackUrl": "must be an https URL (max 500 characters)", "ttlSeconds": "must be 60 to 604800 (how long we keep trying)"}}</code></pre>
+<pre class="out nocopy"><code>Not JSON:
+HTTP 400  {"error": "invalid_request"}</code></pre>
+<pre class="out nocopy"><code>Unknown user:
+request body: {"externalId": "job-1005", "userId": "u_p_00000000000000000000000000000000", "templateId": "a382808f-1175-4eb3-8129-dd61aa75634a", "params": {"name": "Abebe"}, "callbackUrl": "http://172.18.0.1:38593/adera/hook", "ttlSeconds": 3600, "data": {"jobId": "1001"}}
+HTTP 422  {"error": "user_unreachable"}</code></pre>
+<pre class="out nocopy"><code>A link inside a value:
+request body: {"externalId": "job-1006", "userId": "u_p_16cb43ded02e8b0474264dab14651897", "templateId": "a382808f-1175-4eb3-8129-dd61aa75634a", "params": {"name": "see http://evil.example"}, "callbackUrl": "http://172.18.0.1:38593/adera/hook", "ttlSeconds": 3600, "data": {"jobId": "1001"}}
+HTTP 422  {"error": "param_invalid", "fields": {"name": "links are not allowed in this value"}}</code></pre>
+<pre class="out nocopy"><code>Required value missing:
+request body: {"externalId": "job-1007", "userId": "u_p_16cb43ded02e8b0474264dab14651897", "templateId": "a382808f-1175-4eb3-8129-dd61aa75634a", "params": {}, "callbackUrl": "http://172.18.0.1:38593/adera/hook", "ttlSeconds": 3600, "data": {"jobId": "1001"}}
+HTTP 422  {"error": "param_invalid", "fields": {"name": "required"}}</code></pre>
+<pre class="out nocopy"><code>A value the template does not declare:
+request body: {"externalId": "job-1008", "userId": "u_p_16cb43ded02e8b0474264dab14651897", "templateId": "a382808f-1175-4eb3-8129-dd61aa75634a", "params": {"name": "A", "extra": "b"}, "callbackUrl": "http://172.18.0.1:38593/adera/hook", "ttlSeconds": 3600, "data": {"jobId": "1001"}}
+HTTP 422  {"error": "param_invalid", "fields": {"extra": "not a parameter of this template"}}</code></pre>
+<pre class="out nocopy"><code>Template not yours / unknown:
+request body: {"externalId": "job-1009", "userId": "u_p_16cb43ded02e8b0474264dab14651897", "templateId": "717426cb-70d3-4327-9afc-5e51f0c78aa6", "params": {"name": "Abebe"}, "callbackUrl": "http://172.18.0.1:38593/adera/hook", "ttlSeconds": 3600, "data": {"jobId": "1001"}}
+HTTP 404  {"error": "template_not_found"}</code></pre>
+<pre class="out nocopy"><code>Template not usable now:
+request body: {"externalId": "job-1010", "userId": "u_p_16cb43ded02e8b0474264dab14651897", "templateId": "462f0772-a2db-4820-b34e-c52f1e4747da", "params": {"code": "SPRING"}, "callbackUrl": "http://172.18.0.1:38593/adera/hook", "ttlSeconds": 3600, "data": {"jobId": "1001"}}
+HTTP 422  {"error": "template_inactive"}</code></pre>
+<pre class="out nocopy"><code>Capability not granted:
+request body: {"externalId": "job-1014", "userId": "u_p_16cb43ded02e8b0474264dab14651897", "templateId": "a382808f-1175-4eb3-8129-dd61aa75634a", "params": {"name": "Abebe"}, "ttlSeconds": 3600, "data": {"jobId": "1001"}}
+HTTP 403  {"error": "capability_not_granted", "capability": "notify.sms"}</code></pre>
+<pre class="out nocopy"><code>Over the per-user limit:
+request body: {"externalId": "job-1012", "userId": "u_p_16cb43ded02e8b0474264dab14651897", "templateId": "a382808f-1175-4eb3-8129-dd61aa75634a", "params": {"name": "Abebe"}, "ttlSeconds": 3600, "data": {"jobId": "1001"}}
+HTTP 429  {"error": "quota_exceeded", "limit": "max_per_user_per_day", "channel": "SMS"}</code></pre>
+<pre class="out nocopy"><code>The user muted this channel:
+request body: {"externalId": "job-1013", "userId": "u_p_16cb43ded02e8b0474264dab14651897", "templateId": "a382808f-1175-4eb3-8129-dd61aa75634a", "params": {"name": "Abebe"}, "ttlSeconds": 3600, "data": {"jobId": "1001"}}
+HTTP 200  {"notificationId": "caf7fc1e-1987-44bf-83ae-d2236a7715d7", "externalId": "job-1013", "status": "SUPPRESSED", "channel": "SMS", "reason": "recipient_opted_out", "environment": "DEV", "createdAt": "2026-10-25T06:07:26.409313Z", "expiresAt": "2026-10-25T07:07:26.356333Z", "completedAt": "2026-10-25T06:07:26.409313Z"}</code></pre>
+<h4>How to use it</h4><ul><li>Serialise the JSON <strong>once</strong>, sign those bytes, send those same bytes.</li><li>On a timeout, resend the identical request with the same <code>externalId</code>: you will get the current state, never a duplicate message.</li><li>Do not retry <code>4xx</code> errors blindly; fix the cause. Retry <code>503</code> and network errors with backoff.</li><li>An <code>IN_APP</code> example: same call with an IN_APP <code>templateId</code> and <code>data</code>, which returns channel <code>IN_APP</code>:</li></ul>
+</div></details>
+<details class="endpoint" id="ep-partner-post-v1-notifications-inapp"><summary><span class="method m-post">POST</span><span class="path">/v1/notifications</span><span class="sum">Example: an in-app notification (inbox and push)</span></summary><div class="body">
+<dl class="meta"><dt>Audience</dt><dd>A mini app's server (partner)</dd><dt>Client path</dt><dd><code>/v1/notifications</code> through the gateway</dd><dt>Internal path</dt><dd>same path on notification-service :8080</dd><dt>Auth</dt><dd><strong>No login.</strong> Headers <code>X-Adera-Key-Id</code>, <code>X-Adera-Timestamp</code>, <code>X-Adera-Signature</code> (ADERA-SIG-1, see <a href="06-security.html#signing">Security</a>), and the caller's IP must be on the app's allowed list for this deployment's environment (the key must belong to it).</dd><dt>Rate limit</dt><dd>600 per 60 s per client IP (gateway route <code>partner-api</code>), plus the per-app quotas</dd><dt>Answers are signed</dt><dd>Every response, errors included, carries <code>X-Adera-Key-Id</code>, <code>X-Adera-Timestamp</code>, <code>X-Adera-Signature</code> made with Adera's key (public key at <a href="08f-operational.html">/.well-known/jwks.json</a>).</dd><dt>Implemented in</dt><dd><code>services/notification-service/src/main/java/app/adera/notification/partner/delivery/NotificationAcceptor.java</code></dd></dl>
+<h4>Purpose</h4><p>The same endpoint with an <code>IN_APP</code> template. The user sees it in the bell menu (<a href="08a-user-api.html">GET /api/v1/me/notifications</a>) and gets a push to every active device.</p>
+<h4>Request parameters</h4><p>None.</p>
+<h4>Example request</h4><pre><code>curl -sS -i -X POST "$BASE/v1/notifications" \
+  -H "X-Adera-Key-Id: $KEY_ID" \
+  -H "X-Adera-Timestamp: $TS" \
+  -H "X-Adera-Signature: $SIG" \
+  -H 'Content-Type: application/json' \
+  --data-binary '{"externalId":"inapp-1","userId":"u_p_16cb43ded02e8b0474264dab14651897","templateId":"$INAPP_TEMPLATE_ID","params":{"name":"Abebe"},"data":{"deepLink":"adera://job/1001"}}'</code></pre>
+<h4>Example response</h4><pre class="out"><code>HTTP/1.1 202 Accepted
+Content-Type: application/json
+X-Request-Id: 3eb848f0-5766-47ae-98e6-748896672ca9
+X-Adera-Key-Id: adera-sig-202610
+X-Adera-Timestamp: 1792908446
+X-Adera-Signature: xor9xfKXhWSZXkGuJbj+SqTf... (base64 RS256 signature)
+
+{
+  "notificationId": "c9908b40-b0d2-4033-95cb-caaf36f51a38",
+  "externalId": "inapp-1",
+  "status": "QUEUED",
+  "channel": "IN_APP",
+  "environment": "DEV",
+  "createdAt": "2026-10-25T06:07:26.186178Z",
+  "expiresAt": "2026-10-26T06:07:26.141973Z"
+}</code></pre>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th><code>error</code></th><th>When it happens</th></tr></thead><tbody><tr><td>202</td><td>-</td><td>Accepted.</td></tr></tbody></table></div>
+<h4>How to use it</h4><ul><li><code>data</code> values are delivered as strings in the push payload, together with <code>notificationId</code> and <code>appId</code>.</li></ul>
+</div></details>
+<details class="endpoint" id="ep-partner-get-v1-notifications-externalid"><summary><span class="method m-get">GET</span><span class="path">/v1/notifications/{externalId}</span><span class="sum">Where is my message? (status)</span></summary><div class="body">
+<dl class="meta"><dt>Audience</dt><dd>A mini app's server (partner)</dd><dt>Client path</dt><dd><code>/v1/notifications/{externalId}</code> through the gateway</dd><dt>Internal path</dt><dd>same path on notification-service :8080</dd><dt>Auth</dt><dd><strong>No login.</strong> Headers <code>X-Adera-Key-Id</code>, <code>X-Adera-Timestamp</code>, <code>X-Adera-Signature</code> (ADERA-SIG-1, see <a href="06-security.html#signing">Security</a>), and the caller's IP must be on the app's allowed list for this deployment's environment (the key must belong to it).</dd><dt>Rate limit</dt><dd>600 per 60 s per client IP (gateway route <code>partner-api</code>), plus the per-app quotas</dd><dt>Answers are signed</dt><dd>Every response, errors included, carries <code>X-Adera-Key-Id</code>, <code>X-Adera-Timestamp</code>, <code>X-Adera-Signature</code> made with Adera's key (public key at <a href="08f-operational.html">/.well-known/jwks.json</a>).</dd><dt>Implemented in</dt><dd><code>services/notification-service/src/main/java/app/adera/notification/partner/delivery/PartnerNotificationController.java</code></dd></dl>
+<h4>Purpose</h4><p>Returns the current state of a message you sent, found by <em>your</em> <code>externalId</code> (within your app and this deployment's environment). Includes the attempt count. Use it when you missed a callback, or to poll.</p>
+<h4>Request parameters</h4><div class="table-wrap"><table><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why it exists</th></tr></thead><tbody><tr><td>externalId</td><td>path</td><td>string</td><td>yes</td><td>The id you sent.</td><td>Your handle for the message.</td></tr></tbody></table></div>
+<h4>Example request</h4><pre><code>curl -sS -i -X GET "$BASE/v1/notifications/job-1001" \
+  -H "X-Adera-Key-Id: $KEY_ID" \
+  -H "X-Adera-Timestamp: $TS" \
+  -H "X-Adera-Signature: $SIG"</code></pre>
+<h4>Example response</h4><pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+X-Request-Id: 9c83b8a2-312b-469b-913e-2fd9121e9bc7
+X-Adera-Key-Id: adera-sig-202610
+X-Adera-Timestamp: 1792908445
+X-Adera-Signature: r7YIoR7Hh1L689XB0hF7sFOc... (base64 RS256 signature)
+
+{
+  "notificationId": "6bfb3f59-a8c6-4033-bcc0-b5a6562776e4",
+  "externalId": "job-1001",
+  "status": "SENT",
+  "channel": "SMS",
+  "environment": "DEV",
+  "createdAt": "2026-10-25T06:07:24.229445Z",
+  "expiresAt": "2026-10-25T07:07:24.169175Z",
+  "completedAt": "2026-10-25T06:07:24.580876Z",
+  "attempts": 1
+}</code></pre>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th><code>error</code></th><th>When it happens</th></tr></thead><tbody><tr><td>200</td><td>-</td><td>OK.</td></tr><tr><td>404</td><td><code>not_found</code></td><td>No such message for your app and environment.</td></tr><tr><td>401</td><td><code>missing_signature</code></td><td>One of <code>X-Adera-Key-Id</code>, <code>X-Adera-Timestamp</code>, <code>X-Adera-Signature</code> is absent.</td></tr><tr><td>401</td><td><code>invalid_timestamp</code> / <code>stale_timestamp</code></td><td>Timestamp not an integer, or more than 5 minutes from our clock.</td></tr><tr><td>401</td><td><code>unknown_key</code> / <code>key_revoked_or_expired</code></td><td>No such key id; or the key was revoked or has expired.</td></tr><tr><td>401</td><td><code>invalid_signature</code></td><td>The signature does not verify: wrong key, or body, path or timestamp differ from what was signed.</td></tr><tr><td>403</td><td><code>wrong_environment</code></td><td>The key belongs to the other environment than this deployment.</td></tr><tr><td>403</td><td><code>app_draft</code> / <code>app_paused</code> / <code>app_killed</code></td><td>PROD needs the app to be LIVE; DEV works unless the app is killed.</td></tr><tr><td>403</td><td><code>ip_not_allowed</code></td><td>The caller's address is not in this environment's allowed list, or the list is empty.</td></tr></tbody></table></div>
+<h4>Real error responses</h4><pre class="out nocopy"><code>Unknown externalId:
+HTTP 404  {"error": "not_found"}</code></pre>
+<h4>How to use it</h4><ul><li>Fields: <code>notificationId</code>, <code>externalId</code>, <code>status</code>, <code>channel</code>, <code>reason</code> (when present), <code>environment</code>, <code>createdAt</code>, <code>expiresAt</code>, <code>completedAt</code> (when final), <code>attempts</code>.</li><li>Statuses: <code>QUEUED</code>, <code>PROCESSING</code>, <code>RETRYING</code> (not final); <code>SENT</code>, <code>FAILED</code>, <code>UNREACHABLE</code>, <code>SUPPRESSED</code>, <code>EXPIRED</code> (final). See <a href="10-reference.html#glossary-status">glossary</a>.</li></ul>
+</div></details>
+</section>
+<section><h2 id="callback">The callback Adera sends you</h2>
+<p>If you gave a <code>callbackUrl</code>, Adera POSTs one signed status report to it when the notification reaches a <em>final</em> status. This is an endpoint <strong>you</strong> provide. 1 callback(s) were captured with a local receiver during the test run; the one below is real (the signature is shortened).</p>
+<ul>
+<li><strong>Request:</strong> <code>POST</code> to your URL, <code>Content-Type: application/json</code>, <code>User-Agent: Adera-Callbacks/1</code>.</li>
+<li><strong>Headers:</strong> <code>X-Adera-Event: notification.status</code>, <code>X-Adera-Key-Id</code> (Adera's key id), <code>X-Adera-Timestamp</code>, <code>X-Adera-Signature</code>, <code>Idempotency-Key</code> (unique per callback, repeated on retries: de-duplicate on it).</li>
+<li><strong>Verify</strong> the signature with the key at <code>/.well-known/jwks.json</code>: the canonical string is <code>ADERA-SIG-1</code>, timestamp, <code>POST</code>, the path (and query) of <em>your</em> URL, base64(sha256(body)) joined with newlines. Code: <a href="06-security.html#signing-response">Security</a>.</li>
+<li><strong>Body fields:</strong> <code>event</code> (always <code>notification.status</code>), <code>notificationId</code>, <code>externalId</code>, <code>status</code>, <code>channel</code>, <code>reason</code> (null when none), <code>environment</code>, <code>at</code> (ISO-8601).</li>
+<li><strong>Answer:</strong> any <code>2xx</code> within 8 seconds. Anything else (or no answer) is retried after 1 minute, doubling up to 6 hours, 8 attempts in all (about a day), then given up.</li>
+<li><strong>URL rules:</strong> https only, port 443 or 8443, no embedded credentials, every address the host resolves to must be public; redirects are not followed. A refused URL fails at once without retry (see <a href="06-security.html#ssrf">SSRF guard</a>).</li>
+<li>Reports are sent for final statuses only (<code>SENT</code>, <code>FAILED</code>, <code>UNREACHABLE</code>, <code>SUPPRESSED</code>, <code>EXPIRED</code>), not for <code>QUEUED</code> or <code>RETRYING</code>.</li>
+</ul>
+<pre class="out"><code>POST /adera/hook HTTP/1.1
+content-type: application/json
+user-agent: Adera-Callbacks/1
+x-adera-event: notification.status
+x-adera-key-id: adera-sig-202610
+x-adera-timestamp: 1792908444
+idempotency-key: 1f2aec7c-5243-4d11-b426-792ce74fcb27
+X-Adera-Signature: p9rAZAHZICwUSJuLTnMD6diz... (base64 RS256 signature)
+
+{
+  "at": "2026-10-25T06:07:24.580875537Z",
+  "event": "notification.status",
+  "reason": null,
+  "status": "SENT",
+  "channel": "SMS",
+  "externalId": "job-1001",
+  "environment": "DEV",
+  "notificationId": "6bfb3f59-a8c6-4033-bcc0-b5a6562776e4"
+}</code></pre>
+<p class="masked">The dev stack ran with <code>PARTNER_ALLOW_PRIVATE_CALLBACKS=true</code> so that the receiver could be a plain <code>http</code> address on this machine; production requires https on a public address.</p>
+</section>
+
+<section><h2 id="statuses">Notification statuses</h2>
+<div class="table-wrap"><div class="table-wrap"><table>
+<thead><tr><th>Status</th><th>Final?</th><th>Meaning</th></tr></thead>
+<tbody>
+<tr><td><code>QUEUED</code></td><td>no</td><td>Accepted, waiting for the delivery worker (checked every second).</td></tr>
+<tr><td><code>PROCESSING</code></td><td>no</td><td>A worker holds it (a 60-second claim; an abandoned claim is picked up again).</td></tr>
+<tr><td><code>RETRYING</code></td><td>no</td><td>A temporary failure; next attempt after 30 s doubling up to 1 hour, at most 8 attempts, until <code>ttlSeconds</code> passes.</td></tr>
+<tr><td><code>SENT</code></td><td>yes</td><td>Handed to the provider (SMS, email) or stored in the inbox with push attempted. For a synthetic <code>u_p_test_*</code> user in DEV: simulated success (nothing sent).</td></tr>
+<tr><td><code>FAILED</code></td><td>yes</td><td>Permanent provider refusal (bad number or address, rejected sender: provider 4xx except 408/429) or the maximum attempts were used.</td></tr>
+<tr><td><code>UNREACHABLE</code></td><td>yes</td><td>The user was deleted or suspended meanwhile, or has no phone / no email for the chosen channel.</td></tr>
+<tr><td><code>SUPPRESSED</code></td><td>yes</td><td>The user muted your app (<code>recipient_opted_out</code>), or the live allowlist excluded the recipient (<code>not_allowlisted</code>). Not an error.</td></tr>
+<tr><td><code>EXPIRED</code></td><td>yes</td><td>The deadline (<code>ttlSeconds</code>) passed before it could be delivered.</td></tr>
+</tbody></table></div></div>
+<p><strong>Retries:</strong> delivery backoff is 30 s, 1 m, 2 m, 4 m ... capped at 1 hour with plus or minus 10% jitter. Permanent errors are never retried. A "delivered" status means the provider accepted it; Adera does not track handset delivery receipts.</p>
+</section>
+
+<div class="pager"><a class="prev" href="08b-staff-api.html"><small>Previous</small>8b. Staff / dashboard API</a><a class="next" href="08d-internal-api.html"><small>Next</small>8d. Internal API</a></div>
+<p class="footer">Adera backend documentation &middot; last verified 2026-10-25 &middot; <a href="../index.html">contents</a></p>
+</main>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

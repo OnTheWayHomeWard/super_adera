@@ -1,0 +1,563 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>5. How it communicates | Adera docs</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+<button id="menu-btn" type="button" aria-label="Toggle menu">Menu</button>
+<a class="brand" href="../index.html">Adera docs</a>
+<span class="spacer"></span>
+<a href="../index.html">Contents</a>
+<button id="theme-btn" type="button" aria-label="Toggle light or dark theme">Theme</button>
+</header>
+<div class="layout">
+<nav class="sidebar" aria-label="Sections">
+<ul><li><a href="../index.html" class="">Home / contents</a></li></ul>
+<h4>Sections</h4><ul>
+<li><a href="01-overview.html">1. Overview</a>
+</li>
+<li><a href="02-setup.html">2. Setup and running</a>
+</li>
+<li><a href="03-tools.html">3. Tools</a>
+</li>
+<li><a href="04-services.html">4. Services</a>
+</li>
+<li><a href="05-communication.html" class=current>5. How it communicates</a>
+<ul><li><a href="#overview">Reading the diagrams</a></li><li><a href="#login">1. User login with a one-time code (email or phone)</a></li><li><a href="#registration">2. Registration webhook: the profile row</a></li><li><a href="#user-request">3. Authenticated user request (forward-auth, X-User-Id)</a></li><li><a href="#staff-request">4. Staff request (X-Staff-Id, X-Staff-Role, aal2)</a></li><li><a href="#partner-request">5. Partner notification request</a></li><li><a href="#inbox-push">6. Inbox and push</a></li><li><a href="#observability-flow">7. Observability flow (traces, metrics, logs)</a></li><li><a href="#trust-model">Trust model: who may call what</a></li></ul>
+</li>
+<li><a href="06-security.html">6. Security model</a>
+</li>
+<li><a href="07-data.html">7. Data</a>
+</li>
+<li><a href="08-endpoints.html">8. Endpoint reference</a>
+</li>
+<li><a href="09-guides.html">9. Guides</a>
+</li>
+<li><a href="10-reference.html">10. Reference</a>
+</li>
+<li><a href="11-backoffice.html">11. Backoffice (staff dashboard)</a>
+</li>
+<li><a href="12-backoffice-guide.html">12. Backoffice guide (staff manual)</a>
+</li>
+<li><a href="13-sample-data.html">13. Sample data (test scenarios)</a>
+</li>
+</ul>
+<h4>Endpoints</h4><ul>
+<li><a href="08a-user-api.html">8a. End-user API</a>
+</li>
+<li><a href="08b-staff-api.html">8b. Staff / dashboard API</a>
+</li>
+<li><a href="08c-partner-api.html">8c. Partner API</a>
+</li>
+<li><a href="08d-internal-api.html">8d. Internal API</a>
+</li>
+<li><a href="08e-kratos-flows.html">8e. Kratos flows</a>
+</li>
+<li><a href="08f-operational.html">8f. Operational endpoints</a>
+</li>
+</ul>
+</nav>
+<main>
+<h1>How everything communicates</h1>
+<p class="lead">The request paths one by one, as diagrams and numbered steps: login, registration, a signed-in user's request, a staff request, a partner notification (accept, deliver, call back), the inbox and push, and observability. Then the trust model that makes these paths safe.</p>
+
+<section>
+<h2 id="overview">Reading the diagrams</h2>
+<p>Each diagram is a time line from top to bottom. Solid arrows are requests; dashed arrows are answers. Blue boxes are our services, grey boxes are tools, green is storage, amber is outside providers. Numbers in the diagram match the numbered steps under it. Paths are as the code and <code>infra/apisix/apisix.yaml</code> define them; everything here was cross-checked against the running stack in the endpoint pages.</p>
+<div class="callout"><span class="label">One rule behind all of it</span>
+<p>Services never trust a caller because of where it is. They trust a request because it carries a <em>secret only the gateway (or another of our services) knows</em>, and they take the user's or staff member's identity only from headers the gateway wrote after checking the session. Details in <a href="#trust-model">the trust model</a>.</p></div>
+</section>
+
+<section>
+<h2 id="login">1. User login with a one-time code (email or phone)</h2>
+<svg class="diagram" viewBox="0 0 1000 476" role="img" aria-label="Login with a one-time code: app, gateway, Kratos, notification-service, provider"><title>Login with a one-time code: app, gateway, Kratos, notification-service, provider</title>
+<defs><marker id="ah-login" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z"/></marker></defs>
+<line class="lane" x1="76" y1="60" x2="76" y2="468"/>
+<rect class="box client" x="1" y="14" width="150" height="46" rx="8"/>
+<text class="title" x="76" y="34" text-anchor="middle">Mobile app</text>
+<text class="muted" x="76" y="50" text-anchor="middle">Flutter</text>
+<line class="lane" x1="288" y1="60" x2="288" y2="468"/>
+<rect class="box tool" x="213" y="14" width="150" height="46" rx="8"/>
+<text class="title" x="288" y="34" text-anchor="middle">APISIX</text>
+<text class="muted" x="288" y="50" text-anchor="middle">gateway :9080</text>
+<line class="lane" x1="500" y1="60" x2="500" y2="468"/>
+<rect class="box tool" x="425" y="14" width="150" height="46" rx="8"/>
+<text class="title" x="500" y="34" text-anchor="middle">Kratos</text>
+<text class="muted" x="500" y="50" text-anchor="middle">identity</text>
+<line class="lane" x1="712" y1="60" x2="712" y2="468"/>
+<rect class="box ours" x="637" y="14" width="150" height="46" rx="8"/>
+<text class="title" x="712" y="34" text-anchor="middle">notification-svc</text>
+<text class="muted" x="712" y="50" text-anchor="middle">courier</text>
+<line class="lane" x1="924" y1="60" x2="924" y2="468"/>
+<rect class="box ext" x="849" y="14" width="150" height="46" rx="8"/>
+<text class="title" x="924" y="34" text-anchor="middle">SMS / email</text>
+<text class="muted" x="924" y="50" text-anchor="middle">dev or real</text>
+<path class="edge" d="M79 94 L285 94" marker-end="url(#ah-login)"/>
+<circle class="stepdot" cx="92" cy="94" r="9"/><text class="step" x="92" y="98">1</text>
+<text x="190" y="86" text-anchor="middle">GET .../login/api</text>
+<path class="edge" d="M291 140 L497 140" marker-end="url(#ah-login)"/>
+<circle class="stepdot" cx="304" cy="140" r="9"/><text class="step" x="304" y="144">2</text>
+<text x="402" y="132" text-anchor="middle">forward (limit 120/min)</text>
+<path class="edge" d="M79 186 L285 186" marker-end="url(#ah-login)"/>
+<circle class="stepdot" cx="92" cy="186" r="9"/><text class="step" x="92" y="190">3</text>
+<text x="190" y="178" text-anchor="middle">POST login: identifier</text>
+<path class="edge" d="M291 232 L497 232" marker-end="url(#ah-login)"/>
+<circle class="stepdot" cx="304" cy="232" r="9"/><text class="step" x="304" y="236">4</text>
+<text x="402" y="224" text-anchor="middle">forward; Kratos makes code</text>
+<path class="edge hot" d="M503 278 L709 278" marker-end="url(#ah-login)"/>
+<circle class="stepdot" cx="516" cy="278" r="9"/><text class="step" x="516" y="282">5</text>
+<text x="614" y="270" text-anchor="middle">POST /internal/kratos/sms</text>
+<path class="edge hot" d="M715 324 L921 324" marker-end="url(#ah-login)"/>
+<circle class="stepdot" cx="728" cy="324" r="9"/><text class="step" x="728" y="328">6</text>
+<text x="826" y="316" text-anchor="middle">send (limits, allowlist)</text>
+<path class="edge" d="M79 370 L285 370" marker-end="url(#ah-login)"/>
+<circle class="stepdot" cx="92" cy="370" r="9"/><text class="step" x="92" y="374">7</text>
+<text x="190" y="362" text-anchor="middle">POST login: id + code</text>
+<path class="edge dash" d="M497 416 L291 416" marker-end="url(#ah-login)"/>
+<circle class="stepdot" cx="484" cy="416" r="9"/><text class="step" x="484" y="420">8</text>
+<text x="386" y="408" text-anchor="middle">200 session_token</text>
+</svg>
+<ol>
+<li>The app starts a <em>native</em> login flow: <code>GET /kratos/self-service/login/api</code>. The gateway strips <code>/kratos</code> and forwards to Kratos. Limit: 120 per minute per IP (route <code>kratos-public</code>). Kratos answers with a flow id and the form fields it expects.</li>
+<li>Nothing else happens at the gateway for this step; it is a plain proxy with a rate limit, a request id and a trace span.</li>
+<li>The app posts <code>{"method":"code","identifier":"+2519..."}</code> to <code>/kratos/self-service/login?flow=ID</code>. This is a <code>POST</code> under <code>/kratos/self-service/*</code>, so the strict limit applies: <strong>10 per minute per IP</strong> (route <code>kratos-self-service-submit</code>; counters in Redis). That limit is the first line of protection against SMS-cost abuse.</li>
+<li>Kratos looks the identifier up. If an identity exists it creates a 6-digit code (valid 5 minutes, <code>selfservice.methods.code.config.lifespan</code>) and queues a courier message. <strong>If no identity exists, Kratos answers that the account does not exist</strong> (known account-enumeration weakness; see <a href="06-security.html#limitations">known limitations</a>).</li>
+<li>Kratos runs with <code>--watch-courier</code> and <code>courier.delivery_strategy: http</code>. It posts the message to <code>http://notification-service:8080/internal/kratos/sms</code> (phone) or <code>/internal/kratos/email</code> (email). The request body is built by a small Jsonnet snippet inside <code>kratos.yml</code> (decoded on the <a href="03-tools.html#kratos">Kratos page</a>).</li>
+<li><code>NotificationDispatcher</code> applies, in order: the per-recipient limit (5 per hour and 10 per day for SMS, 10 and 20 for email, counted from the send log by a SHA-256 hash of the recipient), then the live allowlist (real providers only), then the provider (console or Twilio for SMS, Mailpit or Resend for email), then writes a <code>send_log</code> row with a masked recipient and no code. A <em>rate-limited</em> or <em>allowlist-skipped</em> message still returns <code>200</code> (status <code>suppressed</code> or <code>skipped</code>), on purpose, because Kratos retries any non-2xx and a retry would defeat the limit. A <em>provider failure</em> returns <code>502</code>, so Kratos keeps the message and retries.</li>
+<li>The user types the code; the app posts the same body plus <code>"code"</code> to the same <code>login?flow=ID</code> URL (again counted in the 10 per minute).</li>
+<li>Kratos verifies the code and returns <code>200</code> with a <code>session_token</code> (valid 30 days, <code>session.lifespan: 720h</code>). The app sends it as <code>Authorization: Bearer ...</code> from then on.</li>
+</ol>
+<p><strong>Registration</strong> is the same shape with <code>/self-service/registration/api</code> and <code>traits.phone_number</code> or <code>traits.email</code>; after the code is verified Kratos also creates the identity and runs the hooks below. <strong>Dev mode:</strong> the "provider" is the console (log plus <code>GET /dev/messages</code>) or Mailpit, so the code can be read by tests and by you.</p>
+<p>Full request and response examples: <a href="08e-kratos-flows.html">Kratos flows</a>.</p>
+</section>
+
+<section>
+<h2 id="registration">2. Registration webhook: the profile row</h2>
+<svg class="diagram" viewBox="0 0 1000 292" role="img" aria-label="Registration webhook creating the profile"><title>Registration webhook creating the profile</title>
+<defs><marker id="ah-reg" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z"/></marker></defs>
+<line class="lane" x1="76" y1="60" x2="76" y2="284"/>
+<rect class="box tool" x="1" y="14" width="150" height="46" rx="8"/>
+<text class="title" x="76" y="34" text-anchor="middle">Kratos</text>
+<text class="muted" x="76" y="50" text-anchor="middle">identity</text>
+<line class="lane" x1="500" y1="60" x2="500" y2="284"/>
+<rect class="box ours" x="425" y="14" width="150" height="46" rx="8"/>
+<text class="title" x="500" y="34" text-anchor="middle">user-service</text>
+<text class="muted" x="500" y="50" text-anchor="middle">port 8080</text>
+<line class="lane" x1="924" y1="60" x2="924" y2="284"/>
+<rect class="box store" x="849" y="14" width="150" height="46" rx="8"/>
+<text class="title" x="924" y="34" text-anchor="middle">Postgres</text>
+<text class="muted" x="924" y="50" text-anchor="middle">db users</text>
+<rect class="box ext" x="36" y="80" width="504" height="26" rx="6"/>
+<text class="muted" x="288" y="98" text-anchor="middle">code verified: identity exists</text>
+<path class="edge hot" d="M79 140 L497 140" marker-end="url(#ah-reg)"/>
+<circle class="stepdot" cx="92" cy="140" r="9"/><text class="step" x="92" y="144">1</text>
+<text x="296" y="132" text-anchor="middle">POST /internal/kratos/after-registration</text>
+<path class="edge" d="M503 186 L921 186" marker-end="url(#ah-reg)"/>
+<circle class="stepdot" cx="516" cy="186" r="9"/><text class="step" x="516" y="190">2</text>
+<text x="720" y="178" text-anchor="middle">INSERT app_user (idempotent)</text>
+<path class="edge dash" d="M497 232 L79 232" marker-end="url(#ah-reg)"/>
+<circle class="stepdot" cx="484" cy="232" r="9"/><text class="step" x="484" y="236">3</text>
+<text x="280" y="224" text-anchor="middle">200 (Kratos ignores the answer)</text>
+</svg>
+<ol>
+<li>After a successful sign-up Kratos runs the <code>web_hook</code> configured under <code>selfservice.flows.registration.after.code.hooks</code> (before the <code>session</code> hook). It posts <code>{"identityId":..., "email":..., "phone":...}</code> to <code>http://user-service:8080/internal/kratos/after-registration</code>. The body comes from a Jsonnet function in <code>kratos.yml</code>.</li>
+<li>user-service inserts the profile row (<code>app_user</code>) with the <strong>Kratos identity id as the primary key</strong>, using <code>INSERT ... ON CONFLICT DO NOTHING</code> so a repeated or racing call is harmless.</li>
+<li>The hook is <code>response.ignore: true</code>: Kratos does not wait for, or care about, the answer. A user-service outage therefore never blocks a sign-up.</li>
+</ol>
+<div class="callout why"><span class="label">Why a safety net exists</span>
+<p>Because the hook is fire-and-forget, a lost call would leave a user with no profile. The first <code>GET /api/v1/me</code> creates the row from Kratos' admin API if it is missing (race-safe). Staff identities created through the Kratos admin API by <code>POST /admin/api/v1/staff</code> do not run registration hooks at all, so they also get their profile row lazily, if they ever call <code>/api/v1/me</code>.</p></div>
+<div class="callout warn"><span class="label">No authentication on this hook</span>
+<p><code>/internal/kratos/after-registration</code> (and notification-service's <code>/internal/kratos/*</code>) check no secret, because Kratos' hook configuration is static and would have to carry it in <code>kratos.yml</code>. They are not routed by the gateway and only reachable inside the compose network (and on localhost ports 8085 and 8086 in dev). Worst case: someone inside the network creates an empty profile for an id, or triggers a message. Adding a shared-secret header is on the to-do list.</p></div>
+</section>
+
+<section>
+<h2 id="user-request">3. Authenticated user request (forward-auth, X-User-Id)</h2>
+<svg class="diagram" viewBox="0 0 1000 430" role="img" aria-label="Authenticated user request"><title>Authenticated user request</title>
+<defs><marker id="ah-user" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z"/></marker></defs>
+<line class="lane" x1="76" y1="60" x2="76" y2="422"/>
+<rect class="box client" x="1" y="14" width="150" height="46" rx="8"/>
+<text class="title" x="76" y="34" text-anchor="middle">Mobile app</text>
+<text class="muted" x="76" y="50" text-anchor="middle">Flutter</text>
+<line class="lane" x1="359" y1="60" x2="359" y2="422"/>
+<rect class="box tool" x="284" y="14" width="150" height="46" rx="8"/>
+<text class="title" x="359" y="34" text-anchor="middle">APISIX</text>
+<text class="muted" x="359" y="50" text-anchor="middle">forward-auth</text>
+<line class="lane" x1="641" y1="60" x2="641" y2="422"/>
+<rect class="box ours" x="566" y="14" width="150" height="46" rx="8"/>
+<text class="title" x="641" y="34" text-anchor="middle">user-service</text>
+<text class="muted" x="641" y="50" text-anchor="middle">verify + API</text>
+<line class="lane" x1="924" y1="60" x2="924" y2="422"/>
+<rect class="box tool" x="849" y="14" width="150" height="46" rx="8"/>
+<text class="title" x="924" y="34" text-anchor="middle">Kratos</text>
+<text class="muted" x="924" y="50" text-anchor="middle">whoami</text>
+<path class="edge" d="M79 94 L356 94" marker-end="url(#ah-user)"/>
+<circle class="stepdot" cx="92" cy="94" r="9"/><text class="step" x="92" y="98">1</text>
+<text x="225" y="86" text-anchor="middle">GET /api/v1/me  Bearer token</text>
+<path class="edge" d="M362 140 L638 140" marker-end="url(#ah-user)"/>
+<circle class="stepdot" cx="375" cy="140" r="9"/><text class="step" x="375" y="144">2</text>
+<text x="508" y="132" text-anchor="middle">GET /internal/auth/verify (+secret)</text>
+<path class="edge" d="M644 186 L921 186" marker-end="url(#ah-user)"/>
+<circle class="stepdot" cx="657" cy="186" r="9"/><text class="step" x="657" y="190">3</text>
+<text x="791" y="178" text-anchor="middle">GET /sessions/whoami</text>
+<path class="edge dash" d="M921 232 L644 232" marker-end="url(#ah-user)"/>
+<circle class="stepdot" cx="908" cy="232" r="9"/><text class="step" x="908" y="236">4</text>
+<text x="775" y="224" text-anchor="middle">session, identity id</text>
+<path class="edge dash" d="M638 278 L362 278" marker-end="url(#ah-user)"/>
+<circle class="stepdot" cx="625" cy="278" r="9"/><text class="step" x="625" y="282">5</text>
+<text x="492" y="270" text-anchor="middle">200 + X-User-Id</text>
+<path class="edge hot" d="M362 324 L638 324" marker-end="url(#ah-user)"/>
+<circle class="stepdot" cx="375" cy="324" r="9"/><text class="step" x="375" y="328">6</text>
+<text x="508" y="316" text-anchor="middle">GET /api/v1/me  X-User-Id, secret</text>
+<path class="edge dash" d="M638 370 L79 370" marker-end="url(#ah-user)"/>
+<circle class="stepdot" cx="625" cy="370" r="9"/><text class="step" x="625" y="374">7</text>
+<text x="351" y="362" text-anchor="middle">profile JSON (via gateway)</text>
+</svg>
+<ol>
+<li>The app calls, for example, <code>GET /api/v1/me</code> with <code>Authorization: Bearer $TOKEN</code>. The gateway route is <code>me</code> (limit 300 per minute per IP) and has the <code>forward-auth</code> plugin.</li>
+<li><code>forward-auth</code> makes a side request to <code>user-service /internal/auth/verify</code>, forwarding the client's <code>Authorization</code> and <code>Cookie</code> headers and adding <code>X-Gateway-Secret</code>. user-service's <code>GatewayAuthFilter</code> rejects the call with <code>401</code> if that secret is wrong.</li>
+<li>user-service asks Kratos <code>GET /sessions/whoami</code> with the same credentials. Kratos' own answer carries the identity in the <em>body</em>, not in headers, which is why this small translator exists.</li>
+<li>Kratos answers with the session; user-service reads <code>active</code> and <code>identity.id</code>. A <code>401/403</code> from Kratos means "invalid session". A Kratos outage or 5xx becomes <code>503</code>, not <code>401</code>, so an outage is not mistaken for a bad token.</li>
+<li>user-service answers <code>200</code> with the header <code>X-User-Id: &lt;identity id&gt;</code> (or <code>401</code>). On a non-200 the gateway returns that answer to the client and never contacts the upstream. If the verify call itself fails the gateway answers <code>503</code> (<code>status_on_error: 503</code>).</li>
+<li>The gateway forwards the original request to the upstream, <strong>setting</strong> <code>X-User-Id</code> from step 5 (replacing anything the client sent, tested by <code>journey.py</code>) and setting <code>X-Gateway-Secret</code> via <code>proxy-rewrite</code>. The service requires both: without the secret or without a valid UUID <code>X-User-Id</code> it answers <code>401</code>.</li>
+<li>The upstream answers; the gateway relays it. This same forward-auth is used on <code>/api/v1/apps*</code> (served by registry-service) and <code>/api/v1/me/notifications*</code> (served by notification-service); only the upstream differs. The user id is always the Kratos identity id.</li>
+</ol>
+</section>
+
+<section>
+<h2 id="staff-request">4. Staff request (X-Staff-Id, X-Staff-Role, aal2)</h2>
+<svg class="diagram" viewBox="0 0 1000 476" role="img" aria-label="Staff request through the gateway"><title>Staff request through the gateway</title>
+<defs><marker id="ah-staff" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z"/></marker></defs>
+<line class="lane" x1="76" y1="60" x2="76" y2="468"/>
+<rect class="box client" x="1" y="14" width="150" height="46" rx="8"/>
+<text class="title" x="76" y="34" text-anchor="middle">Dashboard</text>
+<text class="muted" x="76" y="50" text-anchor="middle">staff browser</text>
+<line class="lane" x1="359" y1="60" x2="359" y2="468"/>
+<rect class="box tool" x="284" y="14" width="150" height="46" rx="8"/>
+<text class="title" x="359" y="34" text-anchor="middle">APISIX</text>
+<text class="muted" x="359" y="50" text-anchor="middle">forward-auth</text>
+<line class="lane" x1="641" y1="60" x2="641" y2="468"/>
+<rect class="box ours" x="566" y="14" width="150" height="46" rx="8"/>
+<text class="title" x="641" y="34" text-anchor="middle">registry-service</text>
+<text class="muted" x="641" y="50" text-anchor="middle">verify + API</text>
+<line class="lane" x1="924" y1="60" x2="924" y2="468"/>
+<rect class="box tool" x="849" y="14" width="150" height="46" rx="8"/>
+<text class="title" x="924" y="34" text-anchor="middle">Kratos</text>
+<text class="muted" x="924" y="50" text-anchor="middle">whoami</text>
+<path class="edge" d="M79 94 L356 94" marker-end="url(#ah-staff)"/>
+<circle class="stepdot" cx="92" cy="94" r="9"/><text class="step" x="92" y="98">1</text>
+<text x="225" y="86" text-anchor="middle">GET /admin/api/v1/apps  Bearer</text>
+<path class="edge" d="M362 140 L638 140" marker-end="url(#ah-staff)"/>
+<circle class="stepdot" cx="375" cy="140" r="9"/><text class="step" x="375" y="144">2</text>
+<text x="508" y="132" text-anchor="middle">GET /internal/staff/verify</text>
+<path class="edge" d="M644 186 L921 186" marker-end="url(#ah-staff)"/>
+<circle class="stepdot" cx="657" cy="186" r="9"/><text class="step" x="657" y="190">3</text>
+<text x="791" y="178" text-anchor="middle">GET /sessions/whoami</text>
+<path class="edge dash" d="M921 232 L644 232" marker-end="url(#ah-staff)"/>
+<circle class="stepdot" cx="908" cy="232" r="9"/><text class="step" x="908" y="236">4</text>
+<text x="775" y="224" text-anchor="middle">session, role, aal</text>
+<path class="edge" d="M641 268 L675 268 L675 286 L644 286" marker-end="url(#ah-staff)"/>
+<circle class="stepdot" cx="625" cy="278" r="9"/><text class="step" x="625" y="282">5</text>
+<text x="683" y="281">active staff row? role? aal2?</text>
+<path class="edge dash" d="M638 324 L362 324" marker-end="url(#ah-staff)"/>
+<circle class="stepdot" cx="625" cy="324" r="9"/><text class="step" x="625" y="328">6</text>
+<text x="492" y="316" text-anchor="middle">200 X-Staff-Id, X-Staff-Role</text>
+<path class="edge hot" d="M362 370 L638 370" marker-end="url(#ah-staff)"/>
+<circle class="stepdot" cx="375" cy="370" r="9"/><text class="step" x="375" y="374">7</text>
+<text x="508" y="362" text-anchor="middle">GET /admin/api/v1/apps + headers</text>
+<path class="edge dash" d="M638 416 L79 416" marker-end="url(#ah-staff)"/>
+<circle class="stepdot" cx="625" cy="416" r="9"/><text class="step" x="625" y="420">8</text>
+<text x="351" y="408" text-anchor="middle">JSON (audit written on changes)</text>
+</svg>
+<ol>
+<li>The dashboard calls <code>/admin/api/v1/...</code> with the staff member's session token. Routes <code>admin-api</code> (and the more specific <code>admin-notification</code> for <code>/admin/api/v1/notification/*</code>) use <code>forward-auth</code> to registry-service.</li>
+<li>The gateway calls <code>registry-service /internal/staff/verify</code> with only the <code>Authorization</code> header plus <code>X-Gateway-Secret</code>.</li>
+<li>registry-service asks Kratos <code>whoami</code>. If the identity has an authenticator app enrolled but this session has not completed that step, Kratos itself answers <code>403</code>; registry-service reports it as <code>403 mfa_required</code>.</li>
+<li>Kratos returns the session, including <code>identity.metadata_public.role</code> and <code>authenticator_assurance_level</code>.</li>
+<li>registry-service decides: is there an <code>ACTIVE</code> row in its <code>staff</code> table with a valid role (otherwise <code>403 not_staff</code>), and, because <code>ADMIN_REQUIRE_AAL2</code> is <code>true</code>, is the session <strong>aal2</strong> (otherwise <code>403 mfa_required</code>)? Aal2 means the person proved both the emailed code and the authenticator-app code.</li>
+<li>On success it answers <code>200</code> with <code>X-Staff-Id</code> and <code>X-Staff-Role</code>. The gateway sets both on the forwarded request, plus <code>X-Gateway-Secret</code>, plus <code>X-Client-IP: $remote_addr</code> (used in the audit log).</li>
+<li>The controller enforces the role per endpoint (<code>VIEWER</code> reads, <code>ADMIN</code> changes, <code>SUPER_ADMIN</code> manages staff and revives killed apps) and writes every change to the audit log.</li>
+<li>JSON answer. The same path is used for the notification admin API (templates, delivery log, usage), which notification-service serves behind the same gateway checks.</li>
+</ol>
+<div class="callout why"><span class="label">Why the role lives in Kratos too</span>
+<p>The role is stored in the Kratos identity's <code>metadata_public.role</code> (only the Kratos admin API can write it; no self-service flow lets a user edit it) and mirrored in registry-service's <code>staff</code> table for listing, status and audit. registry-service checks <em>both</em>: the Kratos session must carry a known role and the local row must be <code>ACTIVE</code>, so disabling a person in the table cuts access at once even though their session is still valid in Kratos (disabling also revokes their sessions).</p></div>
+</section>
+
+<section>
+<h2 id="partner-request">5. Partner notification request</h2>
+<p>A partner is a mini app's own server. It has no Adera login. It proves who it is by an RSA signature over each request, and we prove who we are by signing the answer and every callback. The signing rules are in <a href="06-security.html#signing">Security: ADERA-SIG-1</a>.</p>
+<h3 id="partner-accept">5a. Accepting the request (synchronous)</h3>
+<svg class="diagram" viewBox="0 0 1000 430" role="img" aria-label="Partner request, synchronous part"><title>Partner request, synchronous part</title>
+<defs><marker id="ah-pa" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z"/></marker></defs>
+<line class="lane" x1="76" y1="60" x2="76" y2="422"/>
+<rect class="box client" x="1" y="14" width="150" height="46" rx="8"/>
+<text class="title" x="76" y="34" text-anchor="middle">Partner server</text>
+<text class="muted" x="76" y="50" text-anchor="middle">mini-app backend</text>
+<line class="lane" x1="246" y1="60" x2="246" y2="422"/>
+<rect class="box tool" x="171" y="14" width="150" height="46" rx="8"/>
+<text class="title" x="246" y="34" text-anchor="middle">APISIX</text>
+<text class="muted" x="246" y="50" text-anchor="middle">no login here</text>
+<line class="lane" x1="415" y1="60" x2="415" y2="422"/>
+<rect class="box ours" x="340" y="14" width="150" height="46" rx="8"/>
+<text class="title" x="415" y="34" text-anchor="middle">notification-svc</text>
+<text class="muted" x="415" y="50" text-anchor="middle">auth filter</text>
+<line class="lane" x1="585" y1="60" x2="585" y2="422"/>
+<rect class="box ours" x="510" y="14" width="150" height="46" rx="8"/>
+<text class="title" x="585" y="34" text-anchor="middle">registry-service</text>
+<text class="muted" x="585" y="50" text-anchor="middle">keys, app config</text>
+<line class="lane" x1="754" y1="60" x2="754" y2="422"/>
+<rect class="box ours" x="679" y="14" width="150" height="46" rx="8"/>
+<text class="title" x="754" y="34" text-anchor="middle">user-service</text>
+<text class="muted" x="754" y="50" text-anchor="middle">alias lookup</text>
+<line class="lane" x1="924" y1="60" x2="924" y2="422"/>
+<rect class="box store" x="849" y="14" width="150" height="46" rx="8"/>
+<text class="title" x="924" y="34" text-anchor="middle">Postgres</text>
+<text class="muted" x="924" y="50" text-anchor="middle">db notification</text>
+<path class="edge" d="M79 94 L243 94" marker-end="url(#ah-pa)"/>
+<circle class="stepdot" cx="92" cy="94" r="9"/><text class="step" x="92" y="98">1</text>
+<text x="169" y="86" text-anchor="middle">POST /v1/notifications</text>
+<path class="edge" d="M249 140 L412 140" marker-end="url(#ah-pa)"/>
+<circle class="stepdot" cx="262" cy="140" r="9"/><text class="step" x="262" y="144">2</text>
+<text x="338" y="132" text-anchor="middle">forward + X-Client-IP</text>
+<path class="edge" d="M418 186 L582 186" marker-end="url(#ah-pa)"/>
+<circle class="stepdot" cx="431" cy="186" r="9"/><text class="step" x="431" y="190">3</text>
+<text x="508" y="178" text-anchor="middle">GET key, app context</text>
+<path class="edge" d="M415 222 L449 222 L449 240 L418 240" marker-end="url(#ah-pa)"/>
+<circle class="stepdot" cx="399" cy="232" r="9"/><text class="step" x="399" y="236">4</text>
+<text x="457" y="235">verify RS256, skew, IP</text>
+<path class="edge" d="M418 278 L751 278" marker-end="url(#ah-pa)"/>
+<circle class="stepdot" cx="431" cy="278" r="9"/><text class="step" x="431" y="282">5</text>
+<text x="593" y="270" text-anchor="middle">resolve alias, context</text>
+<path class="edge hot" d="M418 324 L921 324" marker-end="url(#ah-pa)"/>
+<circle class="stepdot" cx="431" cy="324" r="9"/><text class="step" x="431" y="328">6</text>
+<text x="678" y="316" text-anchor="middle">quota + insert QUEUED</text>
+<path class="edge dash" d="M412 370 L79 370" marker-end="url(#ah-pa)"/>
+<circle class="stepdot" cx="399" cy="370" r="9"/><text class="step" x="399" y="374">7</text>
+<text x="238" y="362" text-anchor="middle">202 QUEUED (signed by us)</text>
+</svg>
+<ol>
+<li>The partner POSTs <code>/v1/notifications</code> with <code>X-Adera-Key-Id</code>, <code>X-Adera-Timestamp</code>, <code>X-Adera-Signature</code>. Gateway route <code>partner-api</code>: limit <strong>600 per minute per IP</strong>, no forward-auth.</li>
+<li>The gateway sets <code>X-Gateway-Secret</code> and <code>X-Client-IP: $remote_addr</code> (overwriting any client value) and forwards to notification-service. The service believes <code>X-Client-IP</code> only when the secret matches.</li>
+<li><code>PartnerAuthFilter</code> reads the body (max 64 KB, else <code>413 request_too_large</code>), checks the three headers (<code>401 missing_signature</code>), the timestamp (<code>401 invalid_timestamp</code> or <code>stale_timestamp</code>, allowed skew 5 minutes), then asks registry-service for the public key (<code>GET /internal/partner-keys/{keyId}</code>, <code>401 unknown_key</code> or <code>key_revoked_or_expired</code>) and the app context (<code>GET /internal/apps/{appId}/context</code>; the environment is always this deployment's <code>ADERA_ENV</code>). Both calls carry <code>X-Internal-Secret</code> and are cached for 15 seconds.</li>
+<li>It rebuilds the canonical string from the request as received and verifies the RS256 signature (<code>401 invalid_signature</code>). Then: does the key belong to this deployment's environment (a DEV key on a PROD deployment or the reverse is <code>403 wrong_environment</code>), is the app usable here (DEV works for any app that is not killed; PROD only when the app status is LIVE; else <code>403 app_&lt;status&gt;</code>), and is the caller's address inside this environment's allowed list (<code>403 ip_not_allowed</code>)?</li>
+<li><code>NotificationAcceptor</code> validates the body, checks idempotency by <code>externalId</code> (same request again: <code>200 replayed:true</code>; different request: <code>409 external_id_reused</code>), loads the template (must belong to the app, active and within its validity window), checks the values against the template's declared params (length, control characters, no links unless allowed), and resolves the <strong>pseudonymous id</strong>: user-service <code>GET /internal/aliases/resolve</code> then <code>GET /internal/users/{id}/delivery-context</code> (phone, email, language, push tokens, mute switches). A deleted, suspended or unknown user is always <code>422 user_unreachable</code> so partners cannot probe for accounts.</li>
+<li>It chooses the channel itself (the partner never does): an <code>IN_APP</code> template goes to inbox plus push (needs <code>notify.inapp</code>); a <code>DIRECT</code> template goes by SMS if the user has a phone and the app has <code>notify.sms</code>, else email if the user has an email and the app has <code>notify.email</code>. A muted channel is stored as <code>SUPPRESSED</code> (answered <code>200</code>). Otherwise in one database transaction it reserves quota (<code>usage_daily</code>, <code>usage_total</code>, serialised with a row lock; over a limit gives <code>429 quota_exceeded</code> with the limit name, and nothing is stored) and inserts the notification as <code>QUEUED</code>. This table <em>is</em> the queue.</li>
+<li><code>202</code> with <code>{"status":"QUEUED", ...}</code>. <code>ResponseSigningFilter</code> adds <code>X-Adera-Key-Id</code>, <code>X-Adera-Timestamp</code> and <code>X-Adera-Signature</code>, computed with <em>our</em> key over the response and bound to the request signature it answers.</li>
+</ol>
+<h3 id="partner-deliver">5b. Delivery and callback (asynchronous)</h3>
+<svg class="diagram" viewBox="0 0 1000 430" role="img" aria-label="Partner request, background delivery and callback"><title>Partner request, background delivery and callback</title>
+<defs><marker id="ah-pb" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z"/></marker></defs>
+<line class="lane" x1="76" y1="60" x2="76" y2="422"/>
+<rect class="box ours" x="1" y="14" width="150" height="46" rx="8"/>
+<text class="title" x="76" y="34" text-anchor="middle">DeliveryWorker</text>
+<text class="muted" x="76" y="50" text-anchor="middle">every 1 s</text>
+<line class="lane" x1="288" y1="60" x2="288" y2="422"/>
+<rect class="box store" x="213" y="14" width="150" height="46" rx="8"/>
+<text class="title" x="288" y="34" text-anchor="middle">Postgres</text>
+<text class="muted" x="288" y="50" text-anchor="middle">notification</text>
+<line class="lane" x1="500" y1="60" x2="500" y2="422"/>
+<rect class="box ext" x="425" y="14" width="150" height="46" rx="8"/>
+<text class="title" x="500" y="34" text-anchor="middle">Provider</text>
+<text class="muted" x="500" y="50" text-anchor="middle">SMS / email / FCM</text>
+<line class="lane" x1="712" y1="60" x2="712" y2="422"/>
+<rect class="box ours" x="637" y="14" width="150" height="46" rx="8"/>
+<text class="title" x="712" y="34" text-anchor="middle">CallbackWorker</text>
+<text class="muted" x="712" y="50" text-anchor="middle">every 2 s</text>
+<line class="lane" x1="924" y1="60" x2="924" y2="422"/>
+<rect class="box client" x="849" y="14" width="150" height="46" rx="8"/>
+<text class="title" x="924" y="34" text-anchor="middle">Partner server</text>
+<text class="muted" x="924" y="50" text-anchor="middle">callbackUrl</text>
+<path class="edge" d="M79 94 L285 94" marker-end="url(#ah-pb)"/>
+<circle class="stepdot" cx="92" cy="94" r="9"/><text class="step" x="92" y="98">1</text>
+<text x="190" y="86" text-anchor="middle">claim due rows</text>
+<path class="edge" d="M76 130 L110 130 L110 148 L79 148" marker-end="url(#ah-pb)"/>
+<circle class="stepdot" cx="60" cy="140" r="9"/><text class="step" x="60" y="144">2</text>
+<text x="118" y="143">re-check user, render template</text>
+<path class="edge hot" d="M79 186 L497 186" marker-end="url(#ah-pb)"/>
+<circle class="stepdot" cx="92" cy="186" r="9"/><text class="step" x="92" y="190">3</text>
+<text x="296" y="178" text-anchor="middle">send SMS / email / push</text>
+<path class="edge" d="M79 232 L285 232" marker-end="url(#ah-pb)"/>
+<circle class="stepdot" cx="92" cy="232" r="9"/><text class="step" x="92" y="236">4</text>
+<text x="190" y="224" text-anchor="middle">set status, queue callback</text>
+<path class="edge" d="M709 278 L291 278" marker-end="url(#ah-pb)"/>
+<circle class="stepdot" cx="696" cy="278" r="9"/><text class="step" x="696" y="282">5</text>
+<text x="492" y="270" text-anchor="middle">claim due callbacks</text>
+<path class="edge hot" d="M715 324 L921 324" marker-end="url(#ah-pb)"/>
+<circle class="stepdot" cx="728" cy="324" r="9"/><text class="step" x="728" y="328">6</text>
+<text x="826" y="316" text-anchor="middle">POST signed status report</text>
+<path class="edge dash" d="M921 370 L715 370" marker-end="url(#ah-pb)"/>
+<circle class="stepdot" cx="908" cy="370" r="9"/><text class="step" x="908" y="374">7</text>
+<text x="810" y="362" text-anchor="middle">2xx = done, else retry</text>
+</svg>
+<ol>
+<li><code>DeliveryWorker</code> runs every second. In one SQL statement it claims up to 20 due rows (<code>QUEUED</code> or <code>RETRYING</code> whose time has come, or <code>PROCESSING</code> whose 60-second lock expired) using <code>FOR UPDATE SKIP LOCKED</code>, so several service instances can run without sending twice and a crashed worker's claim simply expires.</li>
+<li><code>DeliveryService</code> re-reads the user (their phone, mute or status may have changed), renders the template in the user's language, and for a synthetic user (<code>u_p_test_*</code>, DEV only) just records an attempt with provider <code>sandbox</code> and marks <code>SENT</code>; everyone else goes through the real pipeline with the dev providers (console SMS, Mailpit, fake push).</li>
+<li>It sends through the channel chosen at acceptance (Twilio or console, Resend or Mailpit, FCM or fake). With real providers and an allowlist set, other recipients are <code>SUPPRESSED</code> (<code>not_allowlisted</code>).</li>
+<li>It records a row in <code>notification_attempt</code> and sets the final or next status: <code>SENT</code>; <code>FAILED</code> (permanent provider error such as a bad number); <code>UNREACHABLE</code> (user deleted or suspended, no phone or email); <code>SUPPRESSED</code>; <code>EXPIRED</code> (kept trying until the deadline); otherwise <code>RETRYING</code> with backoff 30 s doubling up to 1 hour, at most 8 attempts, with plus or minus 10% jitter. When a status is final and the partner gave a <code>callbackUrl</code>, a signed report is queued in <code>callback</code>.</li>
+<li><code>CallbackWorker</code> runs every 2 seconds and claims due callbacks the same way.</li>
+<li>It POSTs <code>{"event":"notification.status", ...}</code> to the partner. <code>UrlGuard</code> first refuses anything that is not https on port 443 or 8443 with a host whose <em>every</em> resolved address is public (SSRF guard); redirects are never followed. Headers: <code>X-Adera-Event</code>, <code>X-Adera-Key-Id</code>, <code>X-Adera-Timestamp</code>, <code>X-Adera-Signature</code> (our key, same canonical form as a request) and <code>Idempotency-Key</code>.</li>
+<li>A <code>2xx</code> marks the callback <code>DELIVERED</code>. Anything else retries after 1 minute doubling to 6 hours, up to 8 attempts; a refused address fails at once.</li>
+</ol>
+<p>The partner can also poll <code>GET /v1/notifications/{externalId}</code>, and staff can see every attempt and callback at <code>GET /admin/api/v1/notification/notifications/{id}</code>.</p>
+<div class="callout why"><span class="label">Why a Postgres table and not RabbitMQ</span>
+<p>The notification table with <code>SKIP LOCKED</code> gives durable, restart-safe, multi-instance queueing with no extra moving part, and the "queue" rows are also the delivery record staff need. RabbitMQ is installed and ready for events between services, but nothing uses it yet.</p></div>
+</section>
+
+<section>
+<h2 id="inbox-push">6. Inbox and push</h2>
+<svg class="diagram" viewBox="0 0 1000 338" role="img" aria-label="In-app notification: inbox row and push"><title>In-app notification: inbox row and push</title>
+<defs><marker id="ah-inbox" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z"/></marker></defs>
+<line class="lane" x1="76" y1="60" x2="76" y2="330"/>
+<rect class="box ours" x="1" y="14" width="150" height="46" rx="8"/>
+<text class="title" x="76" y="34" text-anchor="middle">DeliveryWorker</text>
+<text class="muted" x="76" y="50" text-anchor="middle">notification-svc</text>
+<line class="lane" x1="288" y1="60" x2="288" y2="330"/>
+<rect class="box store" x="213" y="14" width="150" height="46" rx="8"/>
+<text class="title" x="288" y="34" text-anchor="middle">Postgres</text>
+<text class="muted" x="288" y="50" text-anchor="middle">inbox_item</text>
+<line class="lane" x1="500" y1="60" x2="500" y2="330"/>
+<rect class="box ours" x="425" y="14" width="150" height="46" rx="8"/>
+<text class="title" x="500" y="34" text-anchor="middle">user-service</text>
+<text class="muted" x="500" y="50" text-anchor="middle">devices</text>
+<line class="lane" x1="712" y1="60" x2="712" y2="330"/>
+<rect class="box ext" x="637" y="14" width="150" height="46" rx="8"/>
+<text class="title" x="712" y="34" text-anchor="middle">Firebase FCM</text>
+<text class="muted" x="712" y="50" text-anchor="middle">fake in dev</text>
+<line class="lane" x1="924" y1="60" x2="924" y2="330"/>
+<rect class="box client" x="849" y="14" width="150" height="46" rx="8"/>
+<text class="title" x="924" y="34" text-anchor="middle">Mobile app</text>
+<text class="muted" x="924" y="50" text-anchor="middle">bell menu</text>
+<path class="edge" d="M79 94 L497 94" marker-end="url(#ah-inbox)"/>
+<circle class="stepdot" cx="92" cy="94" r="9"/><text class="step" x="92" y="98">1</text>
+<text x="296" y="86" text-anchor="middle">delivery-context: push tokens</text>
+<path class="edge hot" d="M79 140 L285 140" marker-end="url(#ah-inbox)"/>
+<circle class="stepdot" cx="92" cy="140" r="9"/><text class="step" x="92" y="144">2</text>
+<text x="190" y="132" text-anchor="middle">INSERT inbox_item</text>
+<path class="edge" d="M79 186 L709 186" marker-end="url(#ah-inbox)"/>
+<circle class="stepdot" cx="92" cy="186" r="9"/><text class="step" x="92" y="190">3</text>
+<text x="402" y="178" text-anchor="middle">push to each active token</text>
+<path class="edge bad" d="M79 232 L497 232" marker-end="url(#ah-inbox)"/>
+<circle class="stepdot" cx="92" cy="232" r="9"/><text class="step" x="92" y="236">4</text>
+<text x="296" y="224" text-anchor="middle">token unregistered: deactivate</text>
+<path class="edge" d="M921 278 L291 278" marker-end="url(#ah-inbox)"/>
+<circle class="stepdot" cx="908" cy="278" r="9"/><text class="step" x="908" y="282">5</text>
+<text x="598" y="270" text-anchor="middle">GET /api/v1/me/notifications</text>
+</svg>
+<ol>
+<li>For an <code>IN_APP</code> notification the worker asks user-service for the user's delivery context, including the list of active FCM tokens.</li>
+<li>It writes the <code>inbox_item</code> row first. This is the reliable part: the user sees it whenever they open the app.</li>
+<li>Then it pushes to every active token through the FCM provider (<code>fake</code> in dev: nothing leaves the machine; <code>firebase</code> when a service account exists). Push is best effort on top of the inbox row.</li>
+<li>If Firebase says a token is unregistered, notification-service calls user-service <code>POST /internal/devices/deactivate</code> so the token is not tried again; other failures are recorded as transient. The notification is then marked <code>SENT</code>.</li>
+<li>The app reads its bell menu at <code>GET /api/v1/me/notifications</code> (same forward-auth as step 3; the route is served by notification-service), with <code>/unread-count</code>, <code>PUT /{id}/read</code> and <code>PUT /read-all</code>. Users mute a channel per app at <code>/api/v1/me/apps/{appId}/preferences</code>.</li>
+</ol>
+</section>
+
+<section>
+<h2 id="observability-flow">7. Observability flow (traces, metrics, logs)</h2>
+<svg class="diagram" viewBox="0 0 1000 430" role="img" aria-label="Observability flow"><title>Observability flow</title>
+<defs><marker id="ah-obs" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z"/></marker></defs>
+<line class="lane" x1="76" y1="60" x2="76" y2="422"/>
+<rect class="box tool" x="1" y="14" width="150" height="46" rx="8"/>
+<text class="title" x="76" y="34" text-anchor="middle">APISIX, Kratos</text>
+<text class="muted" x="76" y="50" text-anchor="middle">traces, metrics</text>
+<line class="lane" x1="246" y1="60" x2="246" y2="422"/>
+<rect class="box ours" x="171" y="14" width="150" height="46" rx="8"/>
+<text class="title" x="246" y="34" text-anchor="middle">Java services</text>
+<text class="muted" x="246" y="50" text-anchor="middle">traces, metrics, logs</text>
+<line class="lane" x1="415" y1="60" x2="415" y2="422"/>
+<rect class="box tool" x="340" y="14" width="150" height="46" rx="8"/>
+<text class="title" x="415" y="34" text-anchor="middle">OTel Collector</text>
+<text class="muted" x="415" y="50" text-anchor="middle">:4318</text>
+<line class="lane" x1="585" y1="60" x2="585" y2="422"/>
+<rect class="box tool" x="510" y="14" width="150" height="46" rx="8"/>
+<text class="title" x="585" y="34" text-anchor="middle">Tempo</text>
+<text class="muted" x="585" y="50" text-anchor="middle">traces 3 d</text>
+<line class="lane" x1="754" y1="60" x2="754" y2="422"/>
+<rect class="box tool" x="679" y="14" width="150" height="46" rx="8"/>
+<text class="title" x="754" y="34" text-anchor="middle">Prometheus</text>
+<text class="muted" x="754" y="50" text-anchor="middle">metrics 15 d</text>
+<line class="lane" x1="924" y1="60" x2="924" y2="422"/>
+<rect class="box client" x="849" y="14" width="150" height="46" rx="8"/>
+<text class="title" x="924" y="34" text-anchor="middle">Grafana</text>
+<text class="muted" x="924" y="50" text-anchor="middle">:3001</text>
+<path class="edge" d="M79 94 L412 94" marker-end="url(#ah-obs)"/>
+<circle class="stepdot" cx="92" cy="94" r="9"/><text class="step" x="92" y="98">1</text>
+<text x="254" y="86" text-anchor="middle">OTLP spans (apisix, kratos)</text>
+<path class="edge" d="M249 140 L412 140" marker-end="url(#ah-obs)"/>
+<circle class="stepdot" cx="262" cy="140" r="9"/><text class="step" x="262" y="144">2</text>
+<text x="338" y="132" text-anchor="middle">OTLP spans (spring)</text>
+<path class="edge" d="M418 186 L582 186" marker-end="url(#ah-obs)"/>
+<circle class="stepdot" cx="431" cy="186" r="9"/><text class="step" x="431" y="190">3</text>
+<text x="508" y="178" text-anchor="middle">traces</text>
+<path class="edge dash" d="M751 232 L79 232" marker-end="url(#ah-obs)"/>
+<circle class="stepdot" cx="738" cy="232" r="9"/><text class="step" x="738" y="236">4</text>
+<text x="407" y="224" text-anchor="middle">scrape every 15 s</text>
+<path class="edge dash" d="M751 278 L249 278" marker-end="url(#ah-obs)"/>
+<circle class="stepdot" cx="738" cy="278" r="9"/><text class="step" x="738" y="282">5</text>
+<text x="492" y="270" text-anchor="middle">scrape /actuator/prometheus</text>
+<path class="edge" d="M921 324 L588 324" marker-end="url(#ah-obs)"/>
+<circle class="stepdot" cx="908" cy="324" r="9"/><text class="step" x="908" y="328">6</text>
+<text x="746" y="316" text-anchor="middle">query traces</text>
+<path class="edge" d="M921 370 L757 370" marker-end="url(#ah-obs)"/>
+<circle class="stepdot" cx="908" cy="370" r="9"/><text class="step" x="908" y="374">7</text>
+<text x="831" y="362" text-anchor="middle">query metrics</text>
+</svg>
+<ol>
+<li><strong>Traces.</strong> APISIX (OpenTelemetry plugin, settings in <code>plugin_metadata</code>, sampler <code>always_on</code> in dev) and Kratos (<code>tracing.provider: otel</code>) send OTLP/HTTP spans to <code>otel-collector:4318</code>. The Java services send theirs to <code>OTEL_TRACES_ENDPOINT</code> (also the collector); the gateway's trace context header lets one trace span gateway, Kratos and our services.</li>
+<li>The collector batches and forwards traces to <code>tempo:4317</code> (3-day retention).</li>
+<li><strong>Metrics.</strong> Prometheus scrapes every 15 seconds: APISIX <code>:9091/apisix/prometheus/metrics</code>, Kratos admin port <code>/admin/metrics/prometheus</code>, RabbitMQ <code>:15692</code>, the three Spring services at <code>/actuator/prometheus</code>, Loki, Tempo, Alloy and the collector. (Metrics are scraped, not pushed; the collector's <code>:8889</code> exporter is currently empty because no service sends metrics over OTLP.)</li>
+<li><strong>Logs.</strong> Every container writes to stdout; Alloy reads them through the Docker socket, labels them with <code>container</code> and <code>service</code>, and pushes them to Loki (7-day retention). Not drawn above for space: Alloy to Loki.</li>
+<li>Grafana has three provisioned data sources (Prometheus, Loki, Tempo; a trace links to the logs of the same minute). Dashboard: <em>Adera overview</em>. How to use it: <a href="09-guides.html#observability">Guides</a>.</li>
+</ol>
+</section>
+
+<section>
+<h2 id="trust-model">Trust model: who may call what</h2>
+<p>Four headers carry trust. Three are written <em>by the gateway</em> after it has checked something, one by our services among themselves.</p>
+<div class="table-wrap"><div class="table-wrap"><table>
+<thead><tr><th>Header</th><th>Written by</th><th>Meaning</th><th>Checked by</th><th>If missing or wrong</th></tr></thead>
+<tbody>
+<tr><td><code>X-Gateway-Secret</code></td><td>APISIX, on every proxied route that reaches our services (value from <code>USER_GATEWAY_SECRET</code>), overwriting any client value</td><td>"This request came through the gateway"</td><td>user-service (<code>/api/**</code>, <code>/internal/auth/verify</code>), registry-service (<code>/admin/api/**</code>, <code>/api/**</code>, <code>/internal/staff/verify</code>), notification-service (<code>/admin/api/**</code>, <code>/api/**</code>; on <code>/v1/**</code> only to decide whether to believe <code>X-Client-IP</code>)</td><td><code>401 {"error":"unauthorized"}</code></td></tr>
+<tr><td><code>X-User-Id</code></td><td>APISIX, copied from user-service's verify answer (<code>upstream_headers</code>), overwriting any client value</td><td>The Kratos identity id of the signed-in user</td><td>every <code>/api/**</code> controller (user, registry catalog, notification inbox)</td><td>401</td></tr>
+<tr><td><code>X-Staff-Id</code>, <code>X-Staff-Role</code></td><td>APISIX, copied from registry-service's staff verify answer</td><td>Active staff member's id and role (<code>VIEWER</code>, <code>ADMIN</code>, <code>SUPER_ADMIN</code>); only issued for aal2 sessions</td><td>every <code>/admin/api/**</code> controller</td><td>401 (headers invalid) or <code>403 insufficient_role</code> (role too low)</td></tr>
+<tr><td><code>X-Client-IP</code></td><td>APISIX (<code>$remote_addr</code>) on <code>admin-api</code> and <code>partner-api</code></td><td>The caller's address as the gateway saw it</td><td>registry-service (audit), notification-service (partner allowed addresses)</td><td>ignored; the socket address is used</td></tr>
+<tr><td><code>X-Internal-Secret</code></td><td>Our services, in calls to each other (value from <code>INTERNAL_API_SECRET</code>)</td><td>"A trusted Adera service is calling"</td><td>registry-service (<code>/internal/apps/**</code>, <code>/internal/partner-keys/**</code>), user-service (<code>/internal/aliases/**</code>, <code>/internal/users/**</code>, <code>/internal/devices/**</code>)</td><td><code>401</code></td></tr>
+</tbody></table></div></div>
+<ul>
+<li><strong>Header overwriting.</strong> Because APISIX <em>sets</em> these headers, a client cannot forge <code>X-User-Id</code> or <code>X-Staff-Role</code>. If the client sends its own, the gateway's value replaces it. This is verified by <code>journey.py</code> ("forged X-User-Id overridden").</li>
+<li><strong>Bypassing the gateway.</strong> The service ports 8085, 8086 and 8087 are published on localhost for development. Calling them directly without the gateway secret gives <code>401</code>. This is also tested ("bypassing the gateway rejected").</li>
+<li><strong>Constant-time comparison.</strong> All secret checks use <code>MessageDigest.isEqual</code>.</li>
+<li><strong>Internal-only routes.</strong> <code>/internal/**</code> is never routed by the gateway: a request to <code>/internal/...</code> on port 9080 finds no route (<code>404</code>). <code>/kratos/admin/*</code> is explicitly mocked as <code>403 {"error":"forbidden"}</code> so Kratos' admin API is unreachable from outside.</li>
+<li><strong>An empty secret disables its check.</strong> In every service, an unset <code>GATEWAY_SECRET</code> or <code>INTERNAL_API_SECRET</code> turns that check off (a warning is logged at start in registry-service). This exists for local development only; never run a deployment with an empty secret.</li>
+<li><strong>Known gaps.</strong> <code>/internal/kratos/after-registration</code> and <code>/internal/kratos/sms|email</code> have no authentication (compose network only). Both Java services that write to RustFS use its admin keys. See <a href="06-security.html#limitations">known limitations</a>.</li>
+</ul>
+<h3 id="route-table">Gateway routes at a glance</h3>
+<div class="table-wrap"><div class="table-wrap"><table>
+<thead><tr><th>Route id (priority)</th><th>Client path</th><th>Auth at the gateway</th><th>Limit per IP per minute</th><th>Upstream</th></tr></thead>
+<tbody>
+<tr><td><code>kratos-admin-blocked</code> (100)</td><td><code>/kratos/admin/*</code></td><td>-</td><td>-</td><td>mocked <code>403 {"error":"forbidden"}</code></td></tr>
+<tr><td><code>kratos-self-service-submit</code> (20)</td><td><code>POST /kratos/self-service/*</code></td><td>none (Kratos checks the flow)</td><td>10</td><td>kratos:4433, prefix <code>/kratos</code> removed</td></tr>
+<tr><td><code>kratos-public</code> (10)</td><td><code>/kratos/*</code></td><td>none</td><td>120</td><td>kratos:4433</td></tr>
+<tr><td><code>me-avatar</code> (30)</td><td><code>/api/v1/me/avatar</code></td><td>user session (forward-auth to user-service)</td><td>20</td><td>user-service</td></tr>
+<tr><td><code>me-notifications</code> (30)</td><td><code>/api/v1/me/notifications</code>, <code>/api/v1/me/notifications/*</code></td><td>user session</td><td>300</td><td>notification-service</td></tr>
+<tr><td><code>me</code> (20)</td><td><code>/api/v1/me</code>, <code>/api/v1/me/*</code></td><td>user session</td><td>300</td><td>user-service</td></tr>
+<tr><td><code>apps-catalog</code> (20)</td><td><code>/api/v1/apps</code>, <code>/api/v1/apps/*</code></td><td>user session</td><td>300</td><td>registry-service</td></tr>
+<tr><td><code>admin-notification</code> (30)</td><td><code>/admin/api/v1/notification/*</code></td><td>staff session aal2 (forward-auth to registry-service)</td><td>300</td><td>notification-service</td></tr>
+<tr><td><code>admin-api</code> (20)</td><td><code>/admin/api/v1</code>, <code>/admin/api/v1/*</code></td><td>staff session aal2</td><td>300</td><td>registry-service</td></tr>
+<tr><td><code>partner-api</code> (20)</td><td><code>/v1/*</code></td><td>none; the service checks the signature</td><td>600</td><td>notification-service</td></tr>
+<tr><td><code>partner-jwks</code> (20)</td><td><code>/.well-known/jwks.json</code></td><td>none (public)</td><td>120</td><td>notification-service</td></tr>
+</tbody></table></div></div>
+<p>Global rules on every route: <code>request-id</code> (<code>X-Request-Id</code> in the response), <code>prometheus</code>, <code>opentelemetry</code> (always on in dev) and <code>cors</code> (origin <code>http://localhost:3000</code>; methods GET, POST, PUT, PATCH, DELETE, OPTIONS; headers <code>Authorization</code>, <code>Content-Type</code>, <code>X-Request-Id</code>). Rate-limit counters are shared through Redis (<code>429</code> when exceeded). Anything that matches no route gets APISIX's default <code>404</code>.</p>
+<div class="callout"><span class="label">Note</span><p>The CORS header list does not include the partner signature headers or <code>X-Gateway-Secret</code>; partners are servers, not browsers, so this does not matter for them.</p></div>
+</section>
+
+<div class="pager"><a class="prev" href="04-services.html"><small>Previous</small>4. Services</a><a class="next" href="06-security.html"><small>Next</small>6. Security model</a></div>
+<p class="footer">Adera backend documentation &middot; last verified 2026-10-25 &middot; <a href="../index.html">contents</a></p>
+</main>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

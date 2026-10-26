@@ -1,0 +1,95 @@
+# Kratos config. Secrets (dsn, cookie, cipher) come from env, never from this file.
+serve:
+  public:
+    base_url: http://127.0.0.1:9080/kratos/
+  admin:
+    base_url: http://kratos:4434/
+
+identity:
+  default_schema_id: default
+  schemas:
+    - id: default
+      url: file:///etc/config/kratos/identity.schema.json
+
+selfservice:
+  default_browser_return_url: http://localhost:3000/
+  allowed_return_urls:
+    - http://localhost:3000/
+  methods:
+    password:
+      enabled: false
+    code:
+      enabled: true
+      passwordless_enabled: true
+      config:
+        lifespan: 5m
+    # Authenticator-app codes: the second step for dashboard staff (customers never enrol one).
+    totp:
+      enabled: true
+      config:
+        issuer: Adera
+  flows:
+    registration:
+      enabled: true
+      ui_url: http://localhost:3000/registration
+      lifespan: 10m
+      after:
+        code:
+          hooks:
+            # Create our profile row for the new identity. Non-blocking (ignore: true): a slow or down user-service
+            # must never block a sign-up; the profile is also created on first use if this call is ever lost.
+            - hook: web_hook
+              config:
+                url: http://user-service:8080/internal/kratos/after-registration
+                method: POST
+                body: base64://ZnVuY3Rpb24oY3R4KSB7IGlkZW50aXR5SWQ6IGN0eC5pZGVudGl0eS5pZCwgZW1haWw6IHN0ZC5nZXQoY3R4LmlkZW50aXR5LnRyYWl0cywgJ2VtYWlsJywgbnVsbCksIHBob25lOiBzdGQuZ2V0KGN0eC5pZGVudGl0eS50cmFpdHMsICdwaG9uZV9udW1iZXInLCBudWxsKSB9
+                response:
+                  ignore: true
+            - hook: session   # issue a session right after sign-up (native apps get a session_token)
+    login:
+      ui_url: http://localhost:3000/login
+      lifespan: 10m
+    settings:
+      ui_url: http://localhost:3000/settings
+      privileged_session_max_age: 15m
+    logout:
+      after:
+        default_browser_return_url: http://localhost:3000/login
+    error:
+      ui_url: http://localhost:3000/error
+
+session:
+  lifespan: 720h
+
+courier:
+  # Every message Kratos wants to send goes to our notification service, which decides how to deliver it
+  # (dev: log / Mailpit, live: Twilio / Resend) from SMS_PROVIDER / EMAIL_PROVIDER in .env.
+  delivery_strategy: http
+  http:
+    request_config:
+      url: http://notification-service:8080/internal/kratos/email
+      method: POST
+      headers:
+        Content-Type: application/json
+      body: base64://ZnVuY3Rpb24oY3R4KSB7IHJlY2lwaWVudDogY3R4LnJlY2lwaWVudCwgc3ViamVjdDogY3R4LnN1YmplY3QsIGJvZHk6IGN0eC5ib2R5LCBodG1sQm9keTogc3RkLmdldChjdHgsICdodG1sX2JvZHknLCBudWxsKSwgdGVtcGxhdGVUeXBlOiBzdGQuZ2V0KGN0eCwgJ3RlbXBsYXRlX3R5cGUnLCBudWxsKSB9
+  channels:
+    - id: sms
+      type: http
+      request_config:
+        url: http://notification-service:8080/internal/kratos/sms
+        method: POST
+        headers:
+          Content-Type: application/json
+        body: base64://ZnVuY3Rpb24oY3R4KSB7IHRvOiBjdHgucmVjaXBpZW50LCBib2R5OiBjdHguYm9keSwgdGVtcGxhdGVUeXBlOiBzdGQuZ2V0KGN0eCwgJ3RlbXBsYXRlX3R5cGUnLCBudWxsKSB9
+
+tracing:
+  provider: otel
+  service_name: kratos
+  providers:
+    otlp:
+      server_url: otel-collector:4318
+      insecure: true
+
+log:
+  level: info
+  format: text

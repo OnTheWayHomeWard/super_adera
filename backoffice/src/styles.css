@@ -1,0 +1,12 @@
+/* Layout fixes for normal operation: wide tables scroll inside their own area instead of stretching the page,
+   ids and codes never break letter by letter, long free text wraps, and row actions stay visible. */
+.ant-layout, .ant-layout-content, .ant-layout-content > * { min-width: 0; }
+.ant-table-wrapper .ant-table-content { overflow-x: auto; }
+.ant-table-wrapper .ant-table-cell { word-break: normal; overflow-wrap: break-word; }
+.ant-table-wrapper code, .ant-typography code, .nowrap { white-space: nowrap; }
+.ant-table-wrapper .ant-table-cell-fix-right { background: #fff; }
+.ant-descriptions-item-content { word-break: break-word; overflow-wrap: anywhere; }
+.ant-descriptions-bordered .ant-descriptions-item-label { width: 140px; white-space: nowrap; }
+.long-text { max-width: 520px; min-width: 240px; white-space: pre-wrap; word-break: break-word; overflow-wrap: anywhere; }
+.long-text p { margin: 0 !important; }
+.ant-tabs-nav { max-width: 100%; }

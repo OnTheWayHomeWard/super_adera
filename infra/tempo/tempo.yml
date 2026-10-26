@@ -1,0 +1,28 @@
+# Tempo: trace storage, single container, local disk. Traces are kept 3 days.
+server:
+  http_listen_port: 3200
+distributor:
+  receivers:
+    otlp:
+      protocols:
+        grpc:
+          endpoint: 0.0.0.0:4317
+        http:
+          endpoint: 0.0.0.0:4318
+ingester:
+  lifecycler:
+    min_ready_duration: 0s   # single node: no warm-up gate
+    ring:
+      replication_factor: 1
+      kvstore:
+        store: inmemory   # single node: keep the ring in memory so /ready can turn green
+compactor:
+  compaction:
+    block_retention: 72h
+storage:
+  trace:
+    backend: local
+    wal:
+      path: /var/tempo/wal
+    local:
+      path: /var/tempo/blocks

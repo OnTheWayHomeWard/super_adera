@@ -1,0 +1,282 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>2. Setup and running | Adera docs</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+<button id="menu-btn" type="button" aria-label="Toggle menu">Menu</button>
+<a class="brand" href="../index.html">Adera docs</a>
+<span class="spacer"></span>
+<a href="../index.html">Contents</a>
+<button id="theme-btn" type="button" aria-label="Toggle light or dark theme">Theme</button>
+</header>
+<div class="layout">
+<nav class="sidebar" aria-label="Sections">
+<ul><li><a href="../index.html" class="">Home / contents</a></li></ul>
+<h4>Sections</h4><ul>
+<li><a href="01-overview.html">1. Overview</a>
+</li>
+<li><a href="02-setup.html" class=current>2. Setup and running</a>
+<ul><li><a href="#prerequisites">Prerequisites</a></li><li><a href="#repo-layout">Repository layout</a></li><li><a href="#secrets">Secrets: .env versus Infisical</a></li><li><a href="#compose">Running with docker compose</a></li><li><a href="#urls">URLs and ports</a></li><li><a href="#delivery-modes">Dev versus real delivery</a></li><li><a href="#tests">Running the tests</a></li><li><a href="#production-checklist">Going to a server (deferred checklist)</a></li><li><a href="#troubleshooting">Troubleshooting and lessons learned</a></li></ul>
+</li>
+<li><a href="03-tools.html">3. Tools</a>
+</li>
+<li><a href="04-services.html">4. Services</a>
+</li>
+<li><a href="05-communication.html">5. How it communicates</a>
+</li>
+<li><a href="06-security.html">6. Security model</a>
+</li>
+<li><a href="07-data.html">7. Data</a>
+</li>
+<li><a href="08-endpoints.html">8. Endpoint reference</a>
+</li>
+<li><a href="09-guides.html">9. Guides</a>
+</li>
+<li><a href="10-reference.html">10. Reference</a>
+</li>
+<li><a href="11-backoffice.html">11. Backoffice (staff dashboard)</a>
+</li>
+<li><a href="12-backoffice-guide.html">12. Backoffice guide (staff manual)</a>
+</li>
+<li><a href="13-sample-data.html">13. Sample data (test scenarios)</a>
+</li>
+</ul>
+<h4>Endpoints</h4><ul>
+<li><a href="08a-user-api.html">8a. End-user API</a>
+</li>
+<li><a href="08b-staff-api.html">8b. Staff / dashboard API</a>
+</li>
+<li><a href="08c-partner-api.html">8c. Partner API</a>
+</li>
+<li><a href="08d-internal-api.html">8d. Internal API</a>
+</li>
+<li><a href="08e-kratos-flows.html">8e. Kratos flows</a>
+</li>
+<li><a href="08f-operational.html">8f. Operational endpoints</a>
+</li>
+</ul>
+</nav>
+<main>
+<h1>Setup and running</h1>
+<p class="lead">How to start the whole platform on one machine, where each secret lives, how to switch between dev and real message delivery, how to run the tests, and what has gone wrong before.</p>
+
+<section>
+<h2 id="prerequisites">Prerequisites</h2>
+<div class="table-wrap"><div class="table-wrap"><table>
+<thead><tr><th>Needed for</th><th>What</th><th>Version used here</th></tr></thead>
+<tbody>
+<tr><td>Running the stack</td><td>Docker Engine and the <code>docker compose</code> plugin</td><td>Docker 29.9.1, Compose 5.6.0</td></tr>
+<tr><td>Memory and disk</td><td>About 2.3 GB RAM at rest, about 9 GB of images and volumes. At least 8 GB RAM and 40 GB disk recommended (from <code>SETUP.md</code>)</td><td></td></tr>
+<tr><td>End-to-end scripts, examples in these docs</td><td>Python 3 (standard library only), <code>curl</code>, <code>openssl</code>, <code>jq</code></td><td>Python 3.14</td></tr>
+<tr><td>Building and testing a service outside Docker</td><td>JDK 21 (the services target Java 21). Each service ships its own Maven wrapper (<code>mvnw</code>)</td><td>The machine default is JDK 26, so use <code>JAVA_HOME=/usr/lib/jvm/java-21-openjdk</code></td></tr>
+<tr><td>Integration tests</td><td>A working Docker daemon (Testcontainers starts a real Postgres)</td><td></td></tr>
+<tr><td>Managing API-key secrets</td><td>The Infisical CLI (<code>infisical</code>) or the Infisical web UI</td><td>CLI is at <code>/usr/bin/infisical</code></td></tr>
+<tr><td>Querying the database by hand</td><td>Nothing on the host: use <code>docker compose exec postgres psql</code> (there is no <code>psql</code> on the host)</td><td></td></tr>
+</tbody></table></div></div>
+</section>
+
+<section>
+<h2 id="repo-layout">Repository layout</h2>
+<pre><code>adera/
+  docker-compose.yml          every container (project name "adera")
+  .env                        container secrets + delivery mode            (gitignored, mode 600)
+  .env.example                the variable NAMES only, safe to commit
+  docs/
+    index.html                this documentation (entry page)
+    src/                      the documentation pages, style.css, app.js
+    SETUP.md  PARTNER_API.md  the earlier Markdown notes (source material; these HTML pages are authoritative)
+    kratos-openapi-v26.2.0.json   Kratos API spec, importable into Postman or Swagger
+    ride_flow-credentials.env     unrelated credentials from another project (gitignored; Adera does not use it)
+  services/                   one INDEPENDENT Maven project per microservice, no shared parent build
+    notification-service/     Dockerfile, pom.xml, mvnw, README.md, src/
+    user-service/
+    registry-service/
+  infra/
+    postgres/init-databases.sh    creates one database + one login per service (first start only)
+    redis/entrypoint.sh redis.conf   builds the ACL users from env at start; noeviction, 256 MB
+    rabbitmq/setup.sh              vhost "adera" + users (idempotent one-shot)
+    kratos/kratos.yml identity.schema.json
+    apisix/config.yaml apisix.yaml   gateway: plugin list, routes
+    prometheus/prometheus.yml  loki/loki.yml  alloy/config.alloy  tempo/tempo.yml
+    otel-collector/config.yaml  grafana/provisioning/  grafana/dashboards/
+  tests/e2e/
+    journey.py  partner.py  staff.py  s3tool.py</code></pre>
+<div class="callout why"><span class="label">Why one project per service</span>
+<p>Each microservice has its own <code>pom.xml</code> and Dockerfile and shares no build with the others, so one can be rebuilt, tested and later moved to its own repository without touching the rest. A shared library will only be extracted when real shared code exists (today <code>Cidrs</code> exists in both registry-service and notification-service as a copy).</p></div>
+<p>The working tree is not under git at the time of this writing (the folder has no <code>.git</code>). The state described here is the working tree as of 2026-10-25.</p>
+</section>
+
+<section>
+<h2 id="secrets">Secrets: <code>.env</code> versus Infisical</h2>
+<p>There is no secret value in any documentation page or in <code>docker-compose.yml</code>. Secrets live in exactly two places, split by who reads them.</p>
+<div class="table-wrap"><div class="table-wrap"><table>
+<thead><tr><th>Kind</th><th>Where</th><th>Variable names</th><th>Why there</th></tr></thead>
+<tbody>
+<tr><td>Container secrets</td><td><code>.env</code> (read by <code>docker compose</code> and passed to containers as environment)</td><td><code>POSTGRES_PASSWORD</code>, <code>KRATOS_DB_PASSWORD</code>, <code>USER_DB_PASSWORD</code>, <code>NOTIFICATION_DB_PASSWORD</code>, <code>REGISTRY_DB_PASSWORD</code>, <code>INFISICAL_DB_PASSWORD</code>, <code>REDIS_ADMIN_PASSWORD</code>, <code>INFISICAL_REDIS_PASSWORD</code>, <code>APISIX_REDIS_PASSWORD</code>, <code>RABBITMQ_ADMIN_PASSWORD</code>, <code>USER_SVC_RABBIT_PASSWORD</code>, <code>NOTIFICATION_SVC_RABBIT_PASSWORD</code>, <code>KRATOS_SECRETS_COOKIE</code>, <code>KRATOS_SECRETS_CIPHER</code>, <code>GRAFANA_ADMIN_PASSWORD</code>, <code>RUSTFS_ACCESS_KEY</code>, <code>RUSTFS_SECRET_KEY</code></td><td>These are needed to start the databases and tools themselves. Infisical lives <em>on</em> Postgres and Redis, so it cannot hold the secrets that start Postgres and Redis.</td></tr>
+<tr><td>Trust secrets between our own containers</td><td><code>.env</code></td><td><code>USER_GATEWAY_SECRET</code> (the gateway proves itself to services), <code>INTERNAL_API_SECRET</code> (services prove themselves to each other), <code>ALIAS_HMAC_SECRET</code> (derives pseudonymous ids)</td><td>The gateway reads it from its container environment (<code>${{USER_GATEWAY_SECRET}}</code> in <code>apisix.yaml</code>), which must work without any other service running.</td></tr>
+<tr><td>Infisical's own bootstrap</td><td><code>.env</code></td><td><code>INFISICAL_ENCRYPTION_KEY</code>, <code>INFISICAL_AUTH_SECRET</code></td><td>Infisical needs them before it can serve anything. <strong>Back both up off this machine.</strong> Losing the encryption key makes every stored secret unreadable.</td></tr>
+<tr><td>Machine access to Infisical</td><td><code>.env</code></td><td><code>INFISICAL_DOMAIN</code>, <code>INFISICAL_PROJECT_ID</code>, <code>INFISICAL_IDENTITY_ID</code>, <code>INFISICAL_TOKEN</code></td><td>How the CLI and the notification-service find and open Infisical. The token belongs to machine identity <code>adera-local-dev</code> (Token Auth) and <strong>expires on 2026-11-23</strong>; use Universal Auth for anything beyond local development.</td></tr>
+<tr><td>Delivery mode switches (not secret)</td><td><code>.env</code></td><td><code>SMS_PROVIDER</code>, <code>EMAIL_PROVIDER</code>, <code>NOTIFY_DEV_ENDPOINTS</code>, <code>NOTIFY_LIVE_ALLOWLIST</code>, <code>FCM_PROVIDER</code>, <code>PARTNER_ALLOW_PRIVATE_CALLBACKS</code></td><td>Switching mode is one edit and one command (see <a href="#delivery-modes">below</a>).</td></tr>
+<tr><td>Staff bootstrap, storage address</td><td><code>.env</code></td><td><code>BOOTSTRAP_SUPER_ADMIN_EMAIL</code>, <code>ADERA_ENV</code> (dev or prod; which environment this deployment is), <code>ADMIN_REQUIRE_AAL2</code> (optional), <code>STORAGE_PUBLIC_ENDPOINT</code> (optional)</td><td>Plain configuration.</td></tr>
+<tr><td>Third-party API keys</td><td><strong>Infisical</strong>, project <code>Adera</code>, environment <code>dev</code>, folder <code>/notification</code></td><td><code>TWILIO_ACCOUNT_SID</code>, <code>TWILIO_AUTH_TOKEN</code>, <code>TWILIO_MESSAGING_SERVICE_SID</code>, <code>TWILIO_PHONE_NUMBER</code>, <code>RESEND_API_KEY</code>, <code>RESEND_FROM_EMAIL</code>, <code>RESEND_FROM_NAME</code>, <code>PARTNER_SIGNING_KEY_ID</code>, <code>PARTNER_SIGNING_PRIVATE_KEY_B64</code>. Still to add: <code>FIREBASE_SERVICE_ACCOUNT_B64</code></td><td>Only <code>notification-service</code> needs them, and only when a real provider is on. They are loaded at service start by our own code (<a href="04-services.html#notification-service">notification-service</a>), not injected by compose. This keeps real provider keys out of <code>.env</code>, the images and git, and lets you rotate one without editing files.</td></tr>
+</tbody></table></div></div>
+<p>Verified on 2026-10-25: the <code>dev</code> environment has secrets only in <code>/notification</code> (the nine names above, no Firebase key yet). The folders <code>/infra</code>, <code>/kratos</code>, <code>/gateway</code> and <code>/user</code> exist but hold nothing. The <code>prod</code> environment is empty.</p>
+<div class="callout warn"><span class="label">Start-up race</span>
+<p>The notification-service makes one attempt (5-second timeout) to read Infisical when it starts and carries on if that fails. If Infisical is slow or down at that moment you get a log line <code>Could not load secrets from Infisical (/notification)</code>, and the service silently runs with <strong>no signing key</strong> (it creates an <em>ephemeral</em> key, which changes at every restart) and with no Twilio/Resend keys. In dev mode that is harmless; with a real provider the service refuses to start instead. This was seen once while these docs were being written (a restart while Infisical was still slow; the JWKS <code>kid</code> then looked like <code>ephemeral-xxxxxxxx</code>); a later restart loaded all nine secrets and the persistent key. Fix: start Infisical first, then <code>docker compose up -d notification-service</code> again. See the <a href="#troubleshooting">troubleshooting list</a>.</p></div>
+<p>How to read, add and rotate an Infisical secret is a step-by-step guide: <a href="09-guides.html#infisical-secrets">Guides: Infisical</a>.</p>
+</section>
+
+<section>
+<h2 id="compose">Running with docker compose</h2>
+<pre><code># from the repository root
+docker compose up -d            # build (first time) and start everything
+docker compose ps               # long-running services should be Up; postgres/redis/rabbitmq/mailpit show (healthy)
+docker compose logs -f kratos   # follow one service
+docker compose logs --since 10m notification-service
+docker compose up -d notification-service   # re-create ONE service after editing .env or its compose block
+docker compose build user-service &amp;&amp; docker compose up -d user-service   # after changing Java code
+docker compose restart apisix   # re-read a bind-mounted config (apisix.yaml hot-reloads on its own in about a second)
+docker compose stop             # pause everything: containers stay, data survives
+docker compose start            # start the stopped containers again (same containers, same data, no rebuild)
+docker compose stop mailpit     # or one service only; docker compose start mailpit brings it back
+docker compose down             # stop, keep volumes (data survives)
+docker compose down -v          # stop AND DELETE all data (databases, Redis, files, Infisical content). Be sure.</code></pre>
+<div class="callout"><span class="label">Good to know</span>
+<ul>
+<li><code>docker compose restart</code> does <strong>not</strong> re-read the <code>environment:</code> block or <code>.env</code>. After adding or changing a variable, use <code>docker compose up -d &lt;service&gt;</code>.</li>
+<li>Two one-shot containers run at start and then exit; this is normal: <code>kratos-migrate</code> (database migrations) and <code>rabbitmq-setup</code> (vhost and users).</li>
+<li>The Postgres init script (<code>infra/postgres/init-databases.sh</code>) runs <strong>only on the first start of an empty data volume</strong>. Adding a new database later (as was done for <code>registry</code>) needs a manual <code>CREATE ROLE</code> / <code>CREATE DATABASE</code> on the running server.</li>
+<li>Start order is declared with <code>depends_on</code>: Kratos waits for its migration and for notification-service; user-service and registry-service wait for Postgres, RustFS and Kratos; APISIX waits for Redis and Kratos. Nothing waits for Infisical (see the warning above).</li>
+</ul></div>
+</section>
+
+<section>
+<h2 id="urls">URLs and ports</h2>
+<p>Every published port is bound to <code>127.0.0.1</code> only. The mobile app and partners talk to the gateway, nothing else.</p>
+<div class="table-wrap"><div class="table-wrap"><table>
+<thead><tr><th>What</th><th>URL / address</th><th>Sign-in</th><th>Notes</th></tr></thead>
+<tbody>
+<tr><td><strong>API gateway</strong></td><td><code>http://127.0.0.1:9080</code></td><td>-</td><td>The only door for apps, staff and partners. Kratos is under <code>/kratos</code>.</td></tr>
+<tr><td>Grafana</td><td><code>http://localhost:3001</code></td><td>user <code>admin</code>, password = <code>GRAFANA_ADMIN_PASSWORD</code></td><td>Container port 3000, published as 3001.</td></tr>
+<tr><td>Infisical</td><td><code>http://localhost:8080</code></td><td>your Infisical account</td><td>Invite-only sign-up.</td></tr>
+<tr><td>Mailpit inbox (web and API)</td><td><code>http://localhost:8025</code></td><td>none</td><td>SMTP on <code>127.0.0.1:1025</code>. Dev email lands here.</td></tr>
+<tr><td>notification-service (direct)</td><td><code>http://localhost:8085</code></td><td>none (dev only)</td><td>Container 8080. <code>GET /dev/messages</code> shows dev SMS and email, including one-time codes.</td></tr>
+<tr><td>user-service (direct)</td><td><code>http://localhost:8086</code></td><td>needs gateway or internal secret</td><td>Container 8080. Dev convenience only.</td></tr>
+<tr><td>registry-service (direct)</td><td><code>http://localhost:8087</code></td><td>needs gateway or internal secret</td><td>Container 8080. Dev convenience only.</td></tr>
+<tr><td>Kratos public / admin</td><td><code>http://127.0.0.1:4433</code> / <code>http://127.0.0.1:4434</code></td><td>admin has none: never expose</td><td>Reach the public API through the gateway at <code>/kratos</code>. The admin API is used by tests and by our services inside the compose network.</td></tr>
+<tr><td>RustFS S3 API / console</td><td><code>http://127.0.0.1:9000</code> / <code>http://localhost:9001</code></td><td>console: <code>RUSTFS_ACCESS_KEY</code> / <code>RUSTFS_SECRET_KEY</code></td><td>Bucket <code>adera-media</code>.</td></tr>
+<tr><td>RabbitMQ AMQP / management UI</td><td><code>127.0.0.1:5672</code> / <code>http://localhost:15672</code></td><td>UI: <code>RABBITMQ_ADMIN_USER</code> and its password</td><td>Vhost <code>adera</code>.</td></tr>
+<tr><td>Prometheus</td><td><code>http://localhost:9090</code></td><td>none</td><td>Targets page: <code>/targets</code>.</td></tr>
+<tr><td>OTel Collector (OTLP)</td><td><code>127.0.0.1:4317</code> gRPC, <code>:4318</code> HTTP</td><td>none</td><td>For services run from an IDE on the host.</td></tr>
+<tr><td>Postgres / Redis</td><td><code>127.0.0.1:5432</code> / <code>127.0.0.1:6379</code></td><td>admin logins from <code>.env</code></td><td>Handy for GUI clients; commands in the <a href="03-tools.html">tools</a> page.</td></tr>
+<tr><td>Loki, Tempo, Alloy</td><td>internal only</td><td>-</td><td>Use them through Grafana.</td></tr>
+</tbody></table></div></div>
+</section>
+
+<section>
+<h2 id="delivery-modes">Dev versus real delivery</h2>
+<p>Kratos always hands its messages to notification-service. The service, not Kratos, decides from <code>.env</code> whether anything leaves the machine. The defaults are the safe dev values, and the compose file applies them if the variable is absent (<code>${SMS_PROVIDER:-console}</code> and so on).</p>
+<div class="table-wrap"><div class="table-wrap"><table>
+<thead><tr><th>Setting in <code>.env</code></th><th>Dev (what is running now)</th><th>Real</th><th>What it does</th></tr></thead>
+<tbody>
+<tr><td><code>ADERA_ENV</code></td><td><code>dev</code> (default)</td><td><code>prod</code></td><td>The one environment this deployment is (DEV or PROD). Passed to registry-service and notification-service; anything else stops them starting. Keys and allowed IPs of the other environment are stored but refused here (<code>403 wrong_environment</code>). Switch with <code>docker compose up -d registry-service notification-service</code>.</td></tr>
+<tr><td><code>SMS_PROVIDER</code></td><td><code>console</code></td><td><code>twilio</code></td><td>Console: writes the SMS (and its code) to the service log and the dev store; nothing is sent. Twilio: real SMS, costs money. Needs the four <code>TWILIO_*</code> secrets in Infisical.</td></tr>
+<tr><td><code>EMAIL_PROVIDER</code></td><td><code>mailpit</code></td><td><code>resend</code></td><td>Mailpit: SMTP to the local inbox at <code>:8025</code>. Resend: real email. Needs <code>RESEND_API_KEY</code>, <code>RESEND_FROM_EMAIL</code>, <code>RESEND_FROM_NAME</code> in Infisical.</td></tr>
+<tr><td><code>NOTIFY_DEV_ENDPOINTS</code></td><td><code>true</code></td><td><code>false</code></td><td>Exposes <code>GET/DELETE /dev/messages</code>, which return one-time codes. <strong>The service refuses to start</strong> with this <code>true</code> while a real SMS or email provider is on.</td></tr>
+<tr><td><code>NOTIFY_LIVE_ALLOWLIST</code></td><td>empty (ignored)</td><td>a comma-separated list of numbers and addresses, or empty</td><td>When non-empty and a provider is real, real sends go <em>only</em> to these recipients; others are suppressed. Use it for the first real test.</td></tr>
+<tr><td><code>FCM_PROVIDER</code></td><td><code>fake</code></td><td><code>firebase</code></td><td>Push provider for in-app notifications. <code>firebase</code> needs <code>FIREBASE_SERVICE_ACCOUNT_B64</code> in Infisical (not yet added).</td></tr>
+<tr><td><code>PARTNER_ALLOW_PRIVATE_CALLBACKS</code></td><td><code>true</code> in this dev <code>.env</code> (e2e tests only)</td><td><code>false</code></td><td>Lets partner callbacks go to <code>http</code> and private addresses. <strong>The service refuses to start</strong> with this <code>true</code> while any real provider (SMS, email or push) is on. The compose default is <code>false</code>.</td></tr>
+</tbody></table></div></div>
+<p>The channels switch independently. After editing <code>.env</code>:</p>
+<pre><code>docker compose up -d notification-service
+docker compose logs --since 1m notification-service | grep -E "NOTIFICATION MODE|PARTNER PLATFORM|Infisical"</code></pre>
+<pre class="out"><code>NOTIFICATION MODE: sms=console (dev, nothing leaves the machine), email=mailpit (dev, nothing leaves the machine), allowlist=off, devEndpoints=true
+PARTNER PLATFORM: push=fcm-fake (dev), workers=true, privateCallbacks=true</code></pre>
+<p>The real-mode start was verified once with a throwaway instance (it loaded the Twilio and Resend secrets and printed <code>sms=twilio (REAL)</code>, <code>email=resend (REAL)</code> without sending). The first real send must use the allowlist. The full checklist is <a href="09-guides.html#go-real">Guides: switching to real delivery</a>.</p>
+<div class="callout why"><span class="label">Why so many guards</span>
+<p>A mistake here costs money (SMS) or exposes one-time codes (the dev endpoint), so the dangerous combinations are impossible to start rather than merely discouraged: dev endpoints with real providers, private callbacks with real providers, a real provider without a persistent signing key.</p></div>
+</section>
+
+<section>
+<h2 id="tests">Running the tests</h2>
+<h3 id="tests-unit">Unit and integration tests (per service)</h3>
+<pre><code>cd services/notification-service     # or user-service, registry-service
+JAVA_HOME=/usr/lib/jvm/java-21-openjdk ./mvnw test</code></pre>
+<p>The integration tests start a real Postgres with Testcontainers, so Docker must be running; they do not touch the compose stack. Last full run (reports in each <code>target/surefire-reports</code>): notification-service 54 tests, registry-service 60, user-service 65, all passing. (The older <code>SETUP.md</code> numbers, 28 and 47, are out of date.) What each test class covers is listed per service on the <a href="04-services.html">services page</a>.</p>
+<h3 id="tests-e2e">End-to-end scripts (<code>tests/e2e</code>)</h3>
+<p>They go through the real gateway with every real service. They need the stack running in <strong>dev mode</strong> because they read one-time codes from <code>/dev/messages</code>. Python standard library only. Run from the repository root:</p>
+<div class="table-wrap"><div class="table-wrap"><table>
+<thead><tr><th>Script</th><th>What it proves</th><th>Run</th></tr></thead>
+<tbody>
+<tr><td><code>journey.py</code></td><td>29 checks: two sign-ups, Kratos webhook creates the profile, profile and <code>extra</code> merge, location, avatar to RustFS and back as a signed URL, FCM device tokens, forged <code>X-User-Id</code> overridden, bypassing the gateway refused, logout. Cleans up.</td><td><code>python3 -I tests/e2e/journey.py</code></td></tr>
+<tr><td><code>partner.py</code></td><td>Staff (a temporary account) creates an app, grants capabilities, limits, allowed address, key, template; a signed partner request is accepted, delivered, called back and signature-verified; negative cases (bad signature, replay, stale timestamp, quota, wrong address); inbox. Needs <code>PARTNER_ALLOW_PRIVATE_CALLBACKS=true</code>. Cleans up.</td><td><code>python3 -I tests/e2e/partner.py</code></td></tr>
+<tr><td><code>tempstaff.py</code></td><td>Creates a TEMPORARY staff account in the dev stack (Kratos identity, <code>staff</code> row, authenticator enrolled; random <code>tempstaff-xxxx@adera.local</code>, role ADMIN) and removes it again, including the secret file and its <code>send_log</code> rows. <code>partner.py</code>, <code>admin_users.py</code> and <code>seed_demo.py</code> use it, because the bootstrap account has a person's authenticator app and must not be used by scripts. It refuses to run unless the dev endpoint answers. <code>ADERA_STAFF_EMAIL</code> uses a real account instead (code from <code>ADERA_TOTP</code> or a prompt).</td><td><code>python3 -I tests/e2e/tempstaff.py</code> (self-test), <code>... clean</code> (leftovers)</td></tr>
+<tr><td><code>staff.py</code></td><td>Logs in as staff: emailed code (aal1, admin API answers <code>mfa_required</code>), enrols an authenticator on first run, upgrades to aal2 (admin API works). It is also a module the other scripts import. Keeps the TOTP secret in <code>tests/e2e/.staff-totp-&lt;email&gt;.json</code> (gitignored, mode 600).</td><td><code>python3 -I tests/e2e/staff.py [email]</code></td></tr>
+<tr><td><code>s3tool.py</code></td><td>Lists or deletes objects in the RustFS bucket (a small SigV4 client). Reads <code>RUSTFS_ACCESS_KEY</code> and <code>RUSTFS_SECRET_KEY</code> from the environment.</td><td><code>set -a; . ./.env; set +a; python3 -I tests/e2e/s3tool.py list [prefix]</code></td></tr>
+</tbody></table></div></div>
+<div class="callout warn"><span class="label">Rate limit</span><p>The gateway allows 10 Kratos "submit" calls per minute per IP, shared by everything on this machine. If you run two scripts at once, or run one twice quickly, you will see <code>429</code>. Wait a minute.</p></div>
+</section>
+
+<section>
+<h2 id="production-checklist">Going to a server (deferred checklist)</h2>
+<p>Copying the folder and running <code>docker compose up -d</code> starts the containers but is not production-ready. Do these first (from <code>SETUP.md</code> section 12, restated):</p>
+<ol>
+<li><strong>Infisical starts empty</strong> on a new server (its data is in the Postgres volume). Restore the <code>infisical</code> database (it works with the same <code>.env</code> keys) or recreate project, secrets and token by hand, then update <code>INFISICAL_TOKEN</code> and <code>INFISICAL_PROJECT_ID</code>.</li>
+<li><strong>Public HTTPS in front of the gateway only</strong> (for example Caddy: <code>api.&lt;domain&gt;</code> to APISIX :9080). Everything else stays on <code>127.0.0.1</code>; use SSH tunnels.</li>
+<li><strong>Replace hard-coded localhost URLs:</strong> Kratos <code>serve.public.base_url</code> (otherwise phones get <code>127.0.0.1</code> flow URLs), Infisical <code>SITE_URL</code>, the APISIX CORS origin.</li>
+<li><strong>Real client IP in APISIX</strong> behind the proxy. Without it, the per-IP limits apply to all users combined, and partner allowed-address checks (which use <code>X-Client-IP</code> from the gateway) see the proxy's address.</li>
+<li><strong>Set the delivery mode</strong>: <code>SMS_PROVIDER=twilio</code>, <code>EMAIL_PROVIDER=resend</code>, <code>NOTIFY_DEV_ENDPOINTS=false</code>, empty <code>NOTIFY_LIVE_ALLOWLIST</code>, <code>PARTNER_ALLOW_PRIVATE_CALLBACKS=false</code>. Mailpit is not needed.</li>
+<li><strong>Backups</strong> of Postgres and an off-machine copy of <code>INFISICAL_ENCRYPTION_KEY</code> and <code>INFISICAL_AUTH_SECRET</code>.</li>
+<li><strong>Private git repository</strong> (secrets are gitignored) and copy <code>.env</code> separately and privately.</li>
+<li>Revisit trace sampling (<code>always_on</code>), the Grafana admin password and the Alloy Docker-socket mount.</li>
+<li><strong>RustFS must be reachable by phones over HTTPS</strong> for avatars and logos: set <code>STORAGE_PUBLIC_ENDPOINT</code> to its public address (the signature covers the host). Only the S3 API, not the console on 9001.</li>
+<li>Create a <strong>bucket-scoped RustFS access key</strong> instead of the admin keys (user-service and registry-service use the admin keys today) and keep the console private.</li>
+<li>Give notification-service a <strong>persistent partner signing key</strong> in Infisical and make sure Infisical is reachable at its start.</li>
+<li>Open issue: Twilio to Ethiopia (+251) failed with error 21612 from the US sender; a local route or another channel is needed.</li>
+</ol>
+<p>Also not done (production hardening): TLS everywhere, trace sampling, Postgres and Redis exporters, narrower RabbitMQ permissions, Universal Auth for Infisical, separate Postgres/Redis for Infisical, rotating any key that was ever pasted into a chat.</p>
+</section>
+
+<section>
+<h2 id="troubleshooting">Troubleshooting and lessons learned</h2>
+<p>Each of these cost time once. Symptom first.</p>
+<div class="table-wrap"><div class="table-wrap"><table>
+<thead><tr><th>Symptom</th><th>Cause and fix</th></tr></thead>
+<tbody>
+<tr><td>A container cannot read its mounted config, or exits at start</td><td>Bind-mounted config files must be world-readable (<code>644</code>/<code>755</code>); containers run as other users.</td></tr>
+<tr><td>Kratos: migration error at start</td><td>In Kratos 26 use <code>kratos migrate sql up -e --yes</code> (as <code>kratos-migrate</code> does). To get a <code>session_token</code> right after sign-up add <code>hook: session</code> under <code>registration.after.code</code>.</td></tr>
+<tr><td>Redis refuses to start</td><td>ACL files cannot contain comment lines. <code>infra/redis/entrypoint.sh</code> writes the file from env for that reason.</td></tr>
+<tr><td>Gateway has no CORS headers, no request id and no metrics, with no error</td><td>An unknown plugin in a global rule drops the <strong>whole</strong> rule silently. The plugin list in <code>apisix/config.yaml</code> <em>replaces</em> APISIX's defaults; add a plugin there (and restart) before using it in <code>apisix.yaml</code>.</td></tr>
+<tr><td>No traces from the gateway</td><td>APISIX 3.x reads OpenTelemetry exporter settings from <code>plugin_metadata</code> in <code>apisix.yaml</code>, not from <code>config.yaml</code>.</td></tr>
+<tr><td>A new <code>${{ENV}}</code> in <code>apisix.yaml</code> is empty</td><td>The variable must exist in the container: <code>docker compose up -d apisix</code> (restart is not enough). Also avoid YAML anchors and aliases in that file.</td></tr>
+<tr><td>Tempo <code>/ready</code> stays 503</td><td>Single node: set <code>ingester.lifecycler.min_ready_duration: 0s</code> (done).</td></tr>
+<tr><td>Loki drops the first burst of logs</td><td>Raise <code>ingestion_rate_mb</code> (done: 16).</td></tr>
+<tr><td>Infisical CLI or API incompatibilities</td><td>Pin the image (<code>latest-postgres</code> was ten months stale). <code>infisical secrets delete</code> needs <code>--type shared</code> for shared secrets.</td></tr>
+<tr><td>Java service gets HTTP 400 from Infisical</td><td>Pin Java's <code>HttpClient</code> to HTTP/1.1; the default h2c upgrade over plain HTTP is rejected.</td></tr>
+<tr><td>A Spring start-up component logs nothing</td><td><code>EnvironmentPostProcessor</code>s run before logging exists; use <code>DeferredLogFactory</code>.</td></tr>
+<tr><td>Service reports DOWN because SMTP is down</td><td>Spring's mail health indicator is disabled on purpose (<code>management.health.mail.enabled=false</code>).</td></tr>
+<tr><td>Docker build is slow or fails on Java</td><td>Build with <code>maven:3.9-eclipse-temurin-21</code>, run on <code>eclipse-temurin:21-jre</code> as a non-root user (the Dockerfiles do). On the host use <code>JAVA_HOME=/usr/lib/jvm/java-21-openjdk</code>; the default JDK is 26.</td></tr>
+<tr><td>Spring Boot 4 test code does not compile</td><td><code>MockMultipartHttpServletRequestBuilder</code> no longer extends <code>MockHttpServletRequestBuilder</code> (use <code>AbstractMockHttpServletRequestBuilder&lt;T&gt;</code>); <code>@MockitoBean</code> lives in <code>org.springframework.test.context.bean.override.mockito</code>; Jackson is <code>tools.jackson.*</code> (v3).</td></tr>
+<tr><td>Signed avatar or logo URL gives 403</td><td>The host is part of the S3 signature. Sign with the <em>public</em> endpoint (<code>STORAGE_PUBLIC_ENDPOINT</code>), use path-style addressing and <code>requestChecksumCalculation(WHEN_REQUIRED)</code> with the AWS SDK against RustFS.</td></tr>
+<tr><td>Sign-up works even though user-service is down</td><td>By design: the Kratos <code>web_hook</code> has <code>response.ignore: true</code> (non-blocking). The profile is created on the first <code>GET /api/v1/me</code> instead.</td></tr>
+<tr><td>Changed a variable but the service still uses the old value</td><td><code>docker compose restart</code> does not re-read the environment. Use <code>docker compose up -d &lt;service&gt;</code>.</td></tr>
+<tr><td>Python <code>IncompleteRead</code> on a 413 response</td><td>The server closes the connection right after the status line; catch it and use <code>e.partial</code>.</td></tr>
+<tr><td><code>429</code> in tests</td><td>Per-IP gateway limits (10 Kratos submits per minute). Wait a minute; locally every client shares one Docker IP.</td></tr>
+<tr><td>A partner call is refused with <code>ip_not_allowed</code> right after you changed the allowed addresses</td><td>notification-service caches app configuration for about 15 seconds. Wait, then retry (<code>partner.py</code> sleeps 16 s).</td></tr>
+<tr><td>Staff login stops at <code>mfa_required</code></td><td>The session is aal1. Do the authenticator step (see <a href="09-guides.html#staff-login">Guides: staff login</a>). Kratos does not accept the same TOTP code twice, so wait for the next 30-second window.</td></tr>
+<tr><td>Notification-service logs <code>Could not load secrets from Infisical</code></td><td>Infisical was not ready or reachable. Check <code>curl http://127.0.0.1:8080/api/status</code>, then <code>docker compose up -d notification-service</code>.</td></tr>
+</tbody></table></div></div>
+</section>
+
+<div class="pager"><a class="prev" href="01-overview.html"><small>Previous</small>1. Overview</a><a class="next" href="03-tools.html"><small>Next</small>3. Tools</a></div>
+<p class="footer">Adera backend documentation &middot; last verified 2026-10-25 &middot; <a href="../index.html">contents</a></p>
+</main>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

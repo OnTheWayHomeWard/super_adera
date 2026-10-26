@@ -1,0 +1,352 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>6. Security model | Adera docs</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+<button id="menu-btn" type="button" aria-label="Toggle menu">Menu</button>
+<a class="brand" href="../index.html">Adera docs</a>
+<span class="spacer"></span>
+<a href="../index.html">Contents</a>
+<button id="theme-btn" type="button" aria-label="Toggle light or dark theme">Theme</button>
+</header>
+<div class="layout">
+<nav class="sidebar" aria-label="Sections">
+<ul><li><a href="../index.html" class="">Home / contents</a></li></ul>
+<h4>Sections</h4><ul>
+<li><a href="01-overview.html">1. Overview</a>
+</li>
+<li><a href="02-setup.html">2. Setup and running</a>
+</li>
+<li><a href="03-tools.html">3. Tools</a>
+</li>
+<li><a href="04-services.html">4. Services</a>
+</li>
+<li><a href="05-communication.html">5. How it communicates</a>
+</li>
+<li><a href="06-security.html" class=current>6. Security model</a>
+<ul><li><a href="#layers">Layers at a glance</a></li><li><a href="#roles">Staff roles</a></li><li><a href="#signing">Partner request signing: ADERA-SIG-1</a></li><li><a href="#aliases">Pseudonymous ids</a></li><li><a href="#ssrf">SSRF guard for callback URLs</a></li><li><a href="#quotas">Quotas</a></li><li><a href="#allowlists">Allowlists</a></li><li><a href="#data-protection">Protecting personal data</a></li><li><a href="#secrets-policy">Secrets policy</a></li><li><a href="#limitations">Known limitations</a></li></ul>
+</li>
+<li><a href="07-data.html">7. Data</a>
+</li>
+<li><a href="08-endpoints.html">8. Endpoint reference</a>
+</li>
+<li><a href="09-guides.html">9. Guides</a>
+</li>
+<li><a href="10-reference.html">10. Reference</a>
+</li>
+<li><a href="11-backoffice.html">11. Backoffice (staff dashboard)</a>
+</li>
+<li><a href="12-backoffice-guide.html">12. Backoffice guide (staff manual)</a>
+</li>
+<li><a href="13-sample-data.html">13. Sample data (test scenarios)</a>
+</li>
+</ul>
+<h4>Endpoints</h4><ul>
+<li><a href="08a-user-api.html">8a. End-user API</a>
+</li>
+<li><a href="08b-staff-api.html">8b. Staff / dashboard API</a>
+</li>
+<li><a href="08c-partner-api.html">8c. Partner API</a>
+</li>
+<li><a href="08d-internal-api.html">8d. Internal API</a>
+</li>
+<li><a href="08e-kratos-flows.html">8e. Kratos flows</a>
+</li>
+<li><a href="08f-operational.html">8f. Operational endpoints</a>
+</li>
+</ul>
+</nav>
+<main>
+<h1>Security model</h1>
+<p class="lead">The signing scheme partners use (ADERA-SIG-1) with a worked, runnable example, the pseudonymous ids, the SSRF guard, quotas, allowlists, the secrets policy, and an honest list of what is still weak.</p>
+
+<section>
+<h2 id="layers">Layers at a glance</h2>
+<div class="table-wrap"><div class="table-wrap"><table>
+<thead><tr><th>Layer</th><th>Protects against</th><th>Mechanism</th><th>Where</th></tr></thead>
+<tbody>
+<tr><td>Rate limits at the gateway</td><td>Code-spamming (SMS cost), brute force, floods</td><td>APISIX <code>limit-count</code> per client IP, counters in Redis: 10/min Kratos submits, 120/min other Kratos, 20/min avatar, 300/min user and staff APIs, 600/min partner API</td><td><code>infra/apisix/apisix.yaml</code></td></tr>
+<tr><td>Per-recipient limits</td><td>One number or address being flooded with codes</td><td>Counted from <code>send_log</code>: SMS 5 per hour and 10 per day, email 10 per hour and 20 per day (<code>LIMIT_*</code> variables)</td><td>notification-service <code>NotificationDispatcher</code></td></tr>
+<tr><td>Sessions and aal2</td><td>Stolen or guessed access; staff accounts taken over by an email</td><td>Kratos one-time code (5 min), 30-day session; staff need the emailed code <em>and</em> an authenticator-app code</td><td>Kratos, registry-service <code>StaffVerifyController</code></td></tr>
+<tr><td>Gateway trust and header overwrite</td><td>Forged identity headers, bypassing the gateway</td><td><code>X-Gateway-Secret</code>, overwritten <code>X-User-Id</code> / <code>X-Staff-*</code></td><td><a href="05-communication.html#trust-model">Trust model</a></td></tr>
+<tr><td>Internal secret</td><td>Anything but our own services calling internal APIs</td><td><code>X-Internal-Secret</code>; internal routes are not routed by the gateway</td><td>user-service, registry-service</td></tr>
+<tr><td>Request signing (ADERA-SIG-1)</td><td>Impersonating a partner; tampering with a request or an answer</td><td>RS256 signature; only the partner holds the private key</td><td><a href="#signing">below</a></td></tr>
+<tr><td>Allowed server addresses</td><td>A leaked partner key being used from elsewhere</td><td>Per app and per environment IP/CIDR list</td><td>registry-service, checked in notification-service</td></tr>
+<tr><td>Capabilities and limits</td><td>An app doing more than it was approved for; runaway cost</td><td>Per-app capability grants, per-channel limits</td><td><a href="10-reference.html#capabilities">Capability catalog</a></td></tr>
+<tr><td>Approved templates only</td><td>Phishing or spam sent in Adera's name</td><td>Partners cannot send free text; staff approve the words; values are length-limited and link-checked</td><td>notification-service <code>TemplateRules</code></td></tr>
+<tr><td>Pseudonymous ids</td><td>A partner learning real user ids or linking users across apps</td><td>Per-app HMAC alias</td><td><a href="#aliases">below</a></td></tr>
+<tr><td>SSRF guard</td><td>A partner using our server to call our private network</td><td>Callback URL rules and no redirects</td><td><a href="#ssrf">below</a></td></tr>
+<tr><td>Audit log</td><td>Untraceable staff changes</td><td>Every staff change is written with actor, role, IP</td><td>registry-service <code>AuditService</code></td></tr>
+</tbody></table></div></div>
+</section>
+
+<section>
+<h2 id="roles">Staff roles</h2>
+<p>Roles are deliberately few. A higher role includes everything below it. They are checked by the controller on every call (<code>403 insufficient_role</code>).</p>
+<div class="table-wrap"><div class="table-wrap"><table>
+<thead><tr><th>Role</th><th>May do</th></tr></thead>
+<tbody>
+<tr><td><code>VIEWER</code></td><td>Read: apps and their detail, capability catalog, keys (public metadata only), reviews, reports, templates, delivery log, usage, <code>/admin/api/v1/me</code>.</td></tr>
+<tr><td><code>ADMIN</code></td><td>Everything a viewer can, plus: create and edit apps, change status, upload logos, set capabilities, limits, payment settings and allowed addresses, register, generate and revoke keys, moderate reviews and reports, create and edit templates, read the audit log.</td></tr>
+<tr><td><code>SUPER_ADMIN</code></td><td>Everything an admin can, plus: list, add, change and disable staff, and revive a <code>KILLED</code> app.</td></tr>
+</tbody></table></div></div>
+<p>Safeguards: a super admin cannot demote or disable themselves (<code>409 cannot_demote_self</code>) and the last active super admin cannot be removed (<code>409 last_super_admin</code>). Disabling a staff member removes their role from Kratos and revokes their sessions.</p>
+</section>
+
+<section>
+<h2 id="signing">Partner request signing: ADERA-SIG-1</h2>
+<div class="callout why"><span class="label">Why signatures and not API keys</span>
+<p>A shared API key can be copied from a log, a screenshot or a leaked config and replayed forever. With a signature the partner's <em>private key never leaves the partner</em>; Adera stores only the public key, so even a full leak of Adera's database cannot be used to impersonate a partner. The signature also covers the method, the path, the time and a hash of the body, so a request cannot be altered or redirected to another endpoint, and old requests stop working after five minutes.</p></div>
+<h3 id="signing-rules">The rules</h3>
+<ul>
+<li><strong>Keys.</strong> The partner makes an RSA key pair of 2048 bits or more and gives staff the <em>public</em> key (PEM, <code>-----BEGIN PUBLIC KEY-----</code>). A private key sent by mistake is rejected (<code>400 validation_failed</code>, field <code>publicKeyPem</code>). Each key belongs to one app and one environment: <code>DEV</code> or <code>PROD</code>. A deployment is exactly one environment (<code>ADERA_ENV</code>): it accepts only keys of its own environment and refuses the other with <code>403 wrong_environment</code>, so use the DEV key against the dev deployment and the PROD key against the prod deployment. Up to 5 active keys per environment, so a new key can be added before an old one is revoked. New key ids look like <code>ak_dev_</code> or <code>ak_prod_</code> followed by 24 hex characters; keys created before the rename keep their old <code>ak_test_</code> / <code>ak_live_</code> ids (they are opaque).</li>
+<li><strong>Algorithm.</strong> RSASSA-PKCS1-v1_5 with SHA-256 (RS256, Java <code>SHA256withRSA</code>, <code>openssl dgst -sha256 -sign</code>). The signature is base64. We also accept URL-safe base64, with or without padding, because partners' libraries differ.</li>
+<li><strong>Headers on every request:</strong> <code>X-Adera-Key-Id</code> (the id staff gave you), <code>X-Adera-Timestamp</code> (unix seconds; allowed skew 5 minutes either way), <code>X-Adera-Signature</code> (base64 signature of the canonical string).</li>
+<li><strong>Canonical string</strong>, five lines joined with <code>\n</code>, no trailing newline:
+<pre><code>ADERA-SIG-1
+{timestamp}
+{METHOD}                      upper case, e.g. POST
+{path[?query]}                exactly as sent, e.g. /v1/notifications or /v1/templates?x=1
+{base64(sha256(body))}        standard base64 of the raw 32-byte SHA-256 of the exact body bytes;
+                              an empty body (GET) is the hash of zero bytes</code></pre></li>
+<li><strong>Body bytes matter.</strong> Hash the bytes you actually send. If your HTTP library re-serialises the JSON after you signed it, the hash changes and you get <code>401 invalid_signature</code>. Serialise once, sign that string, send that same string.</li>
+<li><strong>Address check.</strong> The request must come from a server address staff registered for that environment (<code>403 ip_not_allowed</code>). An app starts with an empty list, so nobody can call until an admin adds addresses.</li>
+</ul>
+<h3 id="signing-example">Worked example</h3>
+<p>Illustrative values: fixed timestamp, a made-up key id, and an example body. The body hash and the canonical string are computed for real; the signature is different for every private key.</p>
+<pre><code>Method:      POST
+Path:        /v1/notifications
+Timestamp:   1792910000
+Body (one line, exactly these bytes):
+{"externalId":"job-1001","userId":"u_p_3f9c1a7e5b2d4c8a9e0f1b6d7a2c4e58","templateId":"5c0e5d58-6a43-4b1e-9d57-3f1f0f7f1a11","params":{"name":"Abebe"},"callbackUrl":"https://partner.example.com/adera/hook"}
+
+base64(sha256(body)) = glFrkqgMbZYCRpjVpzXcTVkc1OxZlu+rq0ABmg4kRVA=
+
+Canonical string (4 line breaks, no trailing one):
+ADERA-SIG-1
+1792910000
+POST
+/v1/notifications
+glFrkqgMbZYCRpjVpzXcTVkc1OxZlu+rq0ABmg4kRVA=
+
+Headers sent:
+X-Adera-Key-Id:     ak_prod_0123456789abcdef01234567           (the id staff gave you)
+X-Adera-Timestamp:  1792910000
+X-Adera-Signature:  base64( RS256( private key, canonical string ) )</code></pre>
+<h3 id="signing-openssl">Runnable sketch 1: shell and openssl</h3>
+<p>Make a key once, send only the public half to staff, then sign each request. (This sketch was run against a throwaway key and the signature was verified with <code>openssl dgst -sha256 -verify</code>.)</p>
+<pre><code># once: your key pair. Keep partner.pem secret; send partner.pub to Adera staff.
+openssl genrsa -out partner.pem 2048
+openssl rsa -in partner.pem -pubout -out partner.pub
+
+# every request
+KEY_ID=ak_prod_0123456789abcdef01234567                       # from staff
+BODY='{"externalId":"job-1001","userId":"u_p_3f9c1a7e5b2d4c8a9e0f1b6d7a2c4e58","templateId":"5c0e5d58-6a43-4b1e-9d57-3f1f0f7f1a11","params":{"name":"Abebe"}}'
+TS=$(date +%s)
+HASH=$(printf '%s' "$BODY" | openssl dgst -sha256 -binary | openssl base64 -A)
+CANON=$(printf 'ADERA-SIG-1\n%s\nPOST\n/v1/notifications\n%s' "$TS" "$HASH")
+SIG=$(printf '%s' "$CANON" | openssl dgst -sha256 -sign partner.pem | openssl base64 -A)
+
+curl -sS -X POST http://127.0.0.1:9080/v1/notifications \
+  -H "X-Adera-Key-Id: $KEY_ID" -H "X-Adera-Timestamp: $TS" -H "X-Adera-Signature: $SIG" \
+  -H 'Content-Type: application/json' --data-binary "$BODY"</code></pre>
+<p><code>--data-binary</code> (not <code>-d</code>) keeps the body byte-identical to what you hashed. <code>printf '%s'</code> adds no newline; <code>echo</code> would, and break the hash.</p>
+<h3 id="signing-python">Runnable sketch 2: Python (standard library and the openssl command)</h3>
+<p>Save as <code>adera_sign.py</code>. <code>DRY_RUN=1</code> prints the canonical string and headers without sending; <code>FIXED_TS</code> pins the timestamp for testing.</p>
+<pre><code>#!/usr/bin/env python3
+&quot;&quot;&quot;Sign and send one Adera partner request (ADERA-SIG-1). Needs only Python 3 and the openssl command.
+Usage: python3 adera_sign.py KEY_ID PRIVATE_KEY.pem METHOD PATH [BODY_JSON_STRING]
+Set ADERA_BASE (default http://127.0.0.1:9080) and DRY_RUN=1 to print the headers without sending.&quot;&quot;&quot;
+import base64, hashlib, os, subprocess, sys, time, urllib.error, urllib.request
+
+key_id, key_file, method, path = sys.argv[1:5]
+body = sys.argv[5].encode() if len(sys.argv) &gt; 5 else b&quot;&quot;
+ts = os.environ.get(&quot;FIXED_TS&quot;) or str(int(time.time()))          # unix seconds, within 5 minutes of our clock
+
+body_hash = base64.b64encode(hashlib.sha256(body).digest()).decode()   # empty body = hash of zero bytes
+canonical = &quot;\n&quot;.join([&quot;ADERA-SIG-1&quot;, ts, method.upper(), path, body_hash])   # no trailing newline
+signature = base64.b64encode(subprocess.run(
+    [&quot;openssl&quot;, &quot;dgst&quot;, &quot;-sha256&quot;, &quot;-sign&quot;, key_file], input=canonical.encode(),
+    capture_output=True, check=True).stdout).decode()                  # RSASSA-PKCS1-v1_5 with SHA-256 (RS256)
+
+headers = {&quot;X-Adera-Key-Id&quot;: key_id, &quot;X-Adera-Timestamp&quot;: ts, &quot;X-Adera-Signature&quot;: signature}
+if body:
+    headers[&quot;Content-Type&quot;] = &quot;application/json&quot;
+
+if os.environ.get(&quot;DRY_RUN&quot;):
+    print(canonical); print(&quot;---&quot;); [print(f&quot;{k}: {v}&quot;) for k, v in headers.items()]; sys.exit(0)
+
+base = os.environ.get(&quot;ADERA_BASE&quot;, &quot;http://127.0.0.1:9080&quot;)
+req = urllib.request.Request(base + path, data=body or None, method=method.upper(), headers=headers)
+try:
+    r = urllib.request.urlopen(req, timeout=30); status, data, rh = r.status, r.read(), r.headers
+except urllib.error.HTTPError as e:
+    status, data, rh = e.code, e.read(), e.headers
+print(status); print(data.decode())
+print(&quot;response signature headers:&quot;, {k: rh.get(k) for k in (&quot;X-Adera-Key-Id&quot;, &quot;X-Adera-Timestamp&quot;)})
+</code></pre>
+<pre><code>python3 adera_sign.py ak_prod_0123456789abcdef01234567 partner.pem POST /v1/notifications \
+  '{"externalId":"job-1001","userId":"u_p_...","templateId":"...","params":{"name":"Abebe"}}'
+python3 adera_sign.py ak_prod_0123456789abcdef01234567 partner.pem GET /v1/notifications/job-1001</code></pre>
+<h3 id="signing-response">Our signatures: responses and callbacks</h3>
+<p>We sign too, so a partner can prove an answer or a callback really came from Adera and was not altered. Our public key is at <code>/.well-known/jwks.json</code> (public, cacheable one hour, standard JWKS with <code>kty</code>, <code>use</code>, <code>alg</code>, <code>kid</code>, <code>n</code>, <code>e</code>).</p>
+<div class="table-wrap"><div class="table-wrap"><table>
+<thead><tr><th>What</th><th>Headers</th><th>Canonical string</th></tr></thead>
+<tbody>
+<tr><td>Every <code>/v1/*</code> response, errors included</td><td><code>X-Adera-Key-Id</code> (our key id), <code>X-Adera-Timestamp</code>, <code>X-Adera-Signature</code></td><td><code>ADERA-SIG-1-RESPONSE</code>, timestamp, HTTP status, <code>base64(sha256(response body))</code>, <code>base64(sha256(your request's signature string))</code>, joined with <code>\n</code>. Binding to <em>your</em> signature means a response cannot be replayed as the answer to a different request.</td></tr>
+<tr><td>Callback (we call you)</td><td><code>X-Adera-Event: notification.status</code>, <code>X-Adera-Key-Id</code>, <code>X-Adera-Timestamp</code>, <code>X-Adera-Signature</code>, <code>Idempotency-Key</code>, <code>User-Agent: Adera-Callbacks/1</code></td><td>Same as a request, with us as the caller: <code>ADERA-SIG-1</code>, timestamp, <code>POST</code>, the path (and query) of <em>your</em> callback URL, <code>base64(sha256(body))</code>.</td></tr>
+</tbody></table></div></div>
+<p>To check one, build the canonical string, fetch the JWKS, and verify RS256. Sketch (standard library only; save as <code>verify_adera.py</code>; tested against the signature above):</p>
+<pre><code>#!/usr/bin/env python3
+&quot;&quot;&quot;Check an Adera signature (response or callback) against our published key. Standard library only.
+Usage: python3 verify_adera.py JWKS_JSON_FILE TIMESTAMP SIGNATURE_B64 CANONICAL_STRING_FILE&quot;&quot;&quot;
+import base64, hashlib, json, sys
+
+jwks_file, timestamp, signature_b64, canonical_file = sys.argv[1:5]
+jwk = json.load(open(jwks_file))[&quot;keys&quot;][0]
+b64u = lambda s: int.from_bytes(base64.urlsafe_b64decode(s + &quot;=&quot; * (-len(s) % 4)), &quot;big&quot;)
+n, e = b64u(jwk[&quot;n&quot;]), b64u(jwk[&quot;e&quot;])
+canonical = open(canonical_file, &quot;rb&quot;).read()
+signature = int.from_bytes(base64.b64decode(signature_b64), &quot;big&quot;)
+k = (n.bit_length() + 7) // 8
+em = pow(signature, e, n).to_bytes(k, &quot;big&quot;)                      # RSA public operation
+digest_info = bytes.fromhex(&quot;3031300d060960864801650304020105000420&quot;) + hashlib.sha256(canonical).digest()
+expected = b&quot;\x00\x01&quot; + b&quot;\xff&quot; * (k - len(digest_info) - 3) + b&quot;\x00&quot; + digest_info   # PKCS#1 v1.5 padding, SHA-256
+print(&quot;signature valid&quot; if em == expected else &quot;SIGNATURE INVALID&quot;)
+sys.exit(0 if em == expected else 1)
+</code></pre>
+<div class="callout warn"><span class="label">Production note</span><p>The sketch checks the exact PKCS#1 v1.5 encoding by hand so it needs no library. In a real partner integration prefer your language's JWT or crypto library and cache the JWKS for up to an hour. De-duplicate callbacks on <code>Idempotency-Key</code>: the same callback can arrive twice.</p></div>
+<div class="callout"><span class="label">Dev note</span><p>If notification-service could not read its signing key from Infisical at start, it signs with an <em>ephemeral</em> key whose <code>kid</code> looks like <code>ephemeral-ab12cd34</code> and which changes at every restart. This is allowed only while no real provider is on.</p></div>
+<h3 id="signing-errors">Signature errors</h3>
+<div class="table-wrap"><div class="table-wrap"><table>
+<thead><tr><th>Status</th><th><code>error</code></th><th>Cause</th></tr></thead>
+<tbody>
+<tr><td>401</td><td><code>missing_signature</code></td><td>One of the three <code>X-Adera-*</code> headers is absent or blank.</td></tr>
+<tr><td>401</td><td><code>invalid_timestamp</code></td><td>Timestamp is not an integer.</td></tr>
+<tr><td>401</td><td><code>stale_timestamp</code></td><td>More than 5 minutes (<code>PARTNER_MAX_SKEW_MINUTES</code>) from our clock. Fix your clock (NTP).</td></tr>
+<tr><td>401</td><td><code>unknown_key</code></td><td>The key id does not exist.</td></tr>
+<tr><td>401</td><td><code>key_revoked_or_expired</code></td><td>Key was revoked or its <code>expiresAt</code> has passed.</td></tr>
+<tr><td>401</td><td><code>invalid_signature</code></td><td>Wrong private key, body or path changed after signing, wrong method case or timestamp mismatch.</td></tr>
+<tr><td>401</td><td><code>unknown_app</code></td><td>The key's app no longer exists.</td></tr>
+<tr><td>403</td><td><code>wrong_environment</code></td><td>The key belongs to the other environment than this deployment (checked after the signature verifies). A DEV key does not work on a PROD deployment and the reverse.</td></tr>
+<tr><td>403</td><td><code>app_draft</code>, <code>app_paused</code>, <code>app_killed</code></td><td>The app's status does not allow calls here: on a PROD deployment the app must be LIVE; on a DEV deployment any app that is not killed works.</td></tr>
+<tr><td>403</td><td><code>ip_not_allowed</code></td><td>Caller address not in this environment's allowed list (also: the list is empty). Config changes take up to 15 s to be seen.</td></tr>
+<tr><td>413</td><td><code>request_too_large</code></td><td>Body over 64 KB.</td></tr>
+<tr><td>503</td><td><code>service_unavailable</code></td><td>registry-service could not be reached.</td></tr>
+</tbody></table></div></div>
+</section>
+
+<section>
+<h2 id="aliases">Pseudonymous ids</h2>
+<p>Partners never see a real Adera user id. Each user has a <strong>different id in every app</strong>: <code>u_p_</code> followed by the first 32 hex characters of <code>HMAC-SHA256(ALIAS_HMAC_SECRET, "&lt;userId&gt;:&lt;appId&gt;")</code>. The pair (app, alias) maps back to the user in the table <code>app_user_alias</code> in the <code>users</code> database.</p>
+<ul>
+<li><strong>Why per app:</strong> two partners comparing their data cannot tell they share a user, so a leak at one partner exposes nothing about another or about Adera.</li>
+<li><strong>Why an HMAC and a table:</strong> the HMAC makes the same user and app always give the same alias (minting twice is harmless), and the secret means nobody can compute aliases for a guessed user id. Resolving uses the table, so an alias exists only after it was minted.</li>
+<li><strong>Minting</strong> is internal-only today: <code>POST /internal/aliases</code> with <code>X-Internal-Secret</code>, intended to be called when a user first opens an app. The public side (the frontend bridge and the user's consent) is not built yet, so for now the e2e tests and operators call it directly. See <a href="08d-internal-api.html">internal API</a>.</li>
+<li><strong>Anti-probing:</strong> deleted, suspended and unknown users all answer <code>422 user_unreachable</code> to a partner.</li>
+<li><strong>Synthetic users (DEV only):</strong> ids named <code>u_p_test_&lt;anything&gt;</code> are not real people. <code>u_p_test_unreachable</code> is unreachable (<code>422 user_unreachable</code>); <code>u_p_test_muted</code> is muted on every channel (<code>200 SUPPRESSED</code>); for the others delivery is simulated: nothing is sent and the attempt is recorded with provider <code>sandbox</code>. In PROD every <code>u_p_test_*</code> id is refused with <code>422 synthetic_user_not_allowed</code>. There is no other simulation: in DEV real users are delivered through the dev providers (console SMS, Mailpit, fake push), which is why nothing reaches a real phone or inbox.</li>
+<li>The secret <code>ALIAS_HMAC_SECRET</code> must never change after aliases are minted: changing it makes new aliases differ from the stored ones.</li>
+</ul>
+</section>
+
+<section>
+<h2 id="ssrf">SSRF guard for callback URLs</h2>
+<p>The partner chooses the callback address, so a careless server could be tricked into calling our own network (cloud metadata, databases, Kratos admin). <code>UrlGuard</code> allows a callback only if all of these hold:</p>
+<ul>
+<li>scheme is <code>https</code> (plain <code>http</code> only when <code>PARTNER_ALLOW_PRIVATE_CALLBACKS=true</code>, dev only);</li>
+<li>no embedded credentials (<code>user:pass@</code>) and a host is present;</li>
+<li>port is 443 or 8443 (or none);</li>
+<li><strong>every</strong> address the host resolves to is public: not loopback, any-local, link-local (includes 169.254.169.254 cloud metadata), private (10/8, 172.16/12, 192.168/16), multicast, 0.0.0.0/8, carrier-grade NAT 100.64/10, 192.0.0.0/24, TEST-NET-1/2/3, 198.18/15 benchmarking, 240.0.0.0/4 and above, or IPv6 unique-local fc00::/7;</li>
+<li>redirects are <strong>never followed</strong> (a public URL cannot bounce us to a private one); connect timeout 5 s, request timeout 8 s.</li>
+</ul>
+<p>A refused address fails the callback at once (reason such as <code>address_not_public</code>, <code>port_not_allowed</code>, <code>scheme_not_https</code>, <code>host_not_resolvable</code>) and is not retried. The acceptance step is looser (it checks only that the URL starts with <code>http://</code> or <code>https://</code> and is at most 500 characters), so a bad callback URL is not rejected when you send the notification: the failure shows in the staff delivery view (<code>callbacks[].lastError</code>).</p>
+</section>
+
+<section>
+<h2 id="quotas">Quotas</h2>
+<p>Staff set four limits per app and per channel (<code>SMS</code>, <code>EMAIL</code>, <code>IN_APP</code>); <code>null</code> is unlimited and <code>0</code> is none. Counting uses UTC days.</p>
+<div class="table-wrap"><div class="table-wrap"><table>
+<thead><tr><th>Limit</th><th>Meaning</th><th>Error <code>limit</code> value</th></tr></thead>
+<tbody>
+<tr><td><code>maxPerUserPerDay</code></td><td>Messages to one user today</td><td><code>max_per_user_per_day</code></td></tr>
+<tr><td><code>maxPerDay</code></td><td>All messages today</td><td><code>max_per_day</code></td></tr>
+<tr><td><code>maxDistinctUsersPerDay</code></td><td>Different users reached today</td><td><code>max_distinct_users_per_day</code></td></tr>
+<tr><td><code>maxTotal</code></td><td>Lifetime total</td><td><code>max_total</code></td></tr>
+</tbody></table></div></div>
+<p>The check and the insert happen in one transaction with a row lock per app and channel, so concurrent requests cannot overshoot. A refused request uses no quota. Granting a notify capability creates a conservative default limit row (SMS 3 per user per day, 100 per day, 100 distinct users, 1000 lifetime; email 5, 500, 500, 10000; in-app 20, 10000, 10000, unlimited). See <a href="10-reference.html#capabilities">the capability catalog</a>.</p>
+</section>
+
+<section>
+<h2 id="allowlists">Allowlists</h2>
+<ul>
+<li><strong>Partner server addresses</strong> (per app, per environment): up to 50 IPs or CIDR ranges. A range that matches everything (<code>/0</code>) is refused for PROD. DEV and PROD lists are stored separately and only the deployment's own is used. No DNS names, because names can change under us.</li>
+<li><strong>Live recipient allowlist</strong> <code>NOTIFY_LIVE_ALLOWLIST</code>: when set and a provider is real, only these recipients get real messages. It applies to Kratos codes and to partner messages. Use it for the first real send.</li>
+<li><strong>App allowed origins</strong>: per-app list of web origins for the future frontend bridge (<code>allowedOrigins</code>; format <code>https://host[:port]</code>, no path). Stored and validated, not enforced by anything yet.</li>
+<li><strong>Callback ports</strong>: only 443 and 8443.</li>
+<li><strong>Template links</strong>: values a partner fills into a template may not contain links unless the template parameter declares <code>allowLinks</code>.</li>
+</ul>
+</section>
+
+<section>
+<h2 id="data-protection">Protecting personal data</h2>
+<ul>
+<li><strong>Logs and the send log never hold a code or a full number.</strong> Recipients are masked (<code>+2519*****20</code>, <code>a***@example.com</code>) and rate limits use a SHA-256 hash of the recipient.</li>
+<li><strong>Staff delivery views never show message values</strong> (they can hold personal data); only status, channel, reason and attempts.</li>
+<li><strong>Avatars and logos are re-encoded.</strong> The server decodes, centre-crops to a square, resizes to at most 512 px and writes a fresh JPEG, which drops EXIF location and camera data and neutralises odd files. Size and pixel limits guard against decompression bombs. Files are stored under random ids and served only by signed, expiring URLs (the bucket is not public).</li>
+<li><strong>Kratos identities hold only</strong> <code>email</code> and <code>phone_number</code> traits; everything else lives in user-service.</li>
+<li><strong>Muting:</strong> a user can mute SMS, email or in-app per app; the partner is not told (the request is answered <code>200 SUPPRESSED</code>).</li>
+</ul>
+</section>
+
+<section>
+<h2 id="secrets-policy">Secrets policy</h2>
+<ul>
+<li>Container secrets and trust secrets live in <code>.env</code> (gitignored, mode 600). Third-party API keys and our partner signing key live in Infisical and are read at start by notification-service. See <a href="02-setup.html#secrets">Setup: secrets</a> for the full split.</li>
+<li>Nothing secret is committed, baked into an image, or printed in these documents. <code>.env.example</code> lists names only.</li>
+<li>Back up <code>INFISICAL_ENCRYPTION_KEY</code> and <code>INFISICAL_AUTH_SECRET</code> off the machine. The CLI token expires 2026-11-23.</li>
+<li>Rotate any key that was ever pasted into a chat or a file outside Infisical. The unrelated <code>docs/ride_flow-credentials.env</code> (another project) holds live keys that Adera does not use.</li>
+<li>The Java services never log a secret value (the Infisical loader logs only the count of secrets and failure messages).</li>
+</ul>
+</section>
+
+<section>
+<h2 id="limitations">Known limitations</h2>
+<p>From <code>SETUP.md</code> section 12, checked against the code, plus items found while writing these documents.</p>
+<h3 id="limits-security">Security and behaviour</h3>
+<ul>
+<li><strong>Account enumeration at login.</strong> Kratos answers "account does not exist" for unknown identifiers but "code sent" for known ones. Plan: a single "continue" endpoint in our backend that always says "code sent".</li>
+<li><strong>Phone and email are separate identities.</strong> Linking a second identifier (and merging two profile rows) is a feature still to build.</li>
+<li><strong>Unauthenticated internal hooks.</strong> <code>user-service /internal/kratos/after-registration</code> and notification-service <code>/internal/kratos/sms|email</code> check no secret. They are reachable only inside the compose network (and on localhost dev ports). Worst case: an empty profile row, or a message triggered from inside. A shared-secret header is the next step.</li>
+<li><strong>Account deletion is not implemented</strong> (a store requirement). It must delete the Kratos identity, anonymise the profile, remove avatar files and device tokens.</li>
+<li><strong>Avatar formats.</strong> JPEG, PNG, GIF and BMP only; iPhone HEIC and WebP are not decoded by the JDK, so the app should convert to JPEG first.</li>
+<li><strong>Admin storage keys.</strong> user-service and registry-service use RustFS's <em>admin</em> keys. Create a bucket-scoped key before production.</li>
+<li><strong>No malware or NSFW scanning</strong> of avatars and logos (re-encoding removes active content, not inappropriate images).</li>
+<li><strong>Per-IP limits.</strong> They can block real users behind shared mobile-carrier addresses, and locally all clients share one Docker IP. Behind a proxy the real client IP must be configured, otherwise all users share one counter and partner address checks see the proxy.</li>
+<li><strong>Real sending is built but largely untested.</strong> Twilio and Resend adapters are unit-tested against mocked HTTP and real-mode start-up was verified, but no real SMS has been confirmed delivered end to end by the final code (an earlier real email did arrive; SMS to Ethiopia failed with Twilio error 21612 from the US sender). Resend uses a borrowed account and sender until a domain is verified. The first real send must use the allowlist.</li>
+<li><strong>Firebase push</strong> is a fake until a service account exists; the Firebase code has not been run against Firebase.</li>
+<li><strong>RabbitMQ permissions</strong> are wide (<code>.*</code>) for both service users, to be narrowed once real queues exist.</li>
+</ul>
+<h3 id="limits-found">Found while documenting (not fixed)</h3>
+<ul>
+<li><strong>Replay window.</strong> A captured signed partner request can be replayed for up to 5 minutes (no nonce). The effect is limited: <code>POST /v1/notifications</code> is idempotent by <code>externalId</code> (a replay returns <code>200 replayed</code>), reads are harmless.</li>
+<li><strong>Callback DNS check and connect are separate lookups.</strong> <code>UrlGuard</code> resolves the host, then the HTTP client resolves it again to connect, so a hostile DNS server could answer differently the second time (DNS rebinding). Not tested as exploitable; pinning the resolved address would close it.</li>
+<li><strong>Silent fallback to an ephemeral signing key</strong> if Infisical is unreachable at start (dev mode only, but easy to miss; see <a href="02-setup.html#secrets">Setup</a>).</li>
+<li><strong>Callback URL validation at accept time is weaker than at send time</strong> (see the SSRF section).</li>
+<li><strong>No data retention jobs.</strong> <code>send_log</code>, notifications, attempts, callbacks, <code>usage_daily</code> and <code>audit_event</code> grow without limit.</li>
+<li><strong>Staff identities created by the admin API skip the registration hook</strong>, so they have no <code>app_user</code> row until they first call <code>/api/v1/me</code>.</li>
+<li>Kratos admin (4434) and RustFS (9000, 9001) are published on localhost; anyone with local shell access can use them. Fine for dev, not for a shared server.</li>
+</ul>
+</section>
+
+<div class="pager"><a class="prev" href="05-communication.html"><small>Previous</small>5. How it communicates</a><a class="next" href="07-data.html"><small>Next</small>7. Data</a></div>
+<p class="footer">Adera backend documentation &middot; last verified 2026-10-25 &middot; <a href="../index.html">contents</a></p>
+</main>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

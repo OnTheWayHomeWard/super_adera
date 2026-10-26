@@ -1,0 +1,502 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>8f. Operational endpoints | Adera docs</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+<button id="menu-btn" type="button" aria-label="Toggle menu">Menu</button>
+<a class="brand" href="../index.html">Adera docs</a>
+<span class="spacer"></span>
+<a href="../index.html">Contents</a>
+<button id="theme-btn" type="button" aria-label="Toggle light or dark theme">Theme</button>
+</header>
+<div class="layout">
+<nav class="sidebar" aria-label="Sections">
+<ul><li><a href="../index.html" class="">Home / contents</a></li></ul>
+<h4>Sections</h4><ul>
+<li><a href="01-overview.html">1. Overview</a>
+</li>
+<li><a href="02-setup.html">2. Setup and running</a>
+</li>
+<li><a href="03-tools.html">3. Tools</a>
+</li>
+<li><a href="04-services.html">4. Services</a>
+</li>
+<li><a href="05-communication.html">5. How it communicates</a>
+</li>
+<li><a href="06-security.html">6. Security model</a>
+</li>
+<li><a href="07-data.html">7. Data</a>
+</li>
+<li><a href="08-endpoints.html">8. Endpoint reference</a>
+</li>
+<li><a href="09-guides.html">9. Guides</a>
+</li>
+<li><a href="10-reference.html">10. Reference</a>
+</li>
+<li><a href="11-backoffice.html">11. Backoffice (staff dashboard)</a>
+</li>
+<li><a href="12-backoffice-guide.html">12. Backoffice guide (staff manual)</a>
+</li>
+<li><a href="13-sample-data.html">13. Sample data (test scenarios)</a>
+</li>
+</ul>
+<h4>Endpoints</h4><ul>
+<li><a href="08a-user-api.html">8a. End-user API</a>
+</li>
+<li><a href="08b-staff-api.html">8b. Staff / dashboard API</a>
+</li>
+<li><a href="08c-partner-api.html">8c. Partner API</a>
+</li>
+<li><a href="08d-internal-api.html">8d. Internal API</a>
+</li>
+<li><a href="08e-kratos-flows.html">8e. Kratos flows</a>
+</li>
+<li><a href="08f-operational.html" class=current>8f. Operational endpoints</a>
+<ul><li><a href="#endpoints">Endpoints</a></li><li><a href="#gateway-behaviour">Gateway-level behaviour</a></li><li><a href="#tool-health">Health and status endpoints of the tools</a></li></ul>
+</li>
+</ul>
+</nav>
+<main>
+<h1>8f. Operational endpoints</h1>
+<p class="lead">Health, metrics, dev helpers, the public signing key and what the gateway does on its own. These are not part of any client contract, except the JWKS document which partners depend on. 10 endpoint blocks plus gateway behaviour and tool health tables.</p>
+<div class="callout warn"><span class="label">Reachability</span><p>Actuator, <code>/dev/messages</code> and every <code>/internal/**</code> path are <strong>not routed</strong> by the gateway. They exist on the service ports <code>8085-8087</code>, which compose publishes to <code>127.0.0.1</code> only so developers can reach them. In production unpublish those ports (SETUP section 12): then they are only reachable inside the compose network, where Prometheus scrapes them.</p></div>
+<h2 id="endpoints">Endpoints</h2>
+<details class="endpoint" id="ep-ops-get-actuator-health">
+<summary><span class="method m-get">GET</span><span class="path">/actuator/health</span><span class="sum">Service health (all three Java services)</span></summary>
+<div class="body"><dl class="meta">
+<dt>Audience</dt><dd>operators, Docker, Prometheus</dd>
+<dt>Client path</dt><dd><code>/actuator/health</code> on each service port (<code>8085</code>, <code>8086</code>, <code>8087</code>); not through the gateway</dd>
+<dt>Internal path</dt><dd>same</dd>
+<dt>Auth</dt><dd>none. <strong>Not routed by the gateway</strong>: through <code>$GATEWAY</code> the path answers <code>404 {"error_msg":"404 Route Not Found"}</code>. Reachable only on the dev host ports or inside the compose network</dd>
+<dt>Rate limit</dt><dd>none</dd>
+<dt>Implemented in</dt><dd>Spring Boot Actuator (<code>management.endpoints.web.exposure.include: health,info,prometheus</code> in each <code>application.yml</code>)</dd>
+</dl>
+<h4>Purpose</h4><p>Standard Spring Boot health summary. It answers <code>UP</code> only when the service and its mandatory dependencies are up (database, and for registry-service/user-service the checks Spring enables by default). Details are hidden (<code>show-details</code> is the default <code>never</code>), only the status and the group names. notification-service has the mail health indicator disabled on purpose: its SMTP connection is only used by the dev (Mailpit) provider, and a down Mailpit must not mark a service DOWN (and in live mode there is no SMTP at all).</p>
+<h4>Request parameters</h4><p>None.</p>
+<h4>Example request</h4>
+<pre><code>curl -s http://127.0.0.1:8086/actuator/health</code></pre>
+<pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+
+{
+  "groups": [
+    "liveness",
+    "readiness"
+  ],
+  "status": "UP"
+}</code></pre>
+<h4>Group endpoints</h4>
+<pre><code>curl -s http://127.0.0.1:8085/actuator/health/liveness
+curl -s http://127.0.0.1:8085/actuator/health/readiness</code></pre>
+<pre class="out"><code>{"status":"UP"}
+{"status":"UP"}</code></pre>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th>Error code</th><th>When it happens</th></tr></thead><tbody><tr><td><strong>503</strong></td><td>(body <code>{"status":"DOWN"}</code>)</td><td>A mandatory dependency (for example the database) is down. Not provoked here: it would need stopping Postgres.</td></tr></tbody></table></div>
+<h4>How to use it</h4><ul><li>Use <code>docker compose ps</code> and these endpoints together: a container can be Up while the application inside is still starting (the Spring services need roughly 20-100 seconds after a rebuild).</li><li><div class="table-wrap"><table><thead><tr><th>Service</th><th>Dev host port (127.0.0.1 only)</th><th>Port inside compose</th><th>Reached by</th></tr></thead><tbody><tr><td>notification-service</td><td><code>8085</code></td><td><code>notification-service:8080</code></td><td>Prometheus (job <code>notification-service</code>), Docker health, you</td></tr><tr><td>user-service</td><td><code>8086</code></td><td><code>user-service:8080</code></td><td>Prometheus (job <code>user-service</code>)</td></tr><tr><td>registry-service</td><td><code>8087</code></td><td><code>registry-service:8080</code></td><td>Prometheus (job <code>registry-service</code>)</td></tr></tbody></table></div></li></ul>
+</div></details>
+<details class="endpoint" id="ep-ops-get-actuator-index">
+<summary><span class="method m-get">GET</span><span class="path">/actuator</span><span class="sum">Actuator index</span></summary>
+<div class="body"><dl class="meta">
+<dt>Audience</dt><dd>operators</dd>
+<dt>Client path</dt><dd><code>/actuator</code> on each service port; not through the gateway</dd>
+<dt>Internal path</dt><dd>same</dd>
+<dt>Auth</dt><dd>none. <strong>Not routed by the gateway</strong>: through <code>$GATEWAY</code> the path answers <code>404 {"error_msg":"404 Route Not Found"}</code>. Reachable only on the dev host ports or inside the compose network</dd>
+<dt>Rate limit</dt><dd>none</dd>
+<dt>Implemented in</dt><dd>Spring Boot Actuator</dd>
+</dl>
+<h4>Purpose</h4><p>Lists the exposed actuator endpoints. Only <code>health</code>, <code>info</code> and <code>prometheus</code> are exposed; everything else (<code>env</code>, <code>beans</code>, <code>heapdump</code>) is deliberately not, so secrets in the environment cannot leak through it.</p>
+<h4>Request parameters</h4><p>None.</p>
+<h4>Example request</h4>
+<pre><code>curl -s http://127.0.0.1:8085/actuator</code></pre>
+<pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+
+{
+  "_links": {
+    "self": {
+      "href": "http://127.0.0.1:8085/actuator",
+      "templated": false
+    },
+    "info": {
+      "href": "http://127.0.0.1:8085/actuator/info",
+      "templated": false
+    },
+    "prometheus": {
+      "href": "http://127.0.0.1:8085/actuator/prometheus",
+      "templated": false
+    },
+    "health": {
+      "href": "http://127.0.0.1:8085/actuator/health",
+      "templated": false
+    },
+    "health-path": {
+      "href": "http://127.0.0.1:8085/actuator/health/{*path}",
+      "templated": true
+    }
+  }
+}</code></pre>
+<h4>An endpoint that is not exposed</h4>
+<pre><code>curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8085/actuator/env</code></pre>
+<pre class="out"><code>404</code></pre>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th>Error code</th><th>When it happens</th></tr></thead><tbody><tr><td><strong>404</strong></td><td><code>(Spring default JSON)</code></td><td>Any actuator endpoint that is not exposed.</td></tr></tbody></table></div>
+</div></details>
+<details class="endpoint" id="ep-ops-get-actuator-info">
+<summary><span class="method m-get">GET</span><span class="path">/actuator/info</span><span class="sum">Build info (empty today)</span></summary>
+<div class="body"><dl class="meta">
+<dt>Audience</dt><dd>operators</dd>
+<dt>Client path</dt><dd><code>/actuator/info</code> on each service port; not through the gateway</dd>
+<dt>Internal path</dt><dd>same</dd>
+<dt>Auth</dt><dd>none. <strong>Not routed by the gateway</strong>: through <code>$GATEWAY</code> the path answers <code>404 {"error_msg":"404 Route Not Found"}</code>. Reachable only on the dev host ports or inside the compose network</dd>
+<dt>Rate limit</dt><dd>none</dd>
+<dt>Implemented in</dt><dd>Spring Boot Actuator</dd>
+</dl>
+<h4>Purpose</h4><p>Would show build/git information. No <code>info.*</code> properties are configured, so it answers an empty object. Not a bug; there is nothing to show yet.</p>
+<h4>Request parameters</h4><p>None.</p>
+<h4>Example request</h4>
+<pre><code>curl -s http://127.0.0.1:8087/actuator/info</code></pre>
+<pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+
+{}</code></pre>
+<h4>Errors</h4><p>No endpoint-specific errors.</p>
+</div></details>
+<details class="endpoint" id="ep-ops-get-actuator-prometheus">
+<summary><span class="method m-get">GET</span><span class="path">/actuator/prometheus</span><span class="sum">Metrics in Prometheus text format</span></summary>
+<div class="body"><dl class="meta">
+<dt>Audience</dt><dd>Prometheus (scrape every 15 s), operators</dd>
+<dt>Client path</dt><dd><code>/actuator/prometheus</code> on each service port; not through the gateway</dd>
+<dt>Internal path</dt><dd>same</dd>
+<dt>Auth</dt><dd>none. <strong>Not routed by the gateway</strong>: through <code>$GATEWAY</code> the path answers <code>404 {"error_msg":"404 Route Not Found"}</code>. Reachable only on the dev host ports or inside the compose network</dd>
+<dt>Rate limit</dt><dd>none</dd>
+<dt>Implemented in</dt><dd>Spring Boot Actuator with Micrometer</dd>
+</dl>
+<h4>Purpose</h4><p>JVM, Tomcat, HikariCP (database pool), logging and HTTP server metrics, scraped by Prometheus (<code>infra/prometheus/prometheus.yml</code>, one job per service). The HTTP metric <code>http_server_requests_seconds_*</code> is labelled with the route template (<code>uri="/api/v1/me/notifications/{id}/read"</code>), method, status and outcome, which is what the Grafana overview uses. About 390 lines per service.</p>
+<h4>Request parameters</h4><div class="table-wrap"><table><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why it exists</th></tr></thead><tbody><tr><td><code>Accept</code></td><td>header</td><td>string</td><td>effectively yes</td><td><code>text/plain</code> (Prometheus sends it itself)</td><td>A client that sends only <code>Accept: application/json</code> gets <code>406</code>.</td></tr></tbody></table></div>
+<h4>Example request</h4>
+<pre><code>curl -s -H 'Accept: text/plain' http://127.0.0.1:8085/actuator/prometheus | head -3</code></pre>
+<pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: text/plain;version=0.0.4;charset=utf-8
+
+# HELP application_ready_time_seconds Time taken for the application to be ready to service requests
+# TYPE application_ready_time_seconds gauge
+application_ready_time_seconds{main_application_class="app.adera.notification.NotificationServiceApplication"} 107.818
+# HELP application_started_time_seco</code></pre><p class="masked">Abridged: the capture keeps only the first 300 characters.</p>
+<h4>Useful queries (Prometheus UI, http://localhost:9090)</h4>
+<pre><code>sum by (uri, status) (rate(http_server_requests_seconds_count{job="notification-service"}[5m]))
+hikaricp_connections_active{job="user-service"}
+jvm_memory_used_bytes{area="heap", job="registry-service"}</code></pre>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th>Error code</th><th>When it happens</th></tr></thead><tbody><tr><td><strong>406</strong></td><td><code>(Spring default JSON)</code></td><td><code>Accept</code> does not allow <code>text/plain</code>.</td></tr></tbody></table></div>
+<h4>How to use it</h4><ul><li>There are <strong>no custom Adera delivery metrics</strong> (no counters for SMS sent, notifications failed, queue depth of our workers). The comment in <code>prometheus.yml</code> says "JVM, HTTP and delivery metrics"; only JVM/HTTP exist. Delivery visibility today comes from the notification log and the staff API (<a href="08b-staff-api.html">8b</a>).</li></ul>
+</div></details>
+<details class="endpoint" id="ep-ops-get-dev-messages">
+<summary><span class="method m-get">GET</span><span class="path">/dev/messages</span><span class="sum">Dev only: what the fake providers 'sent'</span></summary>
+<div class="body"><dl class="meta">
+<dt>Audience</dt><dd>developers and the e2e tests</dd>
+<dt>Client path</dt><dd><code>http://127.0.0.1:8085/dev/messages</code> (dev port only)</dd>
+<dt>Internal path</dt><dd>same</dd>
+<dt>Auth</dt><dd>none. Exists only when <code>NOTIFY_DEV_ENDPOINTS=true</code>; the service refuses to start with it while a real provider is on. Not routed by the gateway (404)</dd>
+<dt>Rate limit</dt><dd>none</dd>
+<dt>Implemented in</dt><dd><code>services/notification-service/src/main/java/app/adera/notification/dev/DevMessageController.java</code>, store in <code>dispatch/DevMessageStore.java</code></dd>
+</dl>
+<h4>Purpose</h4><p>Shows the last 100 messages that the <em>non-real</em> providers handled (console SMS and Mailpit email), newest first, so a developer or test can read one-time codes without a phone. It is in-memory: it is empty after a restart. Messages sent by real providers are never stored here.</p>
+<h4>Request parameters</h4><div class="table-wrap"><table><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why it exists</th></tr></thead><tbody><tr><td><code>to</code></td><td>query</td><td>string</td><td>no</td><td>exact recipient, case-insensitive (phone in E.164, or email); URL-encode the <code>+</code> as <code>%2B</code></td><td>Filter to one person, avoiding confusion between parallel tests.</td></tr></tbody></table></div>
+<h4>Example request</h4>
+<pre><code>curl -s "http://127.0.0.1:8085/dev/messages"</code></pre>
+<pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+
+[
+  {
+    "at": "2026-10-25T05:48:31.949124760Z",
+    "channel": "email",
+    "to": "a***@example.com",
+    "subject": "Use code 123456 to log in",
+    "body": "Your login code is 123456"
+  },
+  {
+    "at": "2026-10-25T05:48:31.834076582Z",
+    "channel": "sms",
+    "to": "+2519******11",
+    "subject": null,
+    "body": "Your login code is: 123456"
+  }
+]</code></pre><p class="masked">Values masked: phone, email. The codes shown are placeholders (the real values were one-time codes).</p>
+<h4>Filtered</h4>
+<pre><code>curl -s "http://127.0.0.1:8085/dev/messages?to=%2B251900000011"</code></pre>
+<pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+
+[
+  {
+    "at": "2026-10-25T05:48:31.834076582Z",
+    "channel": "sms",
+    "to": "+2519******11",
+    "subject": null,
+    "body": "Your login code is: 123456"
+  }
+]</code></pre>
+<h4>Through the gateway</h4>
+<pre><code>curl -s "$GATEWAY/dev/messages"</code></pre>
+<pre class="out"><code>HTTP/1.1 404 Not Found
+Content-Type: text/plain; charset=utf-8
+
+{
+  "error_msg": "404 Route Not Found"
+}</code></pre>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th>Error code</th><th>When it happens</th></tr></thead><tbody><tr><td><strong>404</strong></td><td><code>(Spring default JSON)</code></td><td>Dev endpoints are off (<code>NOTIFY_DEV_ENDPOINTS=false</code>): the controller does not exist.</td></tr></tbody></table></div>
+<h4>How to use it</h4><ul><li>Wait for the code with a short loop (the courier is asynchronous: Kratos queues the message and notification-service gets it a moment later); the e2e scripts poll once per second for up to 15-20 seconds.</li><li>Delivery to Mailpit is separate: the same email is also in the Mailpit inbox (see below).</li></ul>
+</div></details>
+<details class="endpoint" id="ep-ops-delete-dev-messages">
+<summary><span class="method m-delete">DELETE</span><span class="path">/dev/messages</span><span class="sum">Dev only: clear the dev message list</span></summary>
+<div class="body"><dl class="meta">
+<dt>Audience</dt><dd>developers and tests</dd>
+<dt>Client path</dt><dd><code>http://127.0.0.1:8085/dev/messages</code> (dev port only)</dd>
+<dt>Internal path</dt><dd>same</dd>
+<dt>Auth</dt><dd>same as above</dd>
+<dt>Rate limit</dt><dd>none</dd>
+<dt>Implemented in</dt><dd><code>DevMessageController.java#clear</code></dd>
+</dl>
+<h4>Purpose</h4><p>Empties the in-memory list. Tests call it before triggering a code so the next message is certainly theirs.</p>
+<h4>Request parameters</h4><p>None.</p>
+<h4>Example request</h4>
+<pre><code>curl -s -X DELETE "http://127.0.0.1:8085/dev/messages"</code></pre>
+<pre class="out"><code>HTTP/1.1 200 OK</code></pre>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th>Error code</th><th>When it happens</th></tr></thead><tbody><tr><td><strong>404</strong></td><td><code>(Spring default JSON)</code></td><td>Dev endpoints are off.</td></tr></tbody></table></div>
+</div></details>
+<details class="endpoint" id="ep-ops-get-jwks">
+<summary><span class="method m-get">GET</span><span class="path">/.well-known/jwks.json</span><span class="sum">Adera's public signing key (JWKS)</span></summary>
+<div class="body"><dl class="meta">
+<dt>Audience</dt><dd>partners (public)</dd>
+<dt>Client path</dt><dd><code>/.well-known/jwks.json</code> (through the gateway)</dd>
+<dt>Internal path</dt><dd>served by notification-service; the gateway adds <code>X-Gateway-Secret</code> and rewrites nothing</dd>
+<dt>Auth</dt><dd>none: public and cacheable</dd>
+<dt>Rate limit</dt><dd>120 per 60 s per client IP (gateway route <code>partner-jwks</code>)</dd>
+<dt>Implemented in</dt><dd><code>services/notification-service/.../partner/auth/JwksController.java</code>, key in <code>SigningKeyHolder.java</code></dd>
+</dl>
+<h4>Purpose</h4><p>Publishes the public half of the key Adera uses to sign API responses and callbacks to partners (scheme <code>ADERA-SIG-1</code>, RS256). A partner fetches it once (the answer is cacheable for 1 hour), then verifies the <code>X-Adera-Signature</code> of every response and callback against it (<a href="06-security.html#signing">signing</a>). The same document is available directly from notification-service on the dev port.</p>
+<h4>Request parameters</h4><p>None.</p>
+<h4>Example request</h4>
+<pre><code>curl -s "$GATEWAY/.well-known/jwks.json"</code></pre>
+<pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+X-RateLimit-Limit: 120
+X-Request-Id: 159d6db5-9055-4663-81ce-3678b4e7ded1
+
+{
+  "keys": [
+    {
+      "kty": "RSA",
+      "use": "sig",
+      "alg": "RS256",
+      "kid": "adera-sig-202610",
+      "n": "1hZGZIorMnraX4Ou21BKv-KaiT3an6XHPZPI9oXyGAbDE9_WZhGIPHpqkvO2LOZpXI6bhqig3QMaPaPe9iPziUtbdy7_UjKyXJ7WVdo1P1V5GfIiDLcDwmFrrt8A4Ve6gEvhZ1msgBzoCbz4bQ_ZMHDGclzLiW1NnSI7ye5yWaqe0vHPj5gUE51ZVyhp9bfKIo8AjoUTe-ZSjFlgchv-sltLUvoILfh7oe_NneQTPLwDBoLBIgOV4zvc5o_X9lmra5I54Mscv-tniPf23JBwX2nCNZRQ-lpzcPgb4eA_xu7GG6zwhmuaLyhKT38Kw7W-8a5byEe3xfftQAd3Eqgkz12DAFqAnyhxoPqIaCkFPT8gwA8Ij0fcefRpCWczdCZDToJ-8fUBLUgNqSqAlfupgeydtitXMdoro0vHcY3qtfpSUI61KFyfdILUv7sNfLqayTWwAao4mAlRC2KUfR0xm__8Oc--obrpk9WmPBE3IIt0CbnlCxkUASNWZ7lUFkAn",
+      "e": "AQAB"
+    }
+  ]
+}</code></pre><p class="masked">The &lt;code&gt;n&lt;/code&gt; value is the RSA public modulus (public by design).</p>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th>Error code</th><th>When it happens</th></tr></thead><tbody><tr><td><strong>429</strong></td><td><code>(HTML page)</code></td><td>Gateway limit of 120 per minute exceeded.</td></tr></tbody></table></div>
+<h4>How to use it</h4><ul><li>Choose the key by <code>kid</code> (<code>adera-sig-202610</code> here) so a future key rotation can publish two keys at once.</li><li>If <code>PARTNER_SIGNING_PRIVATE_KEY_B64</code> is missing from Infisical the service uses an ephemeral key (dev only) and the <code>kid</code>/modulus change at every restart; with real providers it refuses to start (<a href="03-tools.html#infisical">Infisical</a>).</li></ul>
+</div></details>
+<details class="endpoint" id="ep-ops-options-cors">
+<summary><span class="method m-delete">OPTIONS</span><span class="path">/api/v1/me (any gateway path)</span><span class="sum">CORS preflight</span></summary>
+<div class="body"><dl class="meta">
+<dt>Audience</dt><dd>browsers (the future React dashboard and web views)</dd>
+<dt>Client path</dt><dd>any path through the gateway</dd>
+<dt>Internal path</dt><dd>same</dd>
+<dt>Auth</dt><dd>none</dd>
+<dt>Rate limit</dt><dd>counted like other requests of the route</dd>
+<dt>Implemented in</dt><dd>gateway global rule 1, plugin <code>cors</code> in <code>infra/apisix/apisix.yaml</code></dd>
+</dl>
+<h4>Purpose</h4><p>The gateway answers browsers' preflight requests itself. Only the origin <code>http://localhost:3000</code> is allowed today (the dashboard dev server). Methods: GET, POST, PUT, PATCH, DELETE, OPTIONS; request headers: <code>Authorization</code>, <code>Content-Type</code>, <code>X-Request-Id</code>; <code>X-Request-Id</code> is exposed to scripts; preflight results are cached 3600 s. Mobile apps are not browsers and ignore CORS.</p>
+<h4>Request parameters</h4><div class="table-wrap"><table><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why it exists</th></tr></thead><tbody><tr><td><code>Origin</code></td><td>header</td><td>string</td><td>yes</td><td>must equal <code>http://localhost:3000</code> to get the allow headers</td><td>Which web origin asks.</td></tr><tr><td><code>Access-Control-Request-Method</code></td><td>header</td><td>string</td><td>yes</td><td>e.g. <code>PATCH</code></td><td>The method the real request will use.</td></tr></tbody></table></div>
+<h4>Example request</h4>
+<pre><code>curl -s -i -X OPTIONS "$GATEWAY/api/v1/me" \
+  -H 'Origin: http://localhost:3000' \
+  -H 'Access-Control-Request-Method: PATCH' \
+  -H 'Access-Control-Request-Headers: authorization,content-type'</code></pre>
+<pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: text/plain; charset=utf-8
+Access-Control-Allow-Origin: http://localhost:3000
+Access-Control-Allow-Methods: GET,POST,PUT,PATCH,DELETE,OPTIONS
+Access-Control-Allow-Headers: Authorization,Content-Type,X-Request-Id
+Access-Control-Max-Age: 3600
+Access-Control-Expose-Headers: X-Request-Id
+X-Request-Id: 736bc694-5996-49be-b74e-c7f0c9dd9c06</code></pre>
+<h4>Errors</h4><p>No endpoint-specific errors.</p>
+<h4>How to use it</h4><ul><li><code>allow_origins</code> is hard-coded to localhost in the config: set the real dashboard origin before going live (deployment checklist, SETUP section 12). The header list does not include <code>X-Session-Token</code> or the partner <code>X-Adera-*</code> headers; the partner API is server to server and never needs CORS.</li></ul>
+</div></details>
+<details class="endpoint" id="ep-ops-get-apisix-metrics">
+<summary><span class="method m-get">GET</span><span class="path">http://apisix:9091/apisix/prometheus/metrics</span><span class="sum">Gateway metrics (internal)</span></summary>
+<div class="body"><dl class="meta">
+<dt>Audience</dt><dd>Prometheus (job <code>apisix</code>)</dd>
+<dt>Client path</dt><dd><code>apisix:9091/apisix/prometheus/metrics</code> inside the compose network only (port 9091 is not published to the host)</dd>
+<dt>Internal path</dt><dd>same</dd>
+<dt>Auth</dt><dd>none: network isolation</dd>
+<dt>Rate limit</dt><dd>none</dd>
+<dt>Implemented in</dt><dd><code>infra/apisix/config.yaml</code> (<code>plugin_attr.prometheus.export_addr</code>), plugin <code>prometheus</code> in the global rule</dd>
+</dl>
+<h4>Purpose</h4><p>Per-route request counts, status codes, latency histograms and bandwidth, labelled by route id (<code>me</code>, <code>admin-api</code>, <code>apps-catalog</code>, <code>kratos-public</code> ...). The 'Adera overview' Grafana dashboard reads <code>apisix_http_status</code> and <code>apisix_http_latency_bucket</code> from here, including the 429 count.</p>
+<h4>Request parameters</h4><p>None.</p>
+<h4>Example request (from the host, through another container)</h4>
+<pre><code>docker compose exec -T prometheus wget -qO- http://apisix:9091/apisix/prometheus/metrics | grep '^apisix_bandwidth' | head -3</code></pre>
+<pre class="out"><code>apisix_bandwidth{type="egress",route="",service="",consumer="",node="",request_type="traditional_http",request_llm_model="",llm_model=""} 2009
+apisix_bandwidth{type="egress",route="admin-api",service="",consumer="",node="172.18.0.8",request_type="traditional_http",request_llm_model="",llm_model=""} 20257
+apisix_bandwidth{type="egress",route="apps-catalog",service="",consumer="",node="172.18.0.8",request_type="traditional_http",request_llm_model="",llm_model=""} 11457</code></pre>
+<h4>Errors</h4><p>No endpoint-specific errors.</p>
+<h4>How to use it</h4><ul><li>Captured live on 2026-10-25. The empty <code>route=""</code> line is traffic that matched no route (the 404s).</li></ul>
+</div></details>
+<details class="endpoint" id="ep-ops-mailpit-api">
+<summary><span class="method m-get">GET</span><span class="path">http://127.0.0.1:8025/api/v1/messages</span><span class="sum">Mailpit: the dev inbox API</span></summary>
+<div class="body"><dl class="meta">
+<dt>Audience</dt><dd>developers and tests</dd>
+<dt>Client path</dt><dd><code>http://127.0.0.1:8025</code> (Mailpit web UI and API; dev only)</dd>
+<dt>Internal path</dt><dd>same</dd>
+<dt>Auth</dt><dd>none (local only)</dd>
+<dt>Rate limit</dt><dd>none</dd>
+<dt>Implemented in</dt><dd>Mailpit v1.21 (third-party; <code>docker-compose.yml</code> service <code>mailpit</code>)</dd>
+</dl>
+<h4>Purpose</h4><p>Mailpit is the fake SMTP server that receives all dev emails (login codes from Kratos, Infisical mail). The UI is at <code>/</code>; the JSON API is below <code>/api/v1</code>. Useful calls: <code>GET /api/v1/info</code> (counts, version), <code>GET /api/v1/messages?limit=N</code> (list, newest first), <code>GET /api/v1/message/{ID}</code> (one message with body), <code>GET /api/v1/search?query=to:someone@example.com</code> (search), <code>DELETE /api/v1/messages</code> with <code>{"IDs":[...]}</code> (delete selected; no body deletes all), <code>GET /readyz</code> (health).</p>
+<h4>Request parameters</h4><div class="table-wrap"><table><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why it exists</th></tr></thead><tbody><tr><td><code>limit</code></td><td>query</td><td>integer</td><td>no</td><td>default 50</td><td>Page size.</td></tr><tr><td><code>start</code></td><td>query</td><td>integer</td><td>no</td><td>default 0</td><td>Offset.</td></tr></tbody></table></div>
+<h4>Example request</h4>
+<pre><code>curl -s "http://127.0.0.1:8025/api/v1/messages?limit=2"</code></pre>
+<pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+
+{
+  "total": 10,
+  "unread": 10,
+  "count": 2,
+  "messages_count": 10,
+  "start": 0,
+  "tags": [],
+  "messages": [
+    {
+      "ID": "dy5FDGJxZt8dqVftuLPPm7",
+      "MessageID": "593527857.7.1792889559450@890bf50a3307",
+      "Read": false,
+      "From": {
+        "Name": "Adera",
+        "Address": "no-reply@adera.local"
+      },
+      "To": [
+        {
+          "Name": "",
+          "Address": "a***@adera.local"
+        }
+      ],
+      "Cc": [],
+      "Bcc": [],
+      "ReplyTo": [],
+      "Subject": "Use code ****** to log in",
+      "Created": "2026-10-25T00:52:39.458Z",
+      "Tags": [],
+      "Size": 1331,
+      "Attachments": 0,
+      "Snippet": "Login to your account with the following code: ****** It expires in 5 minutes."
+    },
+    {
+      "ID": "3Rt6YxT3WJ8GC2wkNCZ8Kx",
+      "MessageID": "1669602818.3.1792889519176@890bf50a3307",
+      "Read": false,
+      "From": {
+        "Name": "Adera",
+        "Address": "no-reply@adera.local"
+      },
+      "To": [
+        {
+          "Name": "",
+          "Address": "a***@adera.local"
+        }
+      ],
+      "Cc": [],
+      "Bcc": [],
+      "ReplyTo": [],
+      "Subject": "Use code ****** to log in",
+      "Created": "2026-10-25T00:51:59.182Z",
+      "Tags": [],
+      "Size": 1338,
+      "Attachments": 0,
+      "Snippet": "Login to your account with the following code: ****** It expires in 5 minutes."
+    }
+  ]
+}</code></pre><p class="masked">Values masked: the code digits are real one-time codes in the original answer and were expired long ago; they are masked anyway.</p>
+<h4>Info</h4>
+<pre><code>curl -s http://127.0.0.1:8025/api/v1/info</code></pre>
+<pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+
+{
+  "Version": "v1.21.8",
+  "LatestVersion": "v1.32.0",
+  "Database": "/data/mailpit.db",
+  "DatabaseSize": 106496,
+  "Messages": 10,
+  "Unread": 10,
+  "Tags": {},
+  "RuntimeStats": {
+    "Uptime": 2414.928715479,
+    "Memory": 24714256,
+    "MessagesDeleted": 13,
+    "SMTPAccepted": 13,
+    "SMTPAcceptedSize": 17249,
+    "SMTPRejected": 0,
+    "SMTPIgnored": 0
+  }
+}</code></pre>
+<h4>Errors</h4><p>No endpoint-specific errors.</p>
+<h4>How to use it</h4><ul><li>Mailpit's own list has no real recipients: everything sent through it stays on this machine. In live mode (<code>EMAIL_PROVIDER=resend</code>) emails do not go through Mailpit at all.</li></ul>
+</div></details>
+<h2 id="gateway-behaviour">Gateway-level behaviour</h2>
+<p>Things every client sees that come from APISIX itself, not from a service. All captured on 2026-10-25.</p>
+<div class="table-wrap"><table><thead><tr><th>Situation</th><th>Status and body</th><th>Why / where</th></tr></thead><tbody><tr><td>No route matches the path (including every <code>/internal/**</code>, <code>/dev/**</code>, <code>/actuator/**</code>)</td><td><code>404</code> <code>{&quot;error_msg&quot;:&quot;404 Route Not Found&quot;}</code> (Content-Type <code>text/plain</code>)</td><td>Anything not listed in <code>apisix.yaml</code> is unreachable from outside: the default is closed.</td></tr><tr><td>Protected route, no or bad token</td><td><code>401</code> with an <strong>empty body</strong></td><td>forward-auth relays the status and body of user-service's <code>/internal/auth/verify</code> (empty 401). Staff routes can return <code>403</code> with <code>{&quot;error&quot;:&quot;mfa_required&quot;}</code> or <code>{&quot;error&quot;:&quot;not_staff&quot;}</code> from registry-service (<a href='08b-staff-api.html'>8b</a>).</td></tr><tr><td>Rate limit exceeded</td><td><code>429</code>, Content-Type <code>text/html</code>, body is an HTML page (&quot;429 Too Many Requests ... openresty&quot;), headers <code>X-RateLimit-Limit/Remaining/Reset</code></td><td><code>limit-count</code> with <code>rejected_code: 429</code>; counters live in Redis (ACL user <code>apisix</code>, keys <code>plugin-limit-count:*</code>). Clients must not assume JSON here.</td></tr><tr><td>Kratos admin path</td><td><code>403</code> <code>{&quot;error&quot;:&quot;forbidden&quot;}</code></td><td><code>mocking</code> plugin, route <code>kratos-admin-blocked</code> (priority 100).</td></tr><tr><td>Identity service down during forward-auth</td><td><code>503</code> (<code>identity_service_unavailable</code> from the service, or the gateway's own 503 if user-service is unreachable)</td><td><code>status_on_error: 503</code>: an outage is not reported as a login failure.</td></tr><tr><td>Every response</td><td>header <code>X-Request-Id</code> (also forwarded to services, appears in their logs and traces); rate-limited routes add <code>X-RateLimit-Limit</code>, <code>X-RateLimit-Remaining</code>, <code>X-RateLimit-Reset</code></td><td><code>request-id</code> plugin (<code>include_in_response: true</code>) and <code>limit-count</code>. Use the request id when asking 'what happened to my call?' in Grafana (Loki and Tempo, <a href='05-communication.html'>section 5</a>).</td></tr><tr><td>Browser preflight</td><td><code>200</code> with the <code>Access-Control-*</code> headers (above)</td><td><code>cors</code> plugin in global rule 1.</td></tr></tbody></table></div>
+<h3 id="captured-examples">Captured examples</h3>
+<p><strong>401: no token on a protected route</strong></p><pre class="out"><code>HTTP/1.1 401 Unauthorized
+Content-Type: text/plain; charset=utf-8
+X-Request-Id: ac466ffe-5057-40eb-a7fb-c16c1971cbd0</code></pre>
+<p><strong>404: path that is not routed</strong></p><pre class="out"><code>HTTP/1.1 404 Not Found
+Content-Type: text/plain; charset=utf-8
+X-Request-Id: 456ea751-4533-41f3-8a6f-8b03ac6b8bc5
+
+{
+  "error_msg": "404 Route Not Found"
+}</code></pre>
+<p><strong>429: the 11th Kratos submit within 60 s (the same 429 page is returned by every limited route; the avatar route allows 20)</strong></p><pre class="out"><code>HTTP/1.1 429 Too Many Requests
+Content-Type: text/html; charset=utf-8
+X-RateLimit-Limit: 10
+X-RateLimit-Remaining: 0
+X-RateLimit-Reset: 59.8
+X-Request-Id: 212c58d3-7059-4c36-8eda-02139253be94
+
+&lt;html&gt;
+&lt;head&gt;&lt;title&gt;429 Too Many Requests&lt;/title&gt;&lt;/head&gt;
+&lt;body&gt;
+&lt;center&gt;&lt;h1&gt;429 Too Many Requests&lt;/h1&gt;&lt;/center&gt;
+&lt;hr&gt;&lt;center&gt;openresty&lt;/center&gt;
+&lt;p&gt;&lt;em&gt;Powered by &lt;a href="https://apisix.apache.org/"&gt;APISIX&lt;/a&gt;.&lt;/em&gt;&lt;/p&gt;&lt;/body&gt;
+&lt;/html&gt;</code></pre>
+<p><strong>403: Kratos admin path</strong></p><pre class="out"><code>HTTP/1.1 403 Forbidden
+Content-Type: application/json
+X-Request-Id: 33ea691c-0123-411c-b272-23338c8f4f78
+
+{
+  "error": "forbidden"
+}</code></pre>
+<h3 id="direct-access">Calling a service port directly</h3>
+<p>The dev host ports (8085-8087) bypass the gateway. The services therefore check the shared secrets themselves; without them, requests are refused:</p>
+<div class="table-wrap"><table><thead><tr><th>Call (direct to the service)</th><th>Result</th></tr></thead><tbody><tr><td><code>GET :8086/api/v1/me</code> with <code>X-User-Id</code> but without <code>X-Gateway-Secret</code></td><td><code>401 {&quot;error&quot;:&quot;unauthorized&quot;}</code></td></tr><tr><td>same with the secret but without <code>X-User-Id</code>, or a non-UUID id</td><td><code>401 {&quot;error&quot;:&quot;unauthorized&quot;}</code></td></tr><tr><td><code>GET :8085/api/v1/me/notifications</code> without the secret</td><td><code>401 {&quot;error&quot;:&quot;unauthorized&quot;}</code></td></tr><tr><td><code>GET :8087/api/v1/apps</code> and <code>/admin/api/v1/apps</code> without the secret</td><td><code>401 {&quot;error&quot;:&quot;unauthorized&quot;}</code></td></tr></tbody></table></div>
+<p>All of these were called and confirmed on 2026-10-25. See <a href="08d-internal-api.html">8d</a> and <a href="05-communication.html#trust-model">the trust model</a>.</p>
+<h2 id="tool-health">Health and status endpoints of the tools</h2>
+<p>Checked on 2026-10-25 (all answered healthy). "Internal" means: reachable only inside the compose network, so use <code>docker compose exec</code> from a container that has <code>wget</code> (for example <code>prometheus</code>).</p>
+<div class="table-wrap"><table><thead><tr><th>Tool</th><th>Endpoint / command</th><th>Answer</th></tr></thead><tbody><tr><td>Kratos public</td><td><code>http://127.0.0.1:4433/health/alive</code>, <code>/health/ready</code>, <code>/version</code></td><td><code>{"status":"ok"}</code>; version <code>{"version":"v26.2.0"}</code>. Also reachable through the gateway as <code>/kratos/health/ready</code> (captured, 200)</td></tr><tr><td>Kratos admin</td><td><code>http://127.0.0.1:4434/health/ready</code>, <code>/admin/identities</code> ...</td><td>dev host port only; <strong>blocked at the gateway</strong>. Metrics at <code>/admin/metrics/prometheus</code> (scraped by Prometheus)</td></tr><tr><td>Prometheus</td><td><code>http://127.0.0.1:9090/-/healthy</code>, <code>/api/v1/targets</code></td><td>"Prometheus Server is Healthy."; 12 targets, all up on 2026-10-25 (apisix, kratos, rabbitmq, otel-collector x2, loki, tempo, alloy, notification-, user-, registry-service, prometheus itself)</td></tr><tr><td>Grafana</td><td><code>http://127.0.0.1:3001/api/health</code></td><td><code>{"database":"ok","version":"13.0.2",...}</code></td></tr><tr><td>Infisical</td><td><code>http://127.0.0.1:8080/api/status</code></td><td><code>{"message":"Ok","emailConfigured":true,"inviteOnlySignup":true,"redisConfigured":true,...}</code></td></tr><tr><td>RustFS</td><td><code>http://127.0.0.1:9000/health</code></td><td><code>{"service":"rustfs-endpoint","status":"ok","version":"1.0.3",...}</code>; console on :9001</td></tr><tr><td>Mailpit</td><td><code>http://127.0.0.1:8025/readyz</code></td><td>200 (Docker health check uses <code>/mailpit readyz</code>)</td></tr><tr><td>RabbitMQ</td><td><code>docker compose exec rabbitmq rabbitmq-diagnostics -q ping</code>; UI <code>http://127.0.0.1:15672</code>; metrics on :15692 (internal)</td><td>"Ping succeeded"</td></tr><tr><td>Loki (internal)</td><td><code>http://loki:3100/ready</code></td><td>"ready". It can answer 503 for a few seconds after a start or now and then; retry</td></tr><tr><td>Tempo (internal)</td><td><code>http://tempo:3200/ready</code></td><td>"ready"</td></tr><tr><td>Alloy (internal)</td><td><code>http://alloy:12345/-/ready</code></td><td>"Alloy is ready."</td></tr><tr><td>OTel Collector (internal)</td><td><code>http://otel-collector:8888/metrics</code> (own metrics), <code>:8889</code> (metrics from our services); OTLP receivers on :4317 (gRPC) and :4318 (HTTP)</td><td>Prometheus text</td></tr><tr><td>Redis</td><td><code>docker compose exec redis redis-cli --user admin --pass "$REDIS_ADMIN_PASSWORD" ping</code> (the compose health check)</td><td>PONG</td></tr><tr><td>Postgres</td><td><code>docker compose exec postgres pg_isready -U adera_admin -d postgres</code></td><td>accepting connections</td></tr></tbody></table></div>
+
+<div class="pager"><a class="prev" href="08e-kratos-flows.html"><small>Previous</small>8e. Kratos flows</a><a class="next" href="09-guides.html"><small>Next</small>9. Guides</a></div>
+<p class="footer">Adera backend documentation &middot; last verified 2026-10-25 &middot; <a href="../index.html">contents</a></p>
+</main>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

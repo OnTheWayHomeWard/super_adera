@@ -1,0 +1,495 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>12. Backoffice guide | Adera docs</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+<button id="menu-btn" type="button" aria-label="Toggle menu">Menu</button>
+<a class="brand" href="../index.html">Adera docs</a>
+<span class="spacer"></span>
+<a href="../index.html">Contents</a>
+<button id="theme-btn" type="button" aria-label="Toggle light or dark theme">Theme</button>
+</header>
+<div class="layout">
+<nav class="sidebar" aria-label="Sections">
+<ul><li><a href="../index.html" class="">Home / contents</a></li></ul>
+<h4>Sections</h4><ul>
+<li><a href="01-overview.html">1. Overview</a>
+</li>
+<li><a href="02-setup.html">2. Setup and running</a>
+</li>
+<li><a href="03-tools.html">3. Tools</a>
+</li>
+<li><a href="04-services.html">4. Services</a>
+</li>
+<li><a href="05-communication.html">5. How it communicates</a>
+</li>
+<li><a href="06-security.html">6. Security model</a>
+</li>
+<li><a href="07-data.html">7. Data</a>
+</li>
+<li><a href="08-endpoints.html">8. Endpoint reference</a>
+</li>
+<li><a href="09-guides.html">9. Guides</a>
+</li>
+<li><a href="10-reference.html">10. Reference</a>
+</li>
+<li><a href="11-backoffice.html">11. Backoffice (staff dashboard)</a>
+</li>
+<li><a href="12-backoffice-guide.html" class=current>12. Backoffice guide (staff manual)</a>
+<ul><li><a href="#roles">1. Roles</a></li><li><a href="#signin">2. Signing in</a></li><li><a href="#troubleshooting">2.6 Troubleshooting</a></li><li><a href="#screens">3. Screen by screen</a></li><li><a href="#s-apps">3.3 Mini apps</a></li><li><a href="#s-users">3.5 Users</a></li><li><a href="#s-staff">3.7 Staff</a></li><li><a href="#s-audit">3.8 Audit log</a></li><li><a href="#tutorial">4. Zero to LIVE</a></li><li><a href="#why">5. Why no notification?</a></li><li><a href="#recipes">6. Recipes</a></li><li><a href="#cannot">7. Cannot do yet</a></li></ul>
+</li>
+<li><a href="13-sample-data.html">13. Sample data (test scenarios)</a>
+</li>
+</ul>
+<h4>Endpoints</h4><ul>
+<li><a href="08a-user-api.html">8a. End-user API</a>
+</li>
+<li><a href="08b-staff-api.html">8b. Staff / dashboard API</a>
+</li>
+<li><a href="08c-partner-api.html">8c. Partner API</a>
+</li>
+<li><a href="08d-internal-api.html">8d. Internal API</a>
+</li>
+<li><a href="08e-kratos-flows.html">8e. Kratos flows</a>
+</li>
+<li><a href="08f-operational.html">8f. Operational endpoints</a>
+</li>
+</ul>
+</nav>
+<main>
+<h1>12. Backoffice guide (staff operator's manual)</h1>
+<p class="lead">How to do your job in the Adera backoffice, step by step: sign in, manage a mini app from creation to LIVE, answer "why didn't my notification arrive?", handle reports, look after users and colleagues. It describes what the dashboard does today, written from the code (<code>backoffice/src</code> and the three services' controllers), not from plans. For the API calls behind each screen see <a href="11-backoffice.html">11. Backoffice</a> and <a href="08b-staff-api.html">8b. Staff API</a>.</p>
+
+<div class="callout why"><span class="label">How this page is organised</span>
+<p>1 Roles, 2 Signing in (with troubleshooting), 3 Screen by screen (all nine sections: login, dashboard, mini apps with every tab, moderation, users, notifications, staff, audit log, system), 4 A mini app from zero to LIVE (one end-to-end tutorial), 5 "Why didn't my notification arrive?", 6 Recipes, 7 What the backoffice cannot do yet. Section 3.5 is the users manual and 3.7 the staff-management manual.</p></div>
+
+<div class="callout ok"><span class="label">Conventions</span>
+<p>Addresses are the development stack: dashboard <code>http://127.0.0.1:9080/backoffice/</code>, Mailpit (the dev inbox) <code>http://127.0.0.1:8025</code>. Example values (<code>adera-fix</code>, <code>203.0.113.10</code>, <code>support@adera-fix.example</code>) are made up; <code>203.0.113.0/24</code> is a range reserved for documentation. No screenshots are included: the folder <code>backoffice/tests/ui/out</code> was empty when this was written, so screens are described in words.</p></div>
+
+<section><h2 id="roles">1. Who this is for, and what each role can do</h2>
+<p>This is for Adera staff who run the platform day to day: onboarding partner mini apps, moderating, supporting users, adding colleagues. Everyone has one of three roles. A higher role includes everything below it. <strong>The server decides</strong>: the dashboard only hides or greys out what the server would refuse. If you force it anyway, the server answers <code>403 insufficient_role</code> ("Your role is not allowed to do this.").</p>
+<div class="table-wrap"><table>
+<thead><tr><th>Screen / action</th><th>VIEWER</th><th>ADMIN</th><th>SUPER_ADMIN</th></tr></thead>
+<tbody>
+<tr><td>Dashboard (counts, drafts, open reports, latest notifications)</td><td>yes</td><td>yes</td><td>yes</td></tr>
+<tr><td>Dashboard panel "Recent staff activity" (audit)</td><td>no (a blue note says audit is for admins)</td><td>yes</td><td>yes</td></tr>
+<tr><td>Mini apps: list, open an app, read every tab (including keys' fingerprints, templates, usage, notification log)</td><td>read only</td><td>yes</td><td>yes</td></tr>
+<tr><td>Create an app; edit it; logo; capabilities; notification limits; allowed IPs; partner keys (register, generate, revoke); payment settings; templates (create, edit, activate/deactivate)</td><td>no</td><td>yes</td><td>yes</td></tr>
+<tr><td>Set status DRAFT, LIVE, PAUSED, KILLED</td><td>no</td><td>yes (but cannot leave KILLED)</td><td>yes, including reviving a KILLED app</td></tr>
+<tr><td>App tab "Audit"</td><td>no (info note)</td><td>yes</td><td>yes</td></tr>
+<tr><td>Moderation: read reviews and reports</td><td>yes</td><td>yes</td><td>yes</td></tr>
+<tr><td>Moderation: hide or restore a review; resolve, dismiss or reopen a report</td><td>no</td><td>yes</td><td>yes</td></tr>
+<tr><td>Users: list, search, open detail</td><td>yes, with masked data</td><td>yes, full data</td><td>yes, full data</td></tr>
+<tr><td>Users: suspend, reactivate, mark deleted; "Audit for this user" card</td><td>no</td><td>yes</td><td>yes</td></tr>
+<tr><td>Notifications (global delivery log and detail)</td><td>yes</td><td>yes</td><td>yes</td></tr>
+<tr><td>Audit log screen</td><td>no (the page shows an info note)</td><td>yes</td><td>yes (actor filter shows names)</td></tr>
+<tr><td>Staff screen: list, add, change role, deactivate, reactivate</td><td>no</td><td>no</td><td>yes</td></tr>
+<tr><td>System: tool links, service health, capability catalog, error tables</td><td>yes</td><td>yes</td><td>yes</td></tr>
+</tbody></table></div>
+<h3 id="masking">What is masked for a VIEWER</h3>
+<p>On the Users screens the <em>server</em> removes or masks personal data before it leaves user-service; the browser never receives the full values.</p>
+<div class="table-wrap"><table>
+<thead><tr><th>Field</th><th>VIEWER sees</th><th>ADMIN and SUPER_ADMIN see</th></tr></thead>
+<tbody>
+<tr><td>Email</td><td>first character, then <code>***@</code>, first character of the domain, <code>***</code> and the ending, for example <code>a***@g***.com</code></td><td>the full address</td></tr>
+<tr><td>Phone</td><td>country part and last four digits, for example <code>+251*****4567</code></td><td>the full number</td></tr>
+<tr><td>Gender, date of birth</td><td>"hidden"</td><td>the values</td></tr>
+<tr><td>Extra data (free-form JSON)</td><td>hidden; only the <em>names</em> of the keys are listed</td><td>the whole JSON</td></tr>
+<tr><td>First and last name, status, language, market, tier, timestamps, location summary (country, region, city), device counts, mute preferences</td><td colspan="2">shown to everyone (names are not masked)</td></tr>
+</tbody></table></div>
+<div class="callout warn"><span class="label">Search still sees the full value</span><p>A VIEWER can type a full email or phone into the search box and the server matches it against the unmasked data. That tells a viewer whether a given address or number is registered, even though the result row is masked. The screen says so ("You can still search by the full value"). Keep this in mind when deciding who gets VIEWER.</p></div>
+</section>
+
+<section><h2 id="signin">2. Signing in</h2>
+<p>Staff need two proofs: a one-time code sent to your email, and a code from an authenticator app (this is the "second factor"). Until both are done the admin API answers <code>403 mfa_required</code>. The page has a three-step indicator: <strong>Email</strong>, <strong>Emailed code</strong>, <strong>Authenticator</strong>.</p>
+
+<h3 id="signin-first">2.1 First time ever on this account</h3>
+<ol>
+<li>Open <code>http://127.0.0.1:9080/backoffice/</code>. Any address in the dashboard sends you to <code>/backoffice/login</code> and the page title "Staff sign-in".</li>
+<li><strong>Email step.</strong> Type your work email in "Work email" and press <strong>Send me a code</strong>. The address is lower-cased for you. If the field is empty or not an email the form says so. The account must already be a staff member (see <a href="#bootstrap">2.5</a> and <a href="#s-staff">3.7</a>).
+<ul><li>If Kratos does not know the address, the page shows <em>"This account does not exist or has not setup sign in with code."</em> and nothing is sent (checked against the running stack: no email was produced).</li></ul></li>
+<li><strong>Emailed code step.</strong> The page says "We sent a 6-digit code to ... It is valid for 5 minutes." In the development stack nothing real is sent: a blue box "Development stack" links to Mailpit. Open <a href="http://127.0.0.1:8025">http://127.0.0.1:8025</a>; the newest message is from "Adera" with the subject <code>Use code NNNNNN to log in</code>. Type the six digits (the box accepts digits only) and press <strong>Continue</strong>. A wrong or expired code shows Kratos' own message; <strong>Use another email</strong> starts over. (In a real environment the same email arrives in your inbox and the blue box is not shown, because <code>BACKOFFICE_DEV_HINTS</code> is false.)</li>
+<li><strong>Authenticator setup step</strong> (only when this account has no authenticator yet). The page says "First time here: set up an authenticator app" and shows:
+<ul><li>a <strong>QR code</strong>: in your phone's authenticator app choose "scan a QR code";</li>
+<li>the <strong>Secret</strong> as text with a copy button, for apps or password managers where you type or paste it ("enter a setup key", account name anything, type "time based");</li>
+<li>a <strong>Setup link</strong> (<code>otpauth://totp/...</code>) with a copy button, for password managers that import links.</li></ul>
+Any app that supports standard TOTP (time-based, 6 digits, 30 seconds) works: Google Authenticator, Microsoft Authenticator, Authy, Aegis, 2FAS, 1Password, Bitwarden. The secret is private: anyone who has it can generate your codes. Do not paste it into chat or tickets.</li>
+<li>Type the 6-digit code the app shows now into "Code from the authenticator app" and press <strong>Confirm and sign in</strong>. If the account is still not at the second level the page asks for the next code ("The authenticator app is set up. Enter the next code it shows (the same code cannot be used twice)."): wait for the app's number to change and enter the new one.</li>
+<li>You land on the Dashboard. The top bar shows your email and a role tag (Viewer (read only), Admin, Super admin) and <strong>Sign out</strong>.</li></ol>
+
+<h3 id="signin-later">2.2 Every later login</h3>
+<ol>
+<li>Email, then the emailed code, exactly as above.</li>
+<li>The page now asks "Enter the 6-digit code from your authenticator app for ...". Type the current code and press <strong>Sign in</strong>. <strong>Use another account</strong> goes back to the start.</li></ol>
+<p>Kratos refuses an authenticator code it has already accepted. If you sign out and in again within the same 30-second window, wait for the next code. If you reload the page between the emailed code and the authenticator step, the page resumes at the authenticator step ("Resuming sign-in...").</p>
+
+<h3 id="signout">2.3 Signing out</h3>
+<p>Press <strong>Sign out</strong> (top right). The session is revoked at Kratos and the tab's stored copy is deleted; you return to the login page. Closing the tab also ends your access, because the session token is kept only in that tab's <code>sessionStorage</code>, never in <code>localStorage</code> and never in a cookie. A new tab, even in the same browser, needs a new sign-in. Reloading the same tab keeps you signed in.</p>
+
+<h3 id="session">2.4 Session expiry and what you see when it happens</h3>
+<div class="table-wrap"><table>
+<thead><tr><th>What happened</th><th>What you see</th></tr></thead>
+<tbody>
+<tr><td>Kratos session ended (staff sessions last 30 days, <code>session.lifespan: 720h</code> in <code>infra/kratos/kratos.yml</code>), or a super admin deactivated you (their sessions are revoked immediately)</td><td>The next click redirects to the login page with the blue note "Your session ended. Sign in again."</td></tr>
+<tr><td>The account is valid but no longer an active staff member</td><td>Login page with the red note "This account is not an active staff member of the dashboard." (<code>not_staff</code>)</td></tr>
+<tr><td>Only the emailed code was entered (no second factor)</td><td>Yellow note "The authenticator-app step is required. Enter your authenticator code." (<code>mfa_required</code>)</td></tr>
+<tr><td>A backend service is down while you are signed in</td><td>You are <em>not</em> signed out; the screen shows a red message such as "A backend service could not be reached. Try again shortly."</td></tr>
+<tr><td>Too many requests from your address</td><td>"Too many requests from this address. Wait a minute and try again." (429)</td></tr>
+</tbody></table></div>
+
+<h3 id="bootstrap">2.5 The first (bootstrap) super admin</h3>
+<p>A fresh install has nobody who can add staff, so <code>registry-service</code> creates the first SUPER_ADMIN at start from the environment variable <code>BOOTSTRAP_SUPER_ADMIN_EMAIL</code>, but only when no active super admin exists. Look for the value in the repository-root <code>.env</code> (it is also the address <code>tests/e2e/*.py</code> sign in with; this page does not print it). The account is a normal Kratos identity: sign in with that email as in 2.1, and enrol your authenticator. On the Staff screen it carries the gold tag "bootstrap super admin". After you have added real super admins you can promote and demote freely; the only rule is that the <em>last</em> active super admin cannot be removed (see <a href="#s-staff">3.7</a>). Changing the variable later does not create a second bootstrap account while an active super admin exists.</p>
+
+<h3 id="troubleshooting">2.6 Troubleshooting sign-in</h3>
+<div class="callout warn"><span class="label">Troubleshooting</span>
+<p><strong>(1) "It asks for an authenticator code but never showed me a QR code."</strong> That account already has an authenticator enrolled, so the page goes straight to "Enter the 6-digit code from your authenticator app". The usual cause on a dev machine is that the end-to-end script <code>tests/e2e/staff.py</code> (or <code>npm run smoke</code>, or a script run with <code>ADERA_STAFF_EMAIL</code> set to your address; <code>partner.py</code>, <code>admin_users.py</code> and <code>seed_demo.py</code> use a temporary account by default) signed in first and enrolled its own authenticator; <code>staff.py</code> keeps that secret in <code>tests/e2e/.staff-totp-&lt;email&gt;.json</code> (gitignored, mode 0600; treat it as a secret). You do not have that secret in your phone. The fix is to remove the enrolled authenticator, so the next sign-in shows the QR code again. This is a <strong>Kratos admin API</strong> call on the machine that runs the stack (port 4434 is published on 127.0.0.1 only and the gateway blocks <code>/kratos/admin</code>); the dashboard has no button for it (the Staff screen has no such action, so a SUPER_ADMIN cannot do it from the UI today):</p>
+<pre><code># 1. find the identity id of the account (replace the address with the account's email)
+curl -s -G --data-urlencode "credentials_identifier=you@example.com" \
+  http://127.0.0.1:4434/admin/identities | python3 -c 'import json,sys;[print(i["id"], sorted(i["credentials"])) for i in json.load(sys.stdin)]'
+# prints for example:  0b648e27-....  ['code', 'totp']        (totp in the list = an authenticator is enrolled)
+
+# 2. delete only the authenticator credential (the account, its role and the email-code login stay)
+curl -s -o /dev/null -w "%{http_code}\n" -X DELETE http://127.0.0.1:4434/admin/identities/&lt;id&gt;/credentials/totp   # 204 = done</code></pre>
+<p>Then sign in again: after the emailed code you get the QR code and enrol your own authenticator. If the e2e scripts used that account before, delete <code>tests/e2e/.staff-totp-&lt;email&gt;.json</code> too, otherwise they will try the old secret. See also the note below about keeping tests and people on separate accounts. Anyone who can reach port 4434 can do this to any account, which is why it is local-only.</p>
+<p><strong>(2) "No one-time code arrived."</strong> Check, in this order: the email address (an unknown address shows the "account does not exist" message instead); Mailpit in dev (the code is the newest message to that address; real mode: spam folder); and the <strong>per-recipient email limit</strong> in notification-service. Every message Kratos asks to send passes through a per-recipient limit of <strong>10 emails per hour and 20 per day</strong> (<code>LIMIT_EMAIL_PER_HOUR</code>, <code>LIMIT_EMAIL_PER_DAY</code>; defaults in <code>application.yml</code>, not overridden in <code>docker-compose.yml</code>). Beyond that the message is recorded as suppressed (<code>rate_limited</code>) and no email is produced, but the page still says "We sent a 6-digit code". Wait for the hour to pass.</p>
+<p><strong>(3) "Too many sign-in attempts from this address (the limit is 10 per minute)" / HTTP 429.</strong> The gateway allows 10 login-step submits per minute <em>per IP address</em>. One sign-in uses three or four submits (send code, check code, enrol or authenticator code), and everyone behind the same office address shares the counter. Wait a minute. Do not run <code>npm run smoke</code> or the Python e2e scripts at the same time as people sign in.</p>
+<p><strong>(4) Lost or replaced phone.</strong> There is no self-service recovery. Another SUPER_ADMIN cannot reset it from the dashboard either (no such button). Someone with access to the Kratos admin port must run the two commands in (1) for your account; then enrol the new phone. To be safe, keep at least two super admins and enrol the same account on a second device (scan the QR code on both phones during setup: the secret cannot be shown again later).</p>
+<p><strong>(5) Other messages.</strong> "This sign-in attempt expired. Start again." (the flow lasts 10 minutes); "The sign-in session is no longer valid. Start again."; "The server could not be reached. Check your connection and that the gateway is running."</p></div>
+
+<div class="callout danger"><span class="label">E2E scripts and your own account</span>
+<p>The bootstrap super admin has a person's authenticator app enrolled, so the e2e scripts never sign in as it. <code>partner.py</code>, <code>admin_users.py</code> and <code>seed_demo.py</code> create a <strong>temporary staff account</strong> with <code>tests/e2e/tempstaff.py</code> (a random <code>tempstaff-xxxx@adera.local</code> address, role ADMIN, authenticator enrolled by the helper) and remove it when they finish, even if they fail: the Kratos identity, the <code>staff</code> row, the secret file <code>tests/e2e/.staff-totp-&lt;email&gt;.json</code> and the email rows in <code>send_log</code>. The helper refuses to run unless the dev endpoint (<code>/dev/messages</code>) answers.</p>
+<ol><li><code>python3 -I tests/e2e/tempstaff.py</code> creates and removes one account as a self-test (<code>--role SUPER_ADMIN</code> for another role; <code>clean</code> removes leftovers of an interrupted run).</li>
+<li>To use a real account instead, set <code>ADERA_STAFF_EMAIL</code>: the script reads the emailed code from the dev endpoint and asks for the authenticator code (or takes it from <code>ADERA_TOTP</code>); nothing is created or deleted.</li>
+<li><code>staff.py</code> still accepts an email on the command line: <code>python3 -I tests/e2e/staff.py test-viewer@example.test</code> logs that account in and prints the result of <code>/admin/api/v1/me</code>. <code>npm run smoke</code> and the Playwright walkthrough use <code>STAFF_EMAIL</code> (or the bootstrap value in <code>.env</code> for the smoke test).</li></ol></div>
+</section>
+<section><h2 id="screens">3. Screen by screen</h2>
+<p>The left menu has eight entries: Dashboard, Mini apps, Moderation, Users, Notifications, Staff, Audit log, System (Login is the ninth screen, shown when you are signed out). Every table row shows times in your browser's local time to the second; hover a time to see the exact stored value (UTC). Destructive actions ask "are you sure?" first and keep the dialog open if the server refuses, showing the reason inside it. Server errors appear in a red box with the plain-language message and, below it, "HTTP status &middot; code". Validation errors (<code>validation_failed</code>) also put one message next to each offending field.</p>
+<p>Under every screen, "Audited" says what is written to the append-only audit log (section 3.8): who, role, action, target, details, IP and time.</p>
+
+<h3 id="s-login">3.1 Login</h3>
+<p><strong>For:</strong> proving who you are. Full steps, authenticator apps and troubleshooting are in <a href="#signin">section 2</a>. <strong>Fields:</strong> Work email; 6-digit code; Code from the authenticator app (first time) or Authenticator code (later). <strong>Buttons:</strong> Send me a code, Continue, Use another email, Confirm and sign in, Start over, Sign in, Use another account. <strong>Validation you can see:</strong> "Enter your email address", "That does not look like an email address", "Enter the code", "The code is 6 digits", plus Kratos' own messages for a wrong or expired code. <strong>Audited:</strong> nothing (sign-ins and sign-outs are not in the audit log).</p>
+<p><strong>Worked example.</strong> You are <code>amara@your-company.example</code>, a newly added ADMIN. Open the URL, type the address, press <strong>Send me a code</strong>; open Mailpit, read <code>Use code 482913 to log in</code>; type <code>482913</code>, <strong>Continue</strong>; scan the QR code with your phone; type the six digits the app shows; <strong>Confirm and sign in</strong>. The top bar now reads "amara@your-company.example" and the tag "Admin".</p>
+
+<h3 id="s-dashboard">3.2 Dashboard</h3>
+<p><strong>For:</strong> a one-glance health check when you start your day. Everything is a real count from the services, nothing estimated; each panel loads (and can fail) on its own, so one red box does not hide the rest. <strong>Panels:</strong></p>
+<ul>
+<li><strong>Mini apps by status</strong>: total, LIVE, DRAFT, PAUSED, KILLED. Click a status to open the app list filtered to it.</li>
+<li><strong>Moderation</strong>: open reports (red when above zero), all reports, reviews, hidden reviews, new reviews in 7 days.</li>
+<li><strong>Users</strong>: registered, active, suspended, deleted, new in 7 days.</li>
+<li><strong>Notifications</strong>: total, last 24 hours, and the last-24-hours count per status (SENT, FAILED...).</li>
+<li><strong>Apps not ready for LIVE</strong>: up to the 10 newest DRAFT apps and what each still lacks ("logo", "supportEmail"; "nothing: ready" when it can go live now).</li>
+<li><strong>Open reports</strong> (newest 8), <strong>Recent notifications (all apps)</strong> (newest 8, with a "details" link), and, for ADMIN and above, <strong>Recent staff activity</strong> (latest 8 audit events). A VIEWER sees a note instead.</li></ul>
+<p><strong>Validation / errors:</strong> none (read only). <strong>Audited:</strong> nothing. <strong>Worked example:</strong> sign in, see "Open reports 3" in red; click Moderation, Open; you are on the Reports tab with status OPEN pre-selected (see 3.4). If "Apps not ready for LIVE" lists <code>adera-fix</code> missing "logo", click it: you are on the app's detail page.</p>
+
+<h3 id="s-apps">3.3 Mini apps</h3>
+<h4 id="apps-list">The list</h4>
+<p><strong>For:</strong> finding an app and seeing its state. Ordered by priority (lower first), then slug; click a column heading to re-sort. <strong>Controls:</strong> a status selector (Any status, DRAFT, LIVE, PAUSED, KILLED; it is sent to the server, and the dashboard cards link here with it pre-set), a search box "Search name, slug, publisher, category" (filters the loaded rows in your browser: names in all languages, slug, publisher name and legal name, support email, categories), a count ("N apps"), and for ADMIN and above the <strong>New app</strong> button. Columns: logo, Name, Slug, Status, Priority, Publisher, Rating (average and count), Updated. Click the name or double-click a row to open it. 50 rows per page.</p>
+<div class="callout warn"><span class="label">Limit</span><p>With no status filter the server returns at most <strong>200 apps</strong> (<code>AppService.list</code> pages 0..200), and the search box only searches what was returned. With a status filter there is no cap. Fine for now; if you ever have more than 200 apps, use the status filter.</p></div>
+
+<h4 id="apps-create">Creating an app (New app)</h4>
+<p><strong>For:</strong> registering a partner's mini app. It starts as DRAFT, so users cannot see it and the partner can use only the DEV environment (a prod deployment refuses a draft app). Fields, with the reason each exists:</p>
+<div class="table-wrap"><table>
+<thead><tr><th>Field</th><th>What to enter</th><th>Why / rule (server message if broken)</th></tr></thead>
+<tbody>
+<tr><td>Slug</td><td>2-40 characters: lowercase letters, digits, dashes, not at either end. Example <code>adera-fix</code>.</td><td>Stable machine name used in links and logs. <strong>Permanent</strong>: it cannot be changed. Errors: <em>"required: 2-40 chars, lowercase letters, digits and dashes (e.g. adera-fix)"</em>; <code>409 slug_taken</code> "An app with this slug already exists."</td></tr>
+<tr><td>Priority</td><td>Whole number 0 to 100000, default 100.</td><td>Lower numbers are listed first in the user catalogue. "must be a whole number from 0 to 100000 (lower is shown first)".</td></tr>
+<tr><td>Brand colour</td><td><code>#0F9D58</code> style or empty.</td><td>Brand colour for the app (presentation only). "must look like #0F9D58".</td></tr>
+<tr><td>Name: English, Amharic, Afaan Oromoo</td><td>English is required (max 100 each).</td><td>Users see their own language and fall back to English. "an English ('en') name is required"; "en is longer than 100 characters".</td></tr>
+<tr><td>Description: English, Amharic, Afaan Oromoo</td><td>Optional, max 1000 each.</td><td>Shown on the app's page.</td></tr>
+<tr><td>Categories</td><td>Type a word, press Enter: lowercase words like <code>home</code>, <code>travel</code> (2-31 characters, start with a letter; at most 10).</td><td>Used for catalogue grouping and for your search. "each item must be lowercase words like 'home' or 'travel'".</td></tr>
+<tr><td>Markets</td><td>ET (Ethiopia) and/or US; at least one; default ET.</td><td>Where the app is offered. "must be a non-empty list of ET, US".</td></tr>
+<tr><td>Publisher name, Publisher legal name</td><td>Who runs the app (max 150 and 200).</td><td>Shown to users; legal name for contracts.</td></tr>
+<tr><td>Support email</td><td>A valid address.</td><td><strong>Required to go LIVE</strong>; users and staff contact it. "must be a valid email address". Stored lower-cased.</td></tr>
+<tr><td>Support phone, Website</td><td>Phone max 30 characters; website must start with <code>https://</code>.</td><td>"must be an https:// URL".</td></tr>
+<tr><td>Entry URL</td><td><code>https://...</code> (or <code>http://localhost</code> / <code>http://127.0.0.1</code> for development).</td><td>The page opened inside the super app. Same message as above.</td></tr>
+<tr><td>Allowed origins</td><td>Type an origin, press Enter, at most 10: <code>https://fix.adera.et</code>, no path.</td><td>Origins allowed to talk to the app bridge (not yet used, see section 7). "each item must be origins like https://fix.adera.et (no path)".</td></tr>
+<tr><td>Extra data (JSON object)</td><td><code>{}</code> or key/value settings, up to 16384 bytes.</td><td>Free-form settings. On edit, deleting a key here removes it from the app. "Extra data not valid JSON" appears under the box before anything is sent; the server says "must be a JSON object" or "too large (max 16384 bytes)".</td></tr>
+</tbody></table></div>
+<p>The browser checks the same patterns and shows e.g. "A slug is required", "An English name is required", "Pick at least one market", "Must start with https://". Unknown fields are rejected by the server ("unknown field"), so a typo never silently does nothing. <strong>Audited:</strong> <code>app.create</code> (details: slug). <strong>Worked example:</strong> New app; Slug <code>adera-fix</code>; Priority <code>100</code>; Name English <code>Adera Fix</code>, Amharic <code>አደራ ፊክስ</code>; Description English <code>Book a verified technician for home repairs.</code>; Categories <code>home</code>, Enter; Markets ET; Publisher name <code>Fix Services PLC</code>; Support email <code>support@adera-fix.example</code>; Website <code>https://adera-fix.example</code>; Entry URL <code>https://app.adera-fix.example/start</code>; Allowed origins <code>https://app.adera-fix.example</code>; <strong>Create app</strong>. You land on the new app's page with the status DRAFT and a blue note "To go LIVE this app still needs a logo".</p>
+
+<h4 id="apps-detail">The app page and its status</h4>
+<p>Top: logo, name, status tag, slug and id (with a copy button; you need the id in the Audit log and when talking to engineers). A line explains the current status in plain words:</p>
+<div class="table-wrap"><table>
+<thead><tr><th>Status</th><th>Users</th><th>Partner API (what it does to the partner's calls)</th></tr></thead>
+<tbody>
+<tr><td>DRAFT</td><td>Not visible</td><td>DEV works; PROD refused (<code>403 app_draft</code>)</td></tr>
+<tr><td>LIVE</td><td>Visible in the catalogue</td><td>DEV and PROD work</td></tr>
+<tr><td>PAUSED</td><td>Hidden</td><td>PROD refused (<code>403 app_paused</code>), DEV still works. Reversible by any ADMIN.</td></tr>
+<tr><td>KILLED</td><td>Hidden</td><td>Everything refused, DEV too (<code>403 app_killed</code>). Only a SUPER_ADMIN can move it to another status; an ADMIN sees a red tag saying so and the other buttons are disabled.</td></tr>
+</tbody></table></div>
+<p>For ADMIN and above, below it are buttons for every <em>other</em> status: <strong>DRAFT, LIVE, PAUSED, KILLED</strong>. Each asks for confirmation and explains the effect (KILLED warns "This stops all of the partner's API calls immediately."). Going LIVE needs <strong>a logo and a support email</strong>; the dialog warns beforehand and the server refuses with <em>"Not ready for LIVE: missing a logo and a support email."</em> (<code>409 not_ready_for_live</code>). A green note "Ready for LIVE: it has a logo and a support email." appears when both exist. Moving DRAFT to PAUSED, or LIVE back to DRAFT, is allowed. <strong>Audited:</strong> <code>app.status</code> with <code>from</code> and <code>to</code>. Apps are never deleted; KILLED is the end of the road.</p>
+<p>Below the status line are twelve tabs. The tab is kept in the address (<code>?tab=keys</code>, <code>?tab=log</code>, <code>?tab=reports</code>), so you can share a link to a tab.</p>
+
+<h4 id="tab-general">Tab General</h4>
+<p><strong>For:</strong> the logo and every descriptive field. <strong>Logo:</strong> <strong>Upload logo</strong> / <strong>Replace logo</strong> / <strong>Remove logo</strong> (confirmation: "An app without a logo cannot go LIVE."). The server accepts up to <strong>2 MiB</strong>, decodes the image, scales it to at most <strong>512 px</strong> and stores a PNG. Checks you can see: "The logo is larger than 2 MiB.", "Use a PNG, JPEG or WebP image.", server: "not a supported image (use PNG, JPEG, GIF or BMP)", "could not read the image, it may be corrupt", "image dimensions are too large", <code>413 file_too_large</code>.</p>
+<div class="callout warn"><span class="label">Known mismatch</span><p>The file picker and the browser check allow WebP, but the server does <em>not</em> accept WebP (it accepts JPEG, PNG, GIF, BMP, and the picker filters GIF and BMP out). Use PNG or JPEG. A WebP file passes the browser check and is then refused by the server with "not a supported image".</p></div>
+<p>Then read-only facts (rating, created, updated, display name, logo image id) and the same form as New app, where the slug is fixed. <strong>Only fields you changed are sent</strong>, so the audit log shows exactly what changed; if nothing changed the form says "Nothing was changed." and after saving a green "Saved: name, supportEmail" appears. <strong>Audited:</strong> <code>app.update</code> (details: the list of field names), <code>app.logo</code> (new image id), <code>app.logo.remove</code>. <strong>Worked example:</strong> open <code>adera-fix</code>, tab General, <strong>Upload logo</strong>, choose <code>adera-fix-logo.png</code> (square, under 2 MiB); the logo appears and the amber "No logo yet" note disappears.</p>
+
+<h4 id="tab-capabilities">Tab Capabilities</h4>
+<p><strong>For:</strong> deciding what this app is allowed to ask for. A capability is an admin gate: the app cannot use it until you grant it. The table lists the full catalogue with a state per row (GRANTED, DENIED, SUSPENDED, or "not set"), the reason text and a <strong>Change</strong> button. The catalogue (same list on the System screen):</p>
+<div class="table-wrap"><table>
+<thead><tr><th>Capability</th><th>What it allows</th><th>Reason required to grant</th></tr></thead>
+<tbody>
+<tr><td><code>user.basic</code></td><td>Pseudonymous id and display name</td><td>no</td></tr>
+<tr><td><code>user.full_name</code></td><td>First and last name</td><td>yes</td></tr>
+<tr><td><code>user.contact</code></td><td>Phone number and email</td><td>yes</td></tr>
+<tr><td><code>user.address</code></td><td>One saved address the user picks</td><td>yes</td></tr>
+<tr><td><code>location.coarse</code></td><td>City-level location</td><td>yes</td></tr>
+<tr><td><code>location.fine</code></td><td>Precise location, foreground only</td><td>yes</td></tr>
+<tr><td><code>pay.request</code></td><td>Ask the user to pay (currencies and limits in Payment)</td><td>yes</td></tr>
+<tr><td><code>notify.inapp</code></td><td>Send in-app notifications (inbox plus push). Needed for IN_APP templates.</td><td>no</td></tr>
+<tr><td><code>notify.sms</code></td><td>Send SMS (costs money; capped). Needed for DIRECT templates to reach users by SMS.</td><td>no</td></tr>
+<tr><td><code>notify.email</code></td><td>Send email. Needed for DIRECT templates to reach users by email.</td><td>no</td></tr>
+</tbody></table></div>
+<p><strong>Change dialog:</strong> State (GRANTED, DENIED, SUSPENDED) with a one-line meaning: GRANTED "may use this"; DENIED "asked or could ask and was refused"; SUSPENDED "was granted, now switched off (for example while investigating); reversible by granting again". Reason in English (max 300 characters) and optional Amharic and Afaan Oromoo. <strong>The reason is shown verbatim to users</strong> (it appears on the app's permission list), so write it for them. It is <strong>required only to GRANT a capability marked "yes"</strong>: English, at least 10 characters, for example <em>"To show technicians near you"</em>. Server message: <em>"required for location.coarse: a plain-language English reason (min 10 chars) shown to users, e.g. 'To show technicians near you'"</em>. For DENIED and SUSPENDED the reason is optional. For the three <code>notify.*</code> capabilities no reason is needed (add one anyway if you want a note). Other errors: "unsupported language 'fr' (use en, am, om)", "must be GRANTED, DENIED or SUSPENDED".</p>
+<p><strong>Side effect:</strong> granting <code>notify.inapp</code>, <code>notify.sms</code> or <code>notify.email</code> also creates <em>default limits</em> for that channel if none exist yet (only if absent; later grants never overwrite yours): IN_APP 20 per user per day, 10000 per day, 10000 distinct users per day, no total cap; SMS 3 / 100 / 100 / 1000 total; EMAIL 5 / 500 / 500 / 10000 total. Check them on the next tab. <strong>Audited:</strong> <code>capability.set</code> (capability, state). <strong>Worked example:</strong> tab Capabilities, row <code>notify.sms</code>, <strong>Change</strong>, State GRANTED, Save. Do the same for <code>notify.inapp</code>. Then row <code>location.coarse</code> is left "not set" because Adera Fix does not need it.</p>
+
+<h4 id="tab-limits">Tab Notification limits</h4>
+<p><strong>For:</strong> keeping cost and spam under control, per channel (SMS, EMAIL, IN_APP). Four numbers per channel, all counted in <strong>UTC days</strong> except the lifetime total: <strong>Max per user per day</strong> (messages to one user), <strong>Max per day</strong> (messages from this app), <strong>Max distinct users per day</strong> (different people reached), <strong>Max total</strong> (lifetime on that channel, per environment). The table shows each as a number, "unlimited" or "0 (none allowed)", and "Configured: yes / no limits set". <strong>Edit</strong> opens a dialog with, for each number, <strong>Unlimited</strong> or <strong>Limit to</strong> and a whole number. Server: "must be a whole number >= 0, or null for unlimited".</p>
+<div class="callout why"><span class="label">Empty (null) versus 0</span>
+<ul><li><strong>Unlimited (empty, <code>null</code>)</strong>: no cap on that measure. Example: Max total unlimited means the app can send forever; Max per day unlimited means no daily cap.</li>
+<li><strong>0</strong>: nothing is allowed. A 0 in any of the four numbers makes <em>every</em> send on that channel fail with <code>429 quota_exceeded</code> (naming the limit, e.g. <code>max_per_day</code>), because the first message already exceeds a limit of zero. Use it to switch a channel off without touching capabilities. Example: SMS Max per day <code>0</code> stops SMS today; set it back to <code>100</code> to resume.</li>
+<li><strong>A channel with no limits set at all</strong> ("no limits set") is treated as unlimited. This only happens if the capability was never granted through the dashboard; granting it creates the defaults above.</li>
+<li>Example: maxPerUserPerDay <code>3</code>, maxPerDay <code>100</code>, maxDistinctUsersPerDay <code>100</code>, maxTotal unlimited: one person gets at most 3 SMS a day, 100 SMS go out per day in total to at most 100 different people, and there is no lifetime cap. The 4th SMS to the same user that day is refused with <code>quota_exceeded</code> / <code>max_per_user_per_day</code>.</li></ul>
+<p>A refused request uses no quota. Limits are per environment for the counters (Usage tab) but one set of limits applies to both DEV and PROD.</p></div>
+<p><strong>Audited:</strong> <code>limit.set</code> (channel and the new values). <strong>Worked example:</strong> row SMS, <strong>Edit</strong>; Max per user per day: Limit to <code>2</code>; Max per day: Limit to <code>200</code>; Max distinct users per day: Limit to <code>200</code>; Max total: Unlimited; <strong>Save limits</strong>; the SMS row now reads 2 / 200 / 200 / unlimited.</p>
+
+<h4 id="tab-envs">Tab Environments and IPs</h4>
+<p><strong>For:</strong> the partner's server addresses. A partner's call is accepted only if it comes from a registered address for this deployment's environment, so a stolen key is useless from anywhere else. Two editable cards, <strong>DEV</strong> (the dev deployment; works for any app that is not KILLED) and <strong>PROD</strong> (the prod deployment; only while the app status is LIVE; the range <code>0.0.0.0/0</code> that matches everything is refused for PROD). You can fill in both, but a deployment is exactly one environment (<code>ADERA_ENV</code>): the card of the environment this deployment runs is tagged <em>ACTIVE on this deployment</em>, the other <em>stored, not used here</em> with a note that it applies on the other deployment. A new app starts with an <em>empty</em> list in both: nothing can call yet (yellow note "Empty: no server can call in this environment."). Enter one address or CIDR range per line (or comma separated), IPv4 or IPv6, at most 50; <strong>Save addresses</strong>. The list shown afterwards is what the server stored: a single address is stored as <code>/32</code> (IPv6 <code>/128</code>) and duplicates are dropped. Errors: "'999.1.1.1' is not a valid IP address or range", "must be a list (max 50) of IPs or ranges", "a range that matches every address (/0) is not allowed for PROD". <strong>Audited:</strong> <code>environment.set</code> (environment, the stored list). <strong>Worked example:</strong> DEV card: <code>203.0.113.10</code>; PROD card: <code>203.0.113.10</code> and <code>198.51.100.0/24</code>; Save each card. Both now show the stored forms <code>203.0.113.10/32</code> and <code>198.51.100.0/24</code>. Ask the partner for their <em>outbound</em> public IPs (the address their server appears to come from), not their website's IP.</p>
+
+<h4 id="tab-keys">Tab Partner keys</h4>
+<p><strong>For:</strong> how the partner proves who they are. They sign each request with a private key that only they hold; you store the matching <em>public</em> key. The table lists every key: Key id (<code>ak_dev_...</code> or <code>ak_prod_...</code>, older keys <code>ak_test_...</code> / <code>ak_live_...</code>, which the partner sends in <code>X-Adera-Key-Id</code>), Environment (with an "active here" or "not active here" tag), Algorithm, Fingerprint (SHA-256 of the key, to check you have the right one), Label, Status (ACTIVE or REVOKED), Expires, Created, Revoked. A key past its expiry stops working even though it is still listed ACTIVE. At most <strong>5 active keys per environment</strong> (<code>409 too_many_active_keys</code>: "This environment already has the maximum of 5 active keys. Revoke one first."), which is what makes rotation possible.</p>
+<ul>
+<li><strong>Register a public key</strong> (preferred): choose Environment (DEV or PROD; the active one is the environment this deployment runs, and for the other you get a warning notice), an optional Label ("partner backend 2026"), an optional expiry (must be in the future: "must be in the future"), and paste the PEM. The PEM must begin with <code>-----BEGIN PUBLIC KEY-----</code> and be an RSA key of <strong>2048 bits or more</strong>. A private key is refused with <em>"that is a PRIVATE key. Never send it..."</em>; other messages: "must be a PEM public key starting with -----BEGIN PUBLIC KEY-----", "RSA key must be at least 2048 bits", "not a valid RSA public key".</li>
+<li><strong>Generate a key pair</strong>: the server makes an RSA 3072-bit pair, stores the public half and shows the private key <strong>once</strong> in a dialog that cannot be closed until you tick "I have saved the private key somewhere safe." It has Copy and Download .pem buttons (file name like <code>adera-1a2b3c4d-dev-ak_dev_...pem</code>). Choosing PROD shows a red warning: a private key that passes through this screen is exposed to whoever is looking. Use this only for DEV, and send the key to the partner over a secure channel, never plain email or chat.</li>
+<li><strong>Revoke</strong> (on an ACTIVE row, with confirmation): "The partner's requests signed with this key are refused immediately. This cannot be undone." Their calls then fail with <code>401 key_revoked_or_expired</code>.</li></ul>
+<p><strong>How a partner makes a key pair</strong> (they do this on their own machine, with OpenSSL 1.1 or newer):</p>
+<pre><code>openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out partner-private.pem   # KEEP SECRET, never send, never paste into the backoffice
+openssl rsa -in partner-private.pem -pubout -out partner-public.pem                    # this one is safe to share
+head -1 partner-public.pem                                                             # must print: -----BEGIN PUBLIC KEY-----</code></pre>
+<p>(These commands were run to check the output headers; OpenSSL 3.6.5.) <strong>Paste the contents of <code>partner-public.pem</code></strong> (the whole block, BEGIN and END lines included, which you can get with <code>cat partner-public.pem</code>) into "Public key (PEM)". The file <code>partner-private.pem</code> (header <code>-----BEGIN PRIVATE KEY-----</code>) never leaves the partner's server; <code>openssl genrsa</code> also works. How the partner then signs requests is in <a href="06-security.html#signing">Security: signing</a> and <a href="08c-partner-api.html">8c</a>.</p>
+<p><strong>Audited:</strong> <code>key.register</code> (target type <code>partner_key</code>, target = the key id; details: app id, environment, fingerprint) and <code>key.revoke</code>. Because the target is the <em>key id</em>, these events do <strong>not</strong> appear in the app's own "Audit" tab (which filters on the app id); find them in the Audit log with Action <code>key.</code> or Target type <code>partner_key</code>. <strong>Worked example (rotation):</strong> the partner sends <code>partner-public.pem</code>; Register a public key; Environment LIVE, Label <code>fix backend 2027</code>, paste, <strong>Register</strong>; the new row appears with a fresh key id. The partner switches its servers to the new id; when the old key shows no traffic, <strong>Revoke</strong> it.</p>
+
+<h4 id="tab-payment">Tab Payment</h4>
+<p><strong>For:</strong> recording which currencies and amounts this app may use once payments exist. <strong>Stored only: nothing enforces it yet</strong> (the blue note says so). Fields: Allowed currencies (ETB, USD), Allow holds (reserve now, charge later), Minimum and Maximum amount in <em>minor units</em> (santim or cents: <code>1000</code> = 10.00; empty = no limit). Errors: "supported currencies: ETB, USD", "must be a whole number >= 0, or null for none", "minAmountMinor: must not be greater than maxAmountMinor". <strong>Audited:</strong> <code>payment.set</code> (currencies, allowHold). <strong>Example:</strong> ETB ticked, Allow holds off, Minimum <code>500</code>, Maximum <code>2000000</code>, <strong>Save payment settings</strong>.</p>
+
+<h4 id="tab-templates">Tab Templates</h4>
+<p><strong>For:</strong> the only way a partner can send a message. Partners cannot send free text, only fill in values of a template that <em>you</em> wrote and approved; that is the main guard against phishing and abuse. The list shows Code, Kind, Category, Languages, Params, Version, Active, "Usable now" (with the reason when not: <code>template_inactive</code>, <code>template_not_yet_valid</code>, <code>template_expired</code>), Valid from, Expires, Updated, and buttons <strong>Edit</strong> and <strong>Deactivate</strong> / <strong>Activate</strong> (deactivating asks first: partner sends are refused with <code>template_inactive</code> until reactivated). <strong>New template</strong> opens a side panel:</p>
+<div class="table-wrap"><table>
+<thead><tr><th>Field</th><th>Meaning and rule</th></tr></thead>
+<tbody>
+<tr><td>Code</td><td>2-60 characters of lowercase letters, digits, <code>_ . -</code>, not starting or ending with a symbol, for example <code>job-accepted</code>. Fixed after creation. <code>409 template_code_taken</code> "A template with this code already exists for this app."</td></tr>
+<tr><td>Kind</td><td><strong>DIRECT</strong> (goes by SMS, otherwise email) or <strong>IN_APP</strong> (goes to the user's inbox plus push). Fixed after creation. The partner never picks a channel. DIRECT needs <code>notify.sms</code> and/or <code>notify.email</code> granted; IN_APP needs <code>notify.inapp</code>.</td></tr>
+<tr><td>Category</td><td>TRANSACTIONAL, REMINDER or PROMOTIONAL (PROMOTIONAL "may be limited more strictly later").</td></tr>
+<tr><td>Active</td><td>Switched on or off.</td></tr>
+<tr><td>Valid from, Expires</td><td>Optional window. After expiry sends are refused (<code>template_expired</code>). Expiry must be in the future when creating and later than "valid from": "must be in the future", "must be after validFrom".</td></tr>
+<tr><td>Params</td><td>Up to 10 values the partner fills in. Each has a Name (letters, digits, <code>_</code>, starts with a letter, max 30, unique), Max length (1-500, default 100), Required (default yes) and Allow links (default no). <strong>Values are plain text, length-limited, and links are refused unless "Allow links" is ticked</strong> (so a "name" field cannot carry a phishing link). Partners see violations as <code>param_invalid</code>.</td></tr>
+<tr><td>Content per language</td><td>Tabs English, Amharic, Afaan Oromoo. Texts: Title (max 100; required in English for IN_APP), Body (max 1000; <strong>English body is always required</strong>), SMS text (max 320; empty = the body is sent), Email subject (max 150; empty = the title, or the start of the body), Email HTML (max 20000; values are HTML-escaped when filled in). A user gets their own language; any missing text falls back to the English one. Write a value as <code>{name}</code>.</td></tr>
+</tbody></table></div>
+<p><strong>Placeholders:</strong> every <code>{name}</code> you use in any text must be declared as a param. The panel warns live in yellow ("Used in the texts but not declared as a param: {jobRef}") and the server refuses with a message such as <em>"uses {jobRef} which is not a declared param"</em> next to the right text box. Editing params or texts creates a <strong>new version</strong> (the Version column goes up and old notifications keep the version they used); code and kind never change; only fields you changed are sent ("Nothing was changed." otherwise). Other server messages: "an English body is required", "an English title is required for IN_APP templates", "longer than 320 characters", "unsupported language 'fr' (use en, am, om)", "each name must be unique, start with a letter and use letters, digits or '_' (max 30)", "must be a list of at most 10 declared values".</p>
+<div class="callout warn"><span class="label">Not audited</span><p>Creating or editing a template writes <strong>nothing</strong> to the audit log (the code in notification-service has no audit call; the template row only records who last touched it internally). The "template" choice in the Audit log's Target type filter will therefore find nothing. If you need a record of template changes, note them in your ticket.</p></div>
+<p><strong>Worked example:</strong> New template. Code <code>job-accepted</code>; Kind DIRECT; Category TRANSACTIONAL; Active ticked; Expires empty. Add param: Name <code>name</code>, Max length <code>40</code>, Required on, Allow links off. Add param: Name <code>jobRef</code>, Max length <code>12</code>. English tab, Body <code>Hi {name}, your Adera Fix job {jobRef} was accepted.</code>; SMS text <code>Adera Fix: job {jobRef} accepted, {name}.</code>; Email subject <code>Your job {jobRef} was accepted</code>. Amharic tab, Body: your translation with the same <code>{name}</code> and <code>{jobRef}</code>. <strong>Create template</strong>. The row shows Version 1, Active, "Usable now: yes".</p>
+
+<h4 id="tab-log">Tab Notification log</h4>
+<p><strong>For:</strong> everything this app asked us to send, and what became of it ("why didn't it arrive?", section 5). Filters: Status, Channel (SMS, EMAIL, IN_APP), Environment (DEV, PROD), Kind (DIRECT, IN_APP). 25 rows per page, newest first. Columns: Created, External id (the partner's own id), Env, Kind, Channel, Status, Reason, Attempts, Completed, and a <strong>details</strong> link. The detail page is described in section 3.6. Message values and recipients are never shown (they can hold personal data). There is no date filter on screen (the API supports one). <strong>Audited:</strong> nothing (read only).</p>
+
+<h4 id="tab-usage">Tab Usage</h4>
+<p><strong>For:</strong> how close the app is to its limits. A DEV / PROD switch (default: the environment this deployment runs); "today" is the current UTC day. Per channel: sent today against Max per day, users reached today against Max distinct users, lifetime against Max total, plus the per-user daily cap, each as "used / limit" with a bar that is highlighted from 80 percent and red at 100 percent. "Nothing has been sent in PROD yet." when empty. Counters are per environment. Read only.</p>
+
+<h4 id="tab-modtabs">Tabs Reviews, Reports, Audit</h4>
+<p>The same tables as the Moderation screen (3.4) and the Audit log (3.8), pinned to this app. The Audit tab shows events whose <em>target</em> is this app's id: create, update, status, logo, capability, limit, environment and payment changes. It misses key events (target = key id) and, as said, template changes. VIEWERs see an info note instead of the Audit tab.</p>
+</section>
+<section>
+<h3 id="s-moderation">3.4 Moderation</h3>
+<p><strong>For:</strong> keeping the catalogue clean. Users can leave one review per app (1 to 5 stars and an optional comment of up to 2000 characters; sending again edits it) and can report an app (reason SPAM, SCAM, INAPPROPRIATE, BROKEN or OTHER, plus optional details; reporting the same app again while an earlier report is still open returns that same report, so reports do not pile up). Reviews are published immediately; there is no approval queue. Two tabs across all apps: <strong>Reports</strong> (opens first, with status OPEN pre-selected) and <strong>Reviews</strong>.</p>
+<div class="table-wrap"><table>
+<thead><tr><th>Tab</th><th>Columns</th><th>Filter</th><th>Actions (ADMIN and above)</th></tr></thead>
+<tbody>
+<tr><td>Reports</td><td>Reported, App (link to the app's Reports tab), Reason, Details, By user (link to the user), Status, Handled, actions</td><td>Status: OPEN, REVIEWED, DISMISSED (or any). "REVIEWED = acted on. DISMISSED = no action needed. Both can be reopened."</td><td><strong>Resolve</strong> (sets REVIEWED), <strong>Dismiss</strong> (confirm), <strong>Reopen</strong> (sets OPEN)</td></tr>
+<tr><td>Reviews</td><td>When, App, Rating (stars), Comment, User (link), Status, actions</td><td>Status: VISIBLE or HIDDEN (or any)</td><td><strong>Hide</strong> (confirm: users stop seeing it and the app's rating is recalculated), <strong>Restore</strong></td></tr>
+</tbody></table></div>
+<p>Hidden reviews stay in the table but do not count toward the app's average or review count. A report does <strong>not</strong> change the app by itself: if an app is really bad, go to its page and set it PAUSED or KILLED (3.3). There is no note or reason box on these actions. Server messages: "must be VISIBLE or HIDDEN", "must be OPEN, REVIEWED or DISMISSED", <code>404 not_found</code> if the item no longer exists. Tables show 25 rows per page. <strong>Audited:</strong> <code>review.moderate</code> (status, app id; target type <code>app_review</code>, target = review id) and <code>report.handle</code> (status, app id; target <code>app_report</code>). The "Handled" time is set by every change, including a reopen.</p>
+<p><strong>Worked example (a scam report):</strong> Dashboard shows "Open reports 1". Moderation, Reports tab: reason <code>SCAM</code>, details "asks me to pay outside the app", app <code>adera-fix</code>. Click the app link (opens its Reports tab), then the app page's Notification log to see what it has been sending. Decide it is genuine: status button PAUSED (confirm). Back on Moderation press <strong>Resolve</strong>; the row turns REVIEWED with a Handled time. For a false alarm press <strong>Dismiss</strong> and confirm instead.</p>
+
+<h3 id="s-users">3.5 Users (search, detail, suspend, reactivate, mark deleted)</h3>
+<p><strong>For:</strong> supporting customers: finding a person, seeing what Adera knows about them, and blocking or unblocking them. These are the registered end users (customers), not staff. A VIEWER sees a blue banner: "Phone numbers and emails are masked for your role" and the masked values from section 1.</p>
+<h4 id="users-list">List and search</h4>
+<p>Controls: a search box (press Enter or the <strong>Search</strong> button) and a status selector (ACTIVE, SUSPENDED, DELETED). The search matches, case-insensitively and by "contains": email, phone, first name, last name, "first last" together, or a <strong>complete user id</strong> (a 36-character UUID matches exactly). For phones type the number with or without <code>+251</code> and with or without spaces and dashes: <code>+251 911 23 45 67</code> and <code>911234567</code> both match the stored <code>+251911234567</code> (you need at least three digits and nothing but digits and phone punctuation). A leading local <code>0</code> (<code>0911234567</code>) does <em>not</em> match, because the stored number has no 0. Newest registrations first, 25 per page with a total count. Columns: Name (link), Phone, Email, Status, Market, Language, Tier (verification tier), Registered, Last seen. Invalid status shows "must be ACTIVE, SUSPENDED or DELETED".</p>
+<h4 id="users-detail">Detail</h4>
+<p>Click a name. Header: name, status tag, id with a copy button. Cards:</p>
+<ul>
+<li><strong>Account status</strong> (ADMIN and above): the actions below.</li>
+<li><strong>Profile</strong>: first and last name, phone, email, gender, date of birth (the last three "hidden" for a VIEWER), language, market, timezone, verification tier, terms accepted (version and time), avatar set or none, registered, last seen, updated, deleted at.</li>
+<li><strong>Location (summary)</strong>: country, region, city, whether a precise position is on file ("coordinates are not shown here": they never appear in the backoffice) and when it was updated.</li>
+<li><strong>Devices and aliases</strong>: active and total devices and their platforms; how many apps the user has opened (a count of pseudonymous ids). Push tokens and pseudonymous ids are never shown.</li>
+<li><strong>Mute preferences per app</strong>: for each app whether the user muted in-app, SMS or email messages. This is the first place to look when a user says "I never got the message" (a muted channel gives a SUPPRESSED notification with reason <code>recipient_opted_out</code>).</li>
+<li><strong>Extra data</strong>: the free-form JSON (hidden for VIEWER, who see only the key names).</li>
+<li><strong>Audit for this user</strong> (ADMIN and above): every status change with its reason.</li></ul>
+<h4 id="users-status">Suspend, reactivate, mark deleted</h4>
+<div class="table-wrap"><table>
+<thead><tr><th>Action</th><th>Reason box</th><th>What it does to the user</th></tr></thead>
+<tbody>
+<tr><td><strong>Suspend</strong> (only on ACTIVE)</td><td>Required, 3 to 500 characters ("required when suspending or deleting (3-500 characters); it is kept in the audit log")</td><td>The user cannot use the Adera API any more. Their existing sessions are revoked at Kratos at once (the app is signed out; the next call answers 401). They can still receive and enter a sign-in code at Kratos, but every API call is refused at the gateway with <code>403 account_suspended</code>, so a fresh login does not help. <strong>Partners</strong> trying to notify them get <code>422 user_unreachable</code> (the same answer as for an unknown user, on purpose), and messages already queued for them end as UNREACHABLE (<code>user_unreachable</code>). Reversible.</td></tr>
+<tr><td><strong>Reactivate</strong> (only on SUSPENDED)</td><td>Optional note (3 to 500 characters if you write one)</td><td>The user can use the API again and partners can reach them. Their old sessions stay revoked: they sign in again.</td></tr>
+<tr><td><strong>Mark deleted</strong> (on ACTIVE or SUSPENDED)</td><td>Required, 3 to 500 characters</td><td>Final: <code>403 account_deleted</code> at the gateway, sessions revoked, partners get <code>user_unreachable</code>, and any later change answers <code>409 user_deleted</code> ("This user is marked deleted. A deleted user cannot be changed."). <strong>It does not erase anything</strong>: the profile, location, devices and the Kratos identity remain. Real account erasure is not built (section 7).</td></tr>
+</tbody></table></div>
+<p>Asking for the status the user already has changes nothing and writes no audit entry. The status change and its audit entry are written together: if the audit log is unavailable the change is rolled back and you see <code>503 audit_unavailable</code> ("The audit log could not be written, so nothing was changed"). <strong>Audited:</strong> <code>user.status</code> (target type <code>app_user</code>, target = user id; details: from, to, reason). <strong>Not audited:</strong> looking at a user (including ADMINs viewing unmasked data).</p>
+<p><strong>Worked example (a complaint about spam):</strong> Users; type <code>+251911234567</code> (the phone from the complaint), <strong>Search</strong>; open the row. Check "Mute preferences" and status. The user reports a harassing mini app, so you decide to block this <em>user</em>'s abusive account instead: <strong>Suspend</strong>, reason <code>Repeated abusive reviews, see ticket 4471</code>, confirm. The status tag turns SUSPENDED (orange) and "Audit for this user" shows the event. Later: <strong>Reactivate</strong>, note <code>Appeal accepted</code>.</p>
+
+<h3 id="s-notifications">3.6 Notifications</h3>
+<p><strong>For:</strong> the delivery log across all apps, and the detail page that explains one message. Top card: totals (all time and last 24 hours), counts per status and per channel. Table filters: Status (QUEUED, PROCESSING, RETRYING, SENT, FAILED, UNREACHABLE, SUPPRESSED, EXPIRED), Channel, Environment, Kind. There is <strong>no app filter or date filter on this global screen</strong> (use the app's Notification log tab for one app; the API itself supports date filters). 25 per page, newest first; the App column links to the app. Never shown: message values, recipient, user id. A "details" link opens one notification:</p>
+<ul>
+<li>A coloured box. For FAILED, UNREACHABLE, EXPIRED and SUPPRESSED it is titled <strong>"Why did this not arrive?"</strong>; otherwise "What happened". It spells out the status, the reason code in words, the last delivery attempt, and whether the partner callback is still unconfirmed.</li>
+<li><strong>Request</strong>: app (link to its log), the partner's external id, environment, kind and channel, template id and version, status reason, attempts, created, next attempt, expires, completed.</li>
+<li><strong>Delivery attempts</strong>: When, Channel, Provider, Outcome, Error code.</li>
+<li><strong>Callbacks to the partner</strong>: Status, Attempts, last HTTP status, last error, next attempt.</li></ul>
+<p>Read only; <strong>audited:</strong> nothing. Full meaning of every status, reason and provider: section 5. <strong>Worked example:</strong> Dashboard, Notifications panel shows FAILED (24 h) 2. Notifications, Status FAILED, details on the newest row; the box says "Permanent failure (for example a bad number)... Last attempt: SMS through twilio -> PERMANENT (twilio_http_400)".</p>
+
+<h3 id="s-staff">3.7 Staff (add, change role, deactivate)</h3>
+<p><strong>For:</strong> deciding who may sign in and with what power. SUPER_ADMIN only (others see "Staff management is for super admins."). The table lists Email (with tags: <em>you</em>; <em>bootstrap super admin</em>; <em>created by bootstrap</em> for accounts that the start-up bootstrap created rather than a person), Role, Status (ACTIVE or DISABLED), Added, Updated, and buttons <strong>Change role</strong> and <strong>Deactivate</strong> / <strong>Reactivate</strong>. The role explanation sits above the table: VIEWER reads everything but cannot change anything and sees masked personal data; ADMIN changes apps, templates, keys, moderation and user status; SUPER_ADMIN also manages staff.</p>
+<h4 id="staff-add">Adding a colleague</h4>
+<ol>
+<li>Press <strong>Add staff member</strong>. Enter their work Email (validated: "Not a valid email address", server "must be a valid email address") and pick a Role (default VIEWER, so a mistake is safe). <strong>Add</strong>.</li>
+<li>What happens: if the address has never signed in, an identity is created for it in Kratos with the role stored as admin-only metadata (a user cannot edit it through any self-service flow). If the address already has an account (for example it is also a customer), that account is granted the role. If it is already staff, its role is set and it is re-activated; the call is idempotent. <strong>No email is sent to them</strong>: tell them yourself.</li>
+<li>How the new person logs in the first time: they open the dashboard address, type their email, read the emailed code, enter it; the page then shows the QR code and secret for the authenticator (section 2.1); they enter the first code and are in, with the role you chose. Their second sign-in asks for the authenticator code only.</li></ol>
+<div class="callout danger"><span class="label">Careful: Add is not Change role</span><p>Adding an address that is already staff silently overwrites its role, and this path does <strong>not</strong> apply the "last super admin" and "not yourself" protections below (found in <code>StaffService.ensure</code>). For example adding your own address as VIEWER would demote you. Use <strong>Change role</strong> for existing members.</p></div>
+<h4 id="staff-role">Changing a role</h4>
+<p><strong>Change role</strong>, pick the new role, <strong>Save role</strong> (disabled until you pick a different one). Takes effect at once for new requests (the server reads the role on each call). <strong>Deactivate</strong> (confirm: "Their dashboard sessions are revoked and they can no longer sign in"): the status becomes DISABLED, the role is removed from their Kratos account and all their sessions are revoked, so their next click shows "Your session ended" and signing in again gives "not an active staff member". Their authenticator stays enrolled. <strong>Reactivate</strong> restores the stored role and lets them sign in again.</p>
+<h4 id="staff-protect">Protection against locking everyone out</h4>
+<ul><li><strong>Cannot lower or disable yourself</strong> while you are an active super admin: <code>409 cannot_demote_self</code> "You cannot lower or disable your own account. Ask another super admin."</li>
+<li><strong>Cannot remove the last active super admin</strong> (demote or deactivate): <code>409 last_super_admin</code> "This is the last active super admin. Add or promote another one first."</li></ul>
+<p><strong>Audited:</strong> <code>staff.create</code> (email, role) and <code>staff.update</code> (role, status); target type <code>staff</code>, target = the person's identity id. <strong>Worked example:</strong> Staff, <strong>Add staff member</strong>, Email <code>tesfaye@your-company.example</code>, Role Admin, <strong>Add</strong>; the row appears ACTIVE. Message Tesfaye: "Open http://127.0.0.1:9080/backoffice/, use your email, the code arrives by email, then set up Google Authenticator." After a month: <strong>Change role</strong>, Super admin, <strong>Save role</strong>. When Tesfaye leaves: <strong>Deactivate</strong>, confirm.</p>
+
+<h3 id="s-audit">3.8 Audit log</h3>
+<p><strong>For:</strong> answering "who changed this, when, from where?". ADMIN and above. Newest first, 50 per page, append-only (nothing in the dashboard edits or deletes rows). <strong>Filters</strong> (press <strong>Filter</strong>; <strong>Clear</strong> resets): <em>Actor</em> (a name picker for SUPER_ADMIN; other roles type a staff id), <em>Action</em> (matches the <strong>start</strong> of the action name: <code>app.</code> finds every app event, <code>app.status</code> only status changes, <code>user.</code> user changes), <em>Target type</em> (mini_app, partner_key, staff, app_review, app_report, app_user, template), <em>Target id</em> (an app, user, key or staff id), <em>Between</em> (date and time range; "from" included, "to" excluded). Messages: "must be a staff id (uuid)", "must be an ISO-8601 instant like 2026-10-01T00:00:00Z". Columns: When, Actor (email, or "system"), Role, Action, Target (a link for apps and users), Details (shortened), IP (the real client address seen by the gateway). Click the row's expand arrow for the full JSON details.</p>
+<div class="table-wrap"><table>
+<thead><tr><th>Action</th><th>Target type</th><th>Details recorded</th><th>Written by</th></tr></thead>
+<tbody>
+<tr><td><code>app.create</code>, <code>app.update</code>, <code>app.status</code>, <code>app.logo</code>, <code>app.logo.remove</code></td><td>mini_app</td><td>slug; field names changed; from and to status; new image id</td><td>registry-service</td></tr>
+<tr><td><code>capability.set</code>, <code>limit.set</code>, <code>environment.set</code>, <code>payment.set</code></td><td>mini_app</td><td>capability and state; channel and limits; environment and stored addresses; currencies</td><td>registry-service</td></tr>
+<tr><td><code>key.register</code>, <code>key.revoke</code></td><td>partner_key (target = key id)</td><td>app id, environment, fingerprint</td><td>registry-service</td></tr>
+<tr><td><code>review.moderate</code>, <code>report.handle</code></td><td>app_review, app_report</td><td>new status, app id</td><td>registry-service</td></tr>
+<tr><td><code>staff.create</code>, <code>staff.update</code></td><td>staff</td><td>email and role; role and status</td><td>registry-service</td></tr>
+<tr><td><code>user.status</code></td><td>app_user</td><td>from, to, reason</td><td>user-service (through registry-service)</td></tr>
+</tbody></table></div>
+<p><strong>Not in the log:</strong> sign-ins and sign-outs, template changes, staff reading user data, authenticator resets (done at Kratos). Each change and its audit row are written in one transaction in the services that own them (for user status, if the log cannot be written the change is cancelled). <strong>Worked example:</strong> "Why is adera-fix hidden?" Audit log, Action <code>app.status</code>, Target id = the app id (copy it from the app page): the row shows "amara@... ADMIN app.status from=LIVE to=PAUSED, 2026-10-25 14:03:11, 10.0.0.5". The same list is on the app's Audit tab.</p>
+
+<h3 id="s-system">3.9 System</h3>
+<p><strong>For:</strong> checking that the platform is up, jumping to the operations tools, and looking up codes. Any role. Read only.</p>
+<ul>
+<li><strong>Tools</strong>: links to Grafana, Prometheus, Mailpit, Infisical, RabbitMQ and the RustFS console, taken from the dashboard's runtime settings (<code>BACKOFFICE_*_URL</code>; an empty value hides a link). In this dev stack they point to <code>127.0.0.1</code> ports; they open in a new tab and are not reachable from another machine.</li>
+<li><strong>Service health</strong>: registry-service, user-service, notification-service, Ory Kratos, Prometheus, Grafana, Loki, Mailpit, Infisical, each UP (green) or DOWN (red) with a detail ("HTTP 503", "no answer"). Probed through the dashboard server on the internal network every 30 seconds, or press <strong>Check now</strong>. If the page loaded, the gateway itself is up. Gateway-level problems (429, 503) are explained in the tables below.</li>
+<li><strong>Environment</strong>: a line says which environment this deployment runs (DEV or PROD, from <code>ADERA_ENV</code>, via <code>GET /admin/api/v1/system</code>). Keys and allowed addresses of the other environment can be stored but are not used here.</li>
+<li><strong>Capability catalog</strong>: the table from section 3.3 with "reason required to grant".</li>
+<li><strong>Error codes (staff API)</strong> and <strong>Partner-facing codes</strong>: what each code means and its HTTP status (for example <code>ip_not_allowed</code>, <code>capability_not_granted</code>, <code>quota_exceeded</code>, <code>user_unreachable</code>). Use these when a partner sends you an error code.</li></ul>
+<p><strong>Audited:</strong> nothing. <strong>Worked example:</strong> a colleague says the emailed codes stopped. System: notification-service shows DOWN, "HTTP 503"; ask engineering to restart it, press <strong>Check now</strong> until it turns UP. If Mailpit is DOWN in dev, the code mails cannot be read (open the dev message list at notification-service instead).</p>
+</section>
+<section><h2 id="tutorial">4. Tutorial: a mini app from zero to LIVE (and how to stop it)</h2>
+<p>This is the whole lifecycle as one story. You are an ADMIN onboarding <strong>Adera Fix</strong> (slug <code>adera-fix</code>), a partner that wants to send "your job was accepted" messages by SMS and in the app. Sign in first (section 2). Each step names the screen from section 3 for the full field list.</p>
+<ol>
+<li><strong>Create the app.</strong> Mini apps, <strong>New app</strong>, fill the form as in 3.3 (slug <code>adera-fix</code>, name <code>Adera Fix</code>, support email <code>support@adera-fix.example</code>, market ET), <strong>Create app</strong>. Status DRAFT: the partner can use only DEV.</li>
+<li><strong>Logo.</strong> Tab General, <strong>Upload logo</strong>, a square PNG or JPEG under 2 MiB. (Not WebP, see the mismatch note in 3.3.) The amber "No logo yet" note disappears.</li>
+<li><strong>Support email.</strong> If you skipped it in step 1: tab General, field "Support email" <code>support@adera-fix.example</code>, <strong>Save changes</strong> ("Saved: supportEmail"). The blue note at the top now says "Ready for LIVE" in green.</li>
+<li><strong>Capabilities.</strong> Tab Capabilities. Row <code>notify.sms</code>: <strong>Change</strong>, GRANTED, <strong>Save</strong>. Row <code>notify.inapp</code>: the same. Skip <code>notify.email</code> unless the partner needs email. Without <code>notify.sms</code> a DIRECT message cannot go by SMS: it falls back to email when the user has an email and <code>notify.email</code> is granted, otherwise the partner gets <code>403 capability_not_granted</code>. No reason text is needed for <code>notify.*</code>. If the partner also needs, say, the user's city, grant <code>location.coarse</code> with a reason such as <em>To show technicians near you</em> (users will read it).</li>
+<li><strong>Notification limits.</strong> Tab Notification limits. Granting created defaults; look at them and tune. For SMS, which costs money: Edit, Max per user per day <code>2</code>, Max per day <code>200</code>, Max distinct users per day <code>200</code>, Max total <code>5000</code>, Save limits. Remember <em>empty (Unlimited) = no cap</em> and <em>0 = nothing allowed</em> (3.3 explains with examples). Check IN_APP too (default 20 per user per day, 10000 per day).</li>
+<li><strong>Allowed server IPs.</strong> Tab Environments and IPs. Ask the partner for the public IP addresses their servers call <em>from</em> (outbound). DEV card: <code>203.0.113.10</code>, Save addresses. PROD card: the production addresses, for example <code>203.0.113.10</code> and <code>198.51.100.0/24</code>, Save addresses. Both lists start empty and nothing can call until you fill them.</li>
+<li><strong>Register the partner's public key.</strong> The partner runs the two OpenSSL commands shown in 3.3 (tab Partner keys) and sends you <strong>only</strong> <code>partner-public.pem</code>. Tab Partner keys, <strong>Register a public key</strong>: Environment DEV first, Label <code>fix dev</code>, paste the whole <code>-----BEGIN PUBLIC KEY-----</code> block, <strong>Register</strong>. Give the partner the new <strong>key id</strong> (<code>ak_dev_...</code>) from the table. <em>Alternative for DEV work only:</em> <strong>Generate a key pair</strong>, environment DEV, <strong>Generate</strong>; copy or download the private key from the "shown once" dialog, tick the box, Close, and send it over a secure channel. Later, register the PROD key the same way with Environment PROD and the partner's own public key.</li>
+<li><strong>Create a template.</strong> Tab Templates, <strong>New template</strong>, as in the worked example in 3.3: code <code>job-accepted</code>, DIRECT, TRANSACTIONAL, params <code>name</code> (40) and <code>jobRef</code> (12), English body <code>Hi {name}, your Adera Fix job {jobRef} was accepted.</code>, plus the Amharic and Oromo texts if you have them, <strong>Create template</strong>. A message of kind IN_APP (inbox plus push) needs an English title as well. The partner lists the template ids with <code>GET /v1/templates</code> and sends the template's <code>id</code>, never free text. To retire a template without deleting it: <strong>Deactivate</strong>. To make it temporary set "Expires".</li>
+<li><strong>Let the partner test on the dev deployment.</strong> With the DEV key (the dev deployment only accepts DEV keys: <code>403 wrong_environment</code> otherwise) and a DEV address the partner sends to the synthetic users named <code>u_p_test_anything</code> (<code>u_p_test_unreachable</code> and <code>u_p_test_muted</code> exercise those paths). <strong>Nothing real is sent in DEV</strong> (the dev providers are console SMS and Mailpit; for the synthetic users delivery is simulated: QUEUED then SENT with provider <code>sandbox</code>; in PROD they are refused with <code>422 synthetic_user_not_allowed</code>). How to call: <a href="08c-partner-api.html">8c</a> and <a href="09-guides.html#send-notification">Guide: send a notification</a>. You watch it in tab Notification log (Environment DEV).</li>
+<li><strong>Go LIVE.</strong> The checklist: logo, support email, a PROD key, PROD addresses, a granted <code>notify.*</code> capability, at least one active template. Only the first two are enforced by the dashboard. Press the status button <strong>LIVE</strong> and confirm. If something is missing the dialog already warned and the server answers <em>"Not ready for LIVE: missing a logo and a support email."</em> (it names whichever is missing). On success the tag turns LIVE (green), the app is visible to users, and PROD calls are accepted.</li>
+<li><strong>Watch it.</strong> Tab Notification log, Environment LIVE: new rows appear as the partner sends. Tab Usage (LIVE): today's sent count against Max per day, users reached against Max distinct users, lifetime against Max total. Dashboard: "Notifications, last 24 hours". When a row is FAILED or SUPPRESSED, open it and read the "Why did this not arrive?" box (section 5).</li>
+<li><strong>Pause or kill.</strong> Different tools for different problems:
+<ul><li><strong>PAUSED</strong> (any ADMIN, reversible): the app disappears from the catalogue and the partner's PROD calls get <code>403 app_paused</code>; DEV still works. Use for "stop for an hour while we talk".</li>
+<li><strong>KILLED</strong> (emergency): everything is refused immediately, DEV too (<code>403 app_killed</code>). Only a SUPER_ADMIN can bring it back (status buttons, confirm).</li>
+<li>To stop <em>only one channel</em> without hiding the app: set that channel's limits to 0 (Notification limits) or change <code>notify.sms</code> to SUSPENDED (Capabilities); the partner then gets <code>quota_exceeded</code> (limits at 0) or <code>capability_not_granted</code> (suspended; note a DIRECT message may fall back to email if <code>notify.email</code> is granted and the user has an email). To stop one message type: Deactivate the template.</li>
+<li>Compromised key: <strong>Revoke</strong> it on tab Partner keys (calls with it fail at once with <code>key_revoked_or_expired</code>) and register a new one.</li></ul>
+Every one of these steps except template changes is in the audit log (3.8).</li></ol>
+</section>
+
+<section><h2 id="why">5. "Why didn't my notification arrive?"</h2>
+<p>Start in the app's tab <strong>Notification log</strong> (or the global Notifications screen). Find the row by the partner's External id, open <strong>details</strong>, read the coloured box, then use the tables below.</p>
+<div class="callout why"><span class="label">No row at all?</span><p>A request that is refused <em>before</em> it is accepted leaves no trace in the log: bad signature, address not allowed, app not active, unknown or inactive template, invalid values, unknown or unreachable user, quota exceeded (<code>user_unreachable</code> is answered immediately for unknown, suspended and deleted users). Those are returned to the partner as an error code in the HTTP answer. Ask the partner for the exact code and look it up on System, "Partner-facing codes" or <a href="10-reference.html#error-codes">Reference: error codes</a>. If the app was PAUSED or KILLED at that moment, that is the answer. Exception: a user who muted the app is accepted and logged as SUPPRESSED.</p></div>
+<h3 id="why-status">Status glossary</h3>
+<div class="table-wrap"><table>
+<thead><tr><th>Status</th><th>Meaning</th><th>What to do</th></tr></thead>
+<tbody>
+<tr><td><strong>QUEUED</strong></td><td>Accepted and waiting for the delivery worker (it polls every second).</td><td>Normally gone within seconds. If rows stay QUEUED, check System: notification-service may be down.</td></tr>
+<tr><td><strong>PROCESSING</strong></td><td>A worker is sending it right now.</td><td>Wait. If stuck for minutes, tell engineering.</td></tr>
+<tr><td><strong>RETRYING</strong></td><td>An attempt failed for a temporary reason (provider timeout, 5xx, rate limit, our own dependency down). It is retried with growing waits: 30 s, 1 min, 2 min, 4 min... at most 1 hour apart, up to <strong>8 attempts</strong>, and only until the message expires.</td><td>Read "Next attempt" and the last attempt's error code. Nothing to do unless it never recovers.</td></tr>
+<tr><td><strong>SENT</strong></td><td>Handed to the provider (SMS, email) or stored in the user's inbox with push attempted. Adera does not track handset delivery receipts, so SENT is not proof the phone showed it. For the synthetic <code>u_p_test_*</code> users in DEV nothing is really sent (provider <code>sandbox</code>); in this dev stack SMS goes to the console log (provider <code>console</code>), email to Mailpit and push to a fake (<code>fcm-fake</code>).</td><td>If the user says it did not arrive: check the user's mute preferences and phone/email on the user page, the provider's own log, and whether the user is a synthetic <code>u_p_test_*</code> one (simulated in DEV).</td></tr>
+<tr><td><strong>FAILED</strong></td><td>Permanent failure (the provider said the request itself is wrong, such as a bad number or rejected sender, error codes like <code>twilio_http_400</code>) or all 8 attempts failed (<code>max_attempts:...</code>). Never retried.</td><td>Read the error code in the attempts table; fix the cause (for example the user's number) and have the partner send a new message with a new externalId.</td></tr>
+<tr><td><strong>UNREACHABLE</strong></td><td>No way to reach the person: the account was deleted or suspended (<code>user_unreachable</code>) or there is no phone (<code>no_phone</code>) or email (<code>no_email</code>) on file.</td><td>Look the user up (3.5). Reactivate if suspended by mistake.</td></tr>
+<tr><td><strong>SUPPRESSED</strong></td><td>Deliberately not sent: the user muted this app's channel (<code>recipient_opted_out</code>, set in the app window's menu) or, with a real provider and an allowlist active, the recipient is not on it (<code>not_allowlisted</code>).</td><td>Check the user's "Mute preferences per app". An allowlist is an operations setting (<code>NOTIFY_LIVE_ALLOWLIST</code>).</td></tr>
+<tr><td><strong>EXPIRED</strong></td><td>It kept failing until its deadline passed (the partner's <code>ttlSeconds</code>, default 24 hours, between 60 seconds and 7 days).</td><td>Same as FAILED: find the recurring error in the attempts table.</td></tr>
+</tbody></table></div>
+<h3 id="why-attempts">Reading the attempts and callbacks tables</h3>
+<ul>
+<li><strong>Attempts</strong>: one row per try with Channel, Provider (<code>sandbox</code>, <code>console</code>, <code>twilio</code>, <code>mailpit</code>, <code>resend</code>, <code>fcm-fake</code>, <code>fcm</code>), Outcome and Error code. Outcomes: <code>OK</code> (provider accepted), <code>TRANSIENT</code> (temporary failure, will retry), <code>PERMANENT</code> (will not retry), <code>SKIPPED</code> (not tried: <code>not_allowlisted</code>, or <code>no_devices</code> for push when the user has no registered phone). "No attempt was made" means the decision came before any provider was called (for example UNREACHABLE or SUPPRESSED).</li>
+<li>For IN_APP messages the inbox entry is the reliable part: it is stored first, and the message is marked SENT even if there is no device to push to or push is only the fake provider. Push error codes <code>push_unavailable</code> (temporary) and <code>token_unregistered</code> (dead token, retired) refer to the optional push.</li>
+<li><strong>Callbacks</strong> are the partner's webhook calls telling them the final status (only when they sent a <code>callbackUrl</code>). Status PENDING (waiting for the next try), PROCESSING, DELIVERED (the partner answered 2xx) or FAILED (gave up after 8 tries over about a day, 1 minute doubling up to 6 hours). If the callback is not DELIVERED, the partner's server is the problem, not the notification; the last HTTP status and last error say what their server answered.</li></ul>
+<h3 id="why-checklist">A quick checklist</h3>
+<ol>
+<li>Is there a row? No: get the error code from the partner (see the box above).</li>
+<li>Environment DEV? Then the dev providers (console, Mailpit) were used, and for synthetic <code>u_p_test_*</code> users nothing was sent by design.</li>
+<li>Status and reason: use the tables above.</li>
+<li>Muted or unreachable? Open the user (3.5): status, phone and email, "Mute preferences per app".</li>
+<li>Still unclear? System page: is notification-service UP? Is the provider mode what you expect (dev: SMS to the console log, email to Mailpit)?</li></ol>
+</section>
+
+<section><h2 id="recipes">6. Common workflows (recipes)</h2>
+<h3 id="r-onboard">6.1 Onboard a new partner app</h3>
+<ol><li>Mini apps, New app (3.3).</li><li>General: logo and support email.</li><li>Capabilities: grant the <code>notify.*</code> you agreed.</li><li>Notification limits: set sensible numbers.</li><li>Environments and IPs: partner's server addresses for DEV and PROD.</li><li>Partner keys: register their DEV public key; send them the key id.</li><li>Templates: create the messages.</li><li>Partner tests on the dev deployment.</li><li>Register their PROD key; set status LIVE.</li><li>Watch Notification log and Usage for the first day. (Details: section 4.)</li></ol>
+<h3 id="r-rotate">6.2 Rotate a partner key</h3>
+<ol><li>The partner generates a new pair (3.3 commands) and sends the new <code>partner-public.pem</code>.</li>
+<li>Partner keys, Register a public key, same environment, a label with the year, paste, Register. (An environment can hold 5 active keys, so both work during the changeover; if you already have 5, revoke the oldest unused one first.)</li>
+<li>Give the partner the new key id; they switch their servers.</li>
+<li>When the partner confirms the switch (and the Notification log keeps showing normal traffic), <strong>Revoke</strong> the old key (confirm). Its calls now fail with <code>401 key_revoked_or_expired</code>.</li>
+<li>Check Audit log, Action <code>key.</code>, for the register and revoke entries.</li></ol>
+<h3 id="r-stop">6.3 Temporarily stop an app's notifications</h3>
+<ol><li>Whole app (LIVE traffic stops, app hidden from users): status PAUSED; later LIVE (or DRAFT). Emergency: KILLED (SUPER_ADMIN to undo).</li>
+<li>One channel only: Notification limits, set that channel's four numbers to 0 (or "Max per day" 0, which is enough); later restore them. Or Capabilities, change <code>notify.sms</code> to SUSPENDED with a reason such as "investigating complaints", later GRANTED again.</li>
+<li>One message type: Templates, Deactivate.</li><li>Tell the partner which error code to expect (<code>app_paused</code>, <code>quota_exceeded</code>, <code>capability_not_granted</code>, <code>template_inactive</code>).</li></ol>
+<h3 id="r-complaint">6.4 Investigate a user complaint ("I didn't get the code or message", "I can't use the app")</h3>
+<ol><li>Users, search the phone or email they gave (or their user id). Open the user.</li>
+<li>Status: SUSPENDED or DELETED explains a blocked app (403 account_suspended or account_deleted). ADMIN and above: the "Audit for this user" card shows who changed it and why.</li>
+<li>"Mute preferences per app": a muted channel for that app explains SUPPRESSED messages. Check phone and email exist (masked is fine for a VIEWER).</li>
+<li>Find the app (Mini apps), tab Notification log, filter Status or Channel, look for the time of the complaint, open details (section 5).</li>
+<li>For sign-in problems use section 2.6 (limits, Mailpit, allowlist). Do not change the account without a reason; every status change needs one and is audited.</li></ol>
+<h3 id="r-moderate">6.5 Moderate a report</h3>
+<ol><li>Moderation, Reports tab (OPEN by default).</li><li>Read Reason and Details; click the app link for context (its Reports and Reviews tabs).</li><li>Act on the app if needed (status PAUSED or KILLED, or contact the partner via the support email).</li><li>Return and press <strong>Resolve</strong> (acted on) or <strong>Dismiss</strong> (no action). Reopen if it comes back.</li><li>For an abusive review: Reviews tab, <strong>Hide</strong> (confirm); the rating is recalculated.</li></ol>
+<h3 id="r-colleague">6.6 Add a colleague</h3>
+<ol><li>Staff (SUPER_ADMIN), Add staff member, their work email and the lowest role that suffices (VIEWER by default).</li><li>Tell them to open <code>/backoffice/</code> and sign in with that email: emailed code, then QR code and first authenticator code.</li><li>Check the row is ACTIVE.</li><li>Change role later with <strong>Change role</strong>; never re-add an existing member to change a role.</li><li>Make sure at least two people are SUPER_ADMIN.</li></ol>
+</section>
+
+<section><h2 id="cannot">7. What the backoffice cannot do yet</h2>
+<p>Each item below was checked against the code on 2026-10-25.</p>
+<div class="table-wrap"><table>
+<thead><tr><th>Limitation</th><th>Detail</th></tr></thead>
+<tbody>
+<tr><td>Server-side paging and search of mini apps</td><td>The list returns everything at once (at most 200 apps when no status filter is chosen) and the search box filters in the browser.</td></tr>
+<tr><td>Payments are not enforced</td><td>The Payment tab stores currencies, holds and amount limits, and <code>pay.request</code> can be granted, but no payment feature exists and nothing reads these settings.</td></tr>
+<tr><td>No user hard-delete or erasure</td><td>"Mark deleted" is a final status. It blocks the account and partner delivery but erases no data and does not remove the Kratos identity. Staff also cannot edit a user's profile (name, phone, email) or undo a deletion.</td></tr>
+<tr><td>Push is still a fake</td><td><code>FCM_PROVIDER</code> defaults to <code>fake</code>; the real Firebase provider exists in code but needs an Adera Firebase service account. IN_APP messages still land in the user's inbox. Real SMS is also unproven in this environment (dev SMS goes to the console log; the one real-SMS try from a US sender to Ethiopia failed).</td></tr>
+<tr><td>No authenticator reset or lost-phone recovery in the UI</td><td>Only the Kratos admin API (section 2.6) can remove an enrolled authenticator. The Staff screen can add, change role, deactivate and reactivate, but not delete a staff member, and the staff list is not paged.</td></tr>
+<tr><td>Things that are never deleted or undone from the UI</td><td>Apps (KILLED is the end), templates (deactivate only), revoked keys, reviews (hide only), audit rows.</td></tr>
+<tr><td>Audit gaps</td><td>Sign-ins, template changes and staff viewing personal data are not recorded; there is no audit export.</td></tr>
+<tr><td>Notification screens are read only and thin</td><td>No resend or cancel; the global screen has no app or date filter (the API supports dates); message values and recipients are deliberately never shown.</td></tr>
+<tr><td>No frontend bridge or user consent yet</td><td>Capabilities are an admin gate. Only <code>notify.*</code> are checked at runtime (by the partner API); nothing yet reads <code>user.*</code>, <code>location.*</code> or <code>pay.request</code>, and <code>allowedOrigins</code> are stored for the future bridge. See <a href="10-reference.html#not-built">Reference: not built yet</a>.</td></tr>
+<tr><td>Logo format mismatch</td><td>The upload accepts WebP in the browser but the server refuses it (3.3).</td></tr>
+<tr><td>No review approval queue</td><td>Reviews are published immediately and can only be hidden afterwards.</td></tr>
+<tr><td>Settings need a restart</td><td>Tool links, dev hints and service limits (for example the 10 per hour email limit) are environment settings, not screens.</td></tr>
+</tbody></table></div>
+</section>
+
+<div class="pager"><a class="prev" href="11-backoffice.html"><small>Previous</small>11. Backoffice (staff dashboard)</a><a class="next" href="13-sample-data.html"><small>Next</small>13. Sample data</a></div>
+<p class="footer">Adera backend documentation &middot; last verified 2026-10-25 &middot; <a href="../index.html">contents</a></p>
+</main>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

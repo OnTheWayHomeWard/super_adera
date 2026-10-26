@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Adera backend documentation | Adera docs</title>
+<link rel="stylesheet" href="src/style.css">
+</head>
+<body>
+<header class="topbar">
+<button id="menu-btn" type="button" aria-label="Toggle menu">Menu</button>
+<a class="brand" href="index.html">Adera docs</a>
+<span class="spacer"></span>
+<a href="index.html">Contents</a>
+<button id="theme-btn" type="button" aria-label="Toggle light or dark theme">Theme</button>
+</header>
+<div class="layout">
+<nav class="sidebar" aria-label="Sections">
+<ul><li><a href="index.html" class="current">Home / contents</a></li></ul>
+<h4>Sections</h4><ul>
+<li><a href="src/01-overview.html">1. Overview</a>
+</li>
+<li><a href="src/02-setup.html">2. Setup and running</a>
+</li>
+<li><a href="src/03-tools.html">3. Tools</a>
+</li>
+<li><a href="src/04-services.html">4. Services</a>
+</li>
+<li><a href="src/05-communication.html">5. How it communicates</a>
+</li>
+<li><a href="src/06-security.html">6. Security model</a>
+</li>
+<li><a href="src/07-data.html">7. Data</a>
+</li>
+<li><a href="src/08-endpoints.html">8. Endpoint reference</a>
+</li>
+<li><a href="src/09-guides.html">9. Guides</a>
+</li>
+<li><a href="src/10-reference.html">10. Reference</a>
+</li>
+<li><a href="src/11-backoffice.html">11. Backoffice (staff dashboard)</a>
+</li>
+<li><a href="src/12-backoffice-guide.html">12. Backoffice guide (staff manual)</a>
+</li>
+<li><a href="src/13-sample-data.html">13. Sample data (test scenarios)</a>
+</li>
+</ul>
+<h4>Endpoints</h4><ul>
+<li><a href="src/08a-user-api.html">8a. End-user API</a>
+</li>
+<li><a href="src/08b-staff-api.html">8b. Staff / dashboard API</a>
+</li>
+<li><a href="src/08c-partner-api.html">8c. Partner API</a>
+</li>
+<li><a href="src/08d-internal-api.html">8d. Internal API</a>
+</li>
+<li><a href="src/08e-kratos-flows.html">8e. Kratos flows</a>
+</li>
+<li><a href="src/08f-operational.html">8f. Operational endpoints</a>
+</li>
+</ul>
+</nav>
+<main>
+<h1>Adera backend documentation</h1>
+<p class="lead">Everything about the Adera backend in one place: what it is, how to run it, every tool and service, how requests travel, how it is secured, what is in the databases, every endpoint with real examples, step-by-step guides and reference tables. It works offline: open this file from disk.</p>
+
+<div class="callout ok"><span class="label">Last verified</span>
+<p><strong>2026-10-25</strong>, against the running development stack (all 17 containers up) and the source in <code>services/</code> and <code>infra/</code>. Examples were captured from the live stack through the gateway in dev mode (console SMS, Mailpit); nothing real was sent. Where these pages and older notes disagree, the code and the running system won, and the page says so.</p>
+<p><strong>State note.</strong> The repository is not under git yet (there is no <code>.git</code> folder), so there is no commit id to quote. The state described is the working tree of 2026-10-25: <code>notification-service</code> 50 tests, <code>user-service</code> 65, <code>registry-service</code> 56 (all passing), the backoffice 65 unit tests and 21 live smoke tests, <code>tests/e2e/journey.py</code> 29 checks and <code>tests/e2e/partner.py</code> 38 checks. Versions: Spring Boot 4.1 on Java 21, Kratos v26.2.0, APISIX 3.19.0, Postgres 16, Redis 7, RabbitMQ 4, Infisical v0.167.2, RustFS 1.0.3, Grafana 13.0.2.</p></div>
+
+<section>
+<h2 id="contents">Contents</h2>
+<div class="cards">
+<div class="card"><a class="stretch" href="src/01-overview.html"><h3 id="1-overview">1. Overview</h3><p>What Adera is, what is built and what is not, the architecture diagram, and the rule "proven tools, code only product logic".</p></a></div>
+<div class="card"><a class="stretch" href="src/02-setup.html"><h3 id="2-setup-and-running">2. Setup and running</h3><p>Prerequisites, repo layout, <code>.env</code> versus Infisical, compose commands, ports, dev versus real delivery, tests, troubleshooting.</p></a></div>
+<div class="card"><a class="stretch" href="src/03-tools.html"><h3 id="3-tools">3. Tools</h3><p>Postgres, Redis, RabbitMQ, Mailpit, Infisical, Kratos, APISIX, RustFS and the observability stack: why, how configured, how to operate, where a tool did not fit.</p></a></div>
+<div class="card"><a class="stretch" href="src/04-services.html"><h3 id="4-services">4. Services</h3><p>notification-service, user-service and registry-service: responsibilities, packages, configuration, build and tests.</p></a></div>
+<div class="card"><a class="stretch" href="src/05-communication.html"><h3 id="5-how-it-communicates">5. How it communicates</h3><p>Request-path diagrams: login, registration webhook, user and staff requests, partner notifications, inbox and push, observability. The trust model.</p></a></div>
+<div class="card"><a class="stretch" href="src/06-security.html"><h3 id="6-security-model">6. Security model</h3><p>ADERA-SIG-1 with runnable examples, pseudonymous ids, SSRF guard, quotas, allowlists, secrets policy, known limitations.</p></a></div>
+<div class="card"><a class="stretch" href="src/07-data.html"><h3 id="7-data">7. Data</h3><p>Every database, table and column, the RustFS bucket and Redis keys, with real masked example rows.</p></a></div>
+<div class="card"><a class="stretch" href="src/08-endpoints.html"><h3 id="8-endpoint-reference">8. Endpoint reference</h3><p>Every endpoint of every service, by audience, with parameters, real requests and responses, and every error.</p></a></div>
+<div class="card"><a class="stretch" href="src/09-guides.html"><h3 id="9-guides">9. Guides</h3><p>Worked scenarios: sign up, staff login with an authenticator, register a mini app, send a notification, read logs, rotate secrets, go real.</p></a></div>
+<div class="card"><a class="stretch" href="src/10-reference.html"><h3 id="10-reference">10. Reference</h3><p>Environment variables, capability catalog, status glossaries, error-code index, glossary, changelog and not-built list.</p></a></div>
+<div class="card"><a class="stretch" href="src/11-backoffice.html"><h3 id="11-backoffice">11. Backoffice</h3><p>The React staff dashboard: every screen, the API calls behind it, roles, login, configuration and tests.</p></a></div>
+<div class="card"><a class="stretch" href="src/12-backoffice-guide.html"><h3 id="12-backoffice-guide">12. Backoffice guide</h3><p>The staff operator's manual: sign in, every screen and field, a mini app from zero to LIVE, why a notification did not arrive, recipes and current limits.</p></a></div>
+<div class="card"><a class="stretch" href="src/13-sample-data.html"><h3 id="13-sample-data">13. Sample data</h3><p>The scenario seeding script for the DEV stack: what it creates, where to see each scenario in the backoffice, how to run and remove it, and the issues found while generating it.</p></a></div>
+</div>
+</section>
+
+<section>
+<h2 id="endpoint-pages">Endpoint reference pages</h2>
+<div class="table-wrap"><div class="table-wrap"><table>
+<thead><tr><th>Audience</th><th>Page</th><th>Who calls it</th></tr></thead>
+<tbody>
+<tr><td>(a) End-user API</td><td><a href="src/08a-user-api.html">08a</a></td><td>The signed-in mobile app, through the gateway</td></tr>
+<tr><td>(b) Staff / dashboard admin API</td><td><a href="src/08b-staff-api.html">08b</a></td><td>Adera staff after email code and authenticator app (aal2)</td></tr>
+<tr><td>(c) Partner API</td><td><a href="src/08c-partner-api.html">08c</a></td><td>A mini app's server with signed requests</td></tr>
+<tr><td>(d) Internal service-to-service API</td><td><a href="src/08d-internal-api.html">08d</a></td><td>Our own services and Kratos; never routed by the gateway</td></tr>
+<tr><td>(e) Kratos self-service flows</td><td><a href="src/08e-kratos-flows.html">08e</a></td><td>The mobile app and the staff dashboard, under <code>/kratos</code></td></tr>
+<tr><td>(f) Operational endpoints</td><td><a href="src/08f-operational.html">08f</a></td><td>Operators, Prometheus, tests, partners (JWKS)</td></tr>
+</tbody></table></div></div>
+</section>
+
+<section>
+<h2 id="start-here">Where to start</h2>
+<div class="table-wrap"><div class="table-wrap"><table>
+<thead><tr><th>You are...</th><th>Read this first</th></tr></thead>
+<tbody>
+<tr><td>New to the project</td><td><a href="src/01-overview.html">Overview</a>, then <a href="src/05-communication.html">How it communicates</a>.</td></tr>
+<tr><td>Setting it up or operating it</td><td><a href="src/02-setup.html">Setup</a>, then <a href="src/09-guides.html">Guides</a> and <a href="src/03-tools.html">Tools</a>.</td></tr>
+<tr><td>Building the mobile app or dashboard</td><td><a href="src/08-endpoints.html">Endpoint reference</a>, <a href="src/08e-kratos-flows.html">Kratos flows</a>, <a href="src/08a-user-api.html">user API</a>, <a href="src/08b-staff-api.html">staff API</a>.</td></tr>
+<tr><td>Integrating a mini app (a partner)</td><td><a href="src/06-security.html#signing">ADERA-SIG-1</a>, <a href="src/08c-partner-api.html">Partner API</a>, <a href="src/09-guides.html#send-notification">Guide: send a notification</a>.</td></tr>
+<tr><td>Staff running the dashboard</td><td><a href="src/12-backoffice-guide.html"><strong>Backoffice guide (start here)</strong></a>, <a href="src/11-backoffice.html">Backoffice</a>, <a href="src/09-guides.html#staff-login">Guide: staff login</a>, <a href="src/09-guides.html#register-app">Guide: register a mini app</a>.</td></tr>
+<tr><td>Reviewing security</td><td><a href="src/06-security.html">Security model</a> and its <a href="src/06-security.html#limitations">known limitations</a>.</td></tr>
+<tr><td>Looking something up</td><td><a href="src/10-reference.html">Reference</a>: variables, error codes, statuses.</td></tr>
+</tbody></table></div></div>
+</section>
+
+<section>
+<h2 id="conventions">Conventions used in these pages</h2>
+<ul>
+<li><strong>Examples are real.</strong> Requests and responses were captured from the running stack. Where something was masked it says so: phone numbers look like <code>+2519*****20</code>, emails like <code>a***@example.com</code>, and secrets, tokens, password hashes, keys and HMACs are never shown (placeholders such as <code>$TOKEN</code> and <code>&lt;masked&gt;</code> stand in). Identifiers in examples belong to throw-away test data that was deleted afterwards.</li>
+<li><strong>"Illustrative example"</strong> marks a row or response that could not be captured (for example a table with no rows yet); it is clearly labelled and is not real data.</li>
+<li><strong>Paths are as the client calls them</strong> (through the gateway at <code>http://127.0.0.1:9080</code>). The internal path is given where it differs.</li>
+<li><strong>Badges:</strong> <span class="badge built">built</span> <span class="badge partial">partial</span> <span class="badge notyet">not built</span> <span class="badge ours">our code</span>.</li>
+<li><strong>Light and dark</strong> follow your system setting; the Theme button overrides it. On a phone use the Menu button for the section list.</li>
+<li>The earlier Markdown notes <code>docs/SETUP.md</code> and <code>docs/PARTNER_API.md</code> are kept as source material. These pages are the complete and authoritative version.</li>
+</ul>
+</section>
+
+
+<p class="footer">Adera backend documentation &middot; last verified 2026-10-25 &middot; <a href="index.html">contents</a></p>
+</main>
+</div>
+<script src="src/app.js"></script>
+</body>
+</html>
