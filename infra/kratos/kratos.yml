@@ -23,6 +23,11 @@ selfservice:
       passwordless_enabled: true
       config:
         lifespan: 5m
+    # The built-in "profile" settings method would let a signed-in user change their own phone number or email with no
+    # verification of the new value (and user-service would keep the old one). Contact details are changed only through
+    # our own APIs, so it is off. The settings flow stays available for the staff authenticator (totp) below.
+    profile:
+      enabled: false
     # Authenticator-app codes: the second step for dashboard staff (customers never enrol one).
     totp:
       enabled: true
