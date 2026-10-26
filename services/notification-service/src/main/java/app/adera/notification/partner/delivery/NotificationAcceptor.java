@@ -16,6 +16,7 @@ import java.util.UUID;
 import java.util.regex.Pattern;
 
 import app.adera.notification.partner.ApiException;
+import app.adera.notification.partner.PartnerProperties;
 import app.adera.notification.partner.UpstreamUnavailableException;
 import app.adera.notification.partner.auth.PartnerContext;
 import app.adera.notification.partner.auth.UserDirectoryClient;
@@ -51,15 +52,17 @@ public class NotificationAcceptor {
 	private final NotificationRepository repository;
 	private final JsonMapper mapper;
 	private final Clock clock;
+	private final PartnerProperties props;
 
 	public NotificationAcceptor(TemplateService templates, UserDirectoryClient directory, NotificationStore store,
-			NotificationRepository repository, JsonMapper mapper, Clock clock) {
+			NotificationRepository repository, JsonMapper mapper, Clock clock, PartnerProperties props) {
 		this.templates = templates;
 		this.directory = directory;
 		this.store = store;
 		this.repository = repository;
 		this.mapper = mapper;
 		this.clock = clock;
+		this.props = props;
 	}
 
 	@SuppressWarnings("unchecked")
@@ -102,11 +105,17 @@ public class NotificationAcceptor {
 		String callbackUrl = null;
 		if (body.get("callbackUrl") != null) {
 			String u = String.valueOf(body.get("callbackUrl")).trim();
-			if (u.length() > 500 || !(u.startsWith("https://") || u.startsWith("http://"))) {
-				errors.put("callbackUrl", "must be an https URL (max 500 characters)");
+			if (u.length() > 500) {
+				errors.put("callbackUrl", "must be at most 500 characters");
 			}
 			else {
-				callbackUrl = u;
+				try {
+					UrlGuard.checkSyntax(u, props.allowPrivateCallbacks());
+					callbackUrl = u;
+				}
+				catch (IllegalArgumentException e) {
+					errors.put("callbackUrl", "must be a public https URL on port 443 or 8443 without credentials (" + e.getMessage() + ")");
+				}
 			}
 		}
 		int ttl = DEFAULT_TTL;

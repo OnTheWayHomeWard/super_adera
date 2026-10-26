@@ -39,4 +39,22 @@ class UrlGuardTest {
 		assertThat(RetryPolicy.isPermanent("twilio_http_503")).isFalse();
 	}
 
+	@Test
+	void syntaxCheckNeedsNoDnsAndRefusesObviousBadAddresses() {
+		for (String url : new String[] { "http://example.com/x", "https://user:pw@example.com/x", "https://example.com:22/x", "ftp://example.com/x",
+				"https://127.0.0.1/x", "https://10.0.0.5/x", "https://169.254.169.254/x", "https://[::1]/x", "not a url", "https:///nohost" }) {
+			assertThatThrownBy(() -> UrlGuard.checkSyntax(url, false)).as(url).isInstanceOf(IllegalArgumentException.class);
+		}
+		// a name that does not resolve is fine here: resolving happens when the callback is sent
+		assertThat(UrlGuard.checkSyntax("https://hooks.partner.invalid/adera", false).getHost()).isEqualTo("hooks.partner.invalid");
+		assertThat(UrlGuard.checkSyntax("https://8.8.8.8:8443/adera", false)).isNotNull();
+	}
+
+	@Test
+	void syntaxCheckWithPrivateAllowedStillRefusesCredentialsAndOddSchemes() {
+		assertThat(UrlGuard.checkSyntax("http://127.0.0.1:9999/hook", true)).isNotNull();
+		assertThatThrownBy(() -> UrlGuard.checkSyntax("http://user:pw@127.0.0.1/hook", true)).isInstanceOf(IllegalArgumentException.class);
+		assertThatThrownBy(() -> UrlGuard.checkSyntax("ftp://127.0.0.1/hook", true)).isInstanceOf(IllegalArgumentException.class);
+	}
+
 }

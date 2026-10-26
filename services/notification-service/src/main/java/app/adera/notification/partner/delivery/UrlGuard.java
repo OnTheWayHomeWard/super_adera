@@ -16,8 +16,13 @@ public final class UrlGuard {
 	private UrlGuard() {
 	}
 
-	/** @return the validated URI, or throws {@link IllegalArgumentException} with a short reason code */
-	public static URI check(String url, boolean allowPrivate) {
+	/**
+	 * The checks that need no network: the shape of the URL and, when the host is an IP literal, whether that address is public.
+	 * Run when a partner sends the request so a bad address is refused at once (400) instead of being dropped when the callback is sent.
+	 *
+	 * @return the parsed URI, or throws {@link IllegalArgumentException} with a short reason code
+	 */
+	public static URI checkSyntax(String url, boolean allowPrivate) {
 		URI uri;
 		try {
 			uri = URI.create(url);
@@ -36,6 +41,22 @@ public final class UrlGuard {
 		if (!allowPrivate && port != -1 && port != 443 && port != 8443) {
 			throw new IllegalArgumentException("port_not_allowed");
 		}
+		if (!allowPrivate && isIpLiteral(uri.getHost())) {
+			try {
+				if (!isPublic(InetAddress.getByName(uri.getHost()))) {
+					throw new IllegalArgumentException("address_not_public");
+				}
+			}
+			catch (java.net.UnknownHostException e) {
+				throw new IllegalArgumentException("invalid_url");
+			}
+		}
+		return uri;
+	}
+
+	/** The full check, done when the callback is sent: the syntax checks plus resolving the host and requiring EVERY address to be public. */
+	public static URI check(String url, boolean allowPrivate) {
+		URI uri = checkSyntax(url, allowPrivate);
 		if (allowPrivate) {
 			return uri;
 		}
@@ -52,6 +73,10 @@ public final class UrlGuard {
 			}
 		}
 		return uri;
+	}
+
+	private static boolean isIpLiteral(String host) {
+		return host.startsWith("[") || host.matches("^\\d{1,3}(\\.\\d{1,3}){3}$");
 	}
 
 	static boolean isPublic(InetAddress a) {

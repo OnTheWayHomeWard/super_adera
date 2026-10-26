@@ -363,6 +363,17 @@ class PartnerPlatformTests {
 	}
 
 	@Test
+	void aBadCallbackUrlIsRefusedImmediatelyNotSilentlyDroppedLater() throws Exception {
+		String template = directTemplate();
+		for (String url : new String[] { "https://user:pw@example.com/hook", "ftp://example.com/hook", "not a url" }) {
+			String body = send("cbu-" + UUID.randomUUID(), template, alias, ",\"callbackUrl\":\"" + url + "\"");
+			mvc.perform(signed(post("/v1/notifications"), "POST", "/v1/notifications", body)).andExpect(status().isBadRequest())
+				.andExpect(jsonPath("$.error").value("validation_failed")).andExpect(jsonPath("$.fields.callbackUrl").exists());
+		}
+		assertThat(jdbc.sql("SELECT COUNT(*) FROM notification WHERE external_id LIKE 'cbu-%'").query(Integer.class).single()).isZero();
+	}
+
+	@Test
 	void statusCallbackIsSignedAndRetriedUntilThePartnerAnswers() throws Exception {
 		int[] calls = { 0 };
 		String[] captured = new String[3];
