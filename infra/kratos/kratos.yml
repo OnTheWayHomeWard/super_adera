@@ -116,6 +116,27 @@ session:
   lifespan: 720h
 
 courier:
+  # Wording of the codes Kratos sends (the rest of Kratos' texts stay default). Files in courier-templates/, Go template syntax.
+  # Recovery by PHONE does not go through Kratos (its recovery flow only accepts an email address); that SMS text lives in
+  # notification-service (PasswordResetService).
+  templates:
+    verification_code:
+      valid:
+        email:
+          subject: file:///etc/config/kratos/courier-templates/verification-code.email.subject.gotmpl
+          body:
+            plaintext: file:///etc/config/kratos/courier-templates/verification-code.email.body.plaintext.gotmpl
+            html: file:///etc/config/kratos/courier-templates/verification-code.email.body.html.gotmpl
+        sms:
+          body:
+            plaintext: file:///etc/config/kratos/courier-templates/verification-code.sms.gotmpl
+    recovery_code:
+      valid:
+        email:
+          subject: file:///etc/config/kratos/courier-templates/recovery-code.email.subject.gotmpl
+          body:
+            plaintext: file:///etc/config/kratos/courier-templates/recovery-code.email.body.plaintext.gotmpl
+            html: file:///etc/config/kratos/courier-templates/recovery-code.email.body.html.gotmpl
   # Every message Kratos wants to send goes to our notification service, which decides how to deliver it
   # (dev: log / Mailpit, live: Twilio / Resend) from SMS_PROVIDER / EMAIL_PROVIDER in .env.
   delivery_strategy: http
