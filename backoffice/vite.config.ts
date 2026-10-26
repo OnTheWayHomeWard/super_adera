@@ -14,6 +14,7 @@ export default defineConfig({
     proxy: {
       "/admin": { target: gateway, changeOrigin: true },
       "/kratos": { target: gateway, changeOrigin: true },
+      "/public": { target: gateway, changeOrigin: true },
       "/backoffice/api": { target: gateway, changeOrigin: true },
     },
   },

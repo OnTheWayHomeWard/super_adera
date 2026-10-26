@@ -550,7 +550,7 @@ adm "$BASE/admin/api/v1/notification/notifications/$NOTIFICATION_ID" | jq .</cod
 <p>Codes sent by Kratos (login) are separate from partner messages. For them, look at <code>send_log</code>:</p>
 <pre><code>docker compose exec -T postgres psql -U adera_admin -d notification -c \
   "SELECT channel, recipient_masked, provider, status, error_code, created_at FROM send_log ORDER BY created_at DESC LIMIT 5"</code></pre>
-<p>Statuses there: <code>SENT</code>, <code>FAILED</code>, <code>SUPPRESSED</code> (<code>rate_limited</code>), <code>SKIPPED</code> (<code>not_allowlisted</code>). A user who asked for too many codes sees "code sent" yet receives nothing: that is <code>SUPPRESSED rate_limited</code>.</p></section>
+<p>Statuses there: <code>SENT</code>, <code>FAILED</code>, <code>SUPPRESSED</code> (<code>rate_limited</code>), <code>SKIPPED</code> (<code>not_allowlisted</code>). A user who asked for too many codes sees "code sent" yet receives nothing: that is <code>SUPPRESSED rate_limited</code>. Clients that call <code>POST /public/v1/login-codes/check</code> first (the backoffice login page does) get a 429 with the time to wait instead.</p></section>
 <section>
 <h2 id="observability">Read logs, traces and metrics in Grafana</h2>
 <p>Open <a href="http://localhost:3001">http://localhost:3001</a> and sign in as <code>admin</code> with <code>GRAFANA_ADMIN_PASSWORD</code> from <code>.env</code>. Three data sources are pre-configured: Prometheus (default), Loki, Tempo. The queries below were run against the live stack (through Grafana's data-source proxy) and returned data.</p>

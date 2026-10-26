@@ -60,7 +60,7 @@
 <div class="table-wrap"><table><thead><tr><th>Layer</th><th>Limit</th><th>What the client sees</th></tr></thead><tbody>
 <tr><td>Gateway, <strong>POST</strong> on <code>/kratos/self-service/*</code> (every submit: registration, login, settings)</td><td><strong>10 per 60 s per client IP</strong> (Redis counter, route <code>kratos-self-service-submit</code>)</td><td><code>429</code> with an <strong>HTML</strong> body (see below), headers <code>X-RateLimit-Limit: 10</code> and <code>X-RateLimit-Remaining</code>. Wait for the next minute, then retry the same flow.</td></tr>
 <tr><td>Gateway, everything else under <code>/kratos/*</code> (create flow, whoami, sessions, logout)</td><td>120 per 60 s per client IP</td><td>same <code>429</code> HTML page</td></tr>
-<tr><td>Notification service, per <strong>recipient</strong></td><td>SMS: 5 per hour and 10 per day per number. Email: 10 per hour and 20 per day per address</td><td><strong>Nothing</strong>: Kratos still answers "code sent" but no message is delivered and the user simply never receives a code. Show a "did not get a code? try again in a while" hint and a resend button that is throttled by your app (not more than once a minute).</td></tr>
+<tr><td>Notification service, per <strong>recipient</strong></td><td>SMS: 5 per hour and 10 per day per number. Email: 10 per hour and 20 per day per address</td><td>Kratos still answers "code sent" but the message is dropped and the user never receives a code (the courier cannot tell Kratos). <strong>Ask first:</strong> call the pre-flight check below before every "send me a code"; it answers <code>429</code> with the time to wait once the address is over its limit. Also show a "did not get a code? try again in a while" hint and throttle resend in your app (not more than once a minute).</td></tr>
 <tr><td>Kratos code</td><td>6 digits, valid 5 minutes, single use</td><td>wrong, expired or used code: <code>400</code> with message <code>4010008</code> (login) or <code>4040003</code> (registration)</td></tr>
 <tr><td>Kratos flow</td><td>valid 10 minutes from creation</td><td>after that the flow answers <code>410</code>; start a new flow</td></tr>
 </tbody></table></div>
@@ -78,6 +78,25 @@ Content-Type: text/html
 &lt;hr&gt;&lt;center&gt;openresty&lt;/center&gt;
 &lt;p&gt;&lt;em&gt;Powered by &lt;a href="https://apisix.apache.org/"&gt;APISIX&lt;/a&gt;.&lt;/em&gt;&lt;/p&gt;&lt;/body&gt;
 &lt;/html&gt;</code></pre>
+<h2 id="code-check">Pre-flight check: may I ask for a code?</h2>
+<p>Because the per-recipient limit drops codes silently (Kratos cannot be told), a sign-in screen that says "we sent a code" can be lying. Since 2026-10-26 there is a public check to call <strong>before</strong> the send-code step:</p>
+<pre><code>curl -s -X POST "$GATEWAY/public/v1/login-codes/check" -H "Content-Type: application/json" -d '{"identifier": "+251911900169"}'</code></pre>
+<pre class="out"><code>HTTP/1.1 200 OK
+
+{"allowed":true,"limitPerHour":5,"limitPerDay":10,"remainingThisHour":4,"remainingToday":9}</code></pre>
+<p>When the address has used up its allowance (the sixth request for a phone in the example), the answer is a JSON <code>429</code> with the time to wait, also in the <code>Retry-After</code> header (seconds). Do not start the Kratos flow then; show "Too many codes were requested for this address, try again in N minutes":</p>
+<pre class="out"><code>HTTP/1.1 429 Too Many Requests
+Retry-After: 3600
+
+{"error":"too_many_codes","allowed":false,"retryAfterSeconds":3600,"limitPerHour":5,"limitPerDay":10,"remainingThisHour":0,"remainingToday":5}</code></pre>
+<ul>
+<li><strong>It does not reveal whether an account exists.</strong> Every request for an address is counted, registered or not, and the answer has the same shape; an unknown address gets exactly the same numbers as a known one. (Kratos' own "account does not exist" message at login is a separate, known leak.)</li>
+<li><strong>Each call uses one request of the allowance.</strong> Call it once per "send me a code" press, not on every keystroke. Same limits as the real ones (SMS 5/hour and 10/day, email 10/hour and 20/day; the response carries the numbers, so show them instead of hard-coding).</li>
+<li><strong>Write the identifier the way the user signs in:</strong> a phone as <code>+251...</code> (spaces and dashes are ignored), an email in any letter case. Anything else is <code>400 validation_failed</code> with <code>fields.identifier</code>.</li>
+<li><strong>Advisory, not a lock.</strong> A client that calls Kratos directly skips it, and the notification service still drops the code silently. If the check itself cannot be answered (network, <code>5xx</code>), carry on and keep the "wait and retry" hint.</li>
+<li>The gateway limits the check to 10 calls per minute per IP (HTML <code>429</code>, as on the Kratos submit route).</li>
+<li>Recommended wording after a successful request: "If this address is registered, we sent a code. It is valid for 5 minutes. If nothing arrives within a minute, wait a little and request a new one (at most N per hour)." The backoffice login page does exactly this.</li>
+</ul>
 <h2 id="identifiers">Identifiers: phone and email</h2>
 <div class="table-wrap"><table><thead><tr><th>Identifier</th><th>Field in registration</th><th>Field in login</th><th>Rules</th></tr></thead><tbody>
 <tr><td>Phone</td><td><code>traits.phone_number</code></td><td><code>identifier</code></td><td>International E.164 format with the country code, e.g. <code>+2519XXXXXXXX</code>. National format such as <code>0911223344</code> is refused (<code>4000041</code> "Enter a valid phone number"). Kratos normalises spaces: <code>+251 91 122 3344</code> was accepted. The code is sent by SMS.</td></tr>

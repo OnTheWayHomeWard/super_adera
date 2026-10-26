@@ -6,6 +6,7 @@ import { consumeLoginNotice, type LoginNotice } from "../auth/notice";
 import { CopyButton } from "../components/common";
 import { getConfig } from "../lib/config";
 import { KratosError, kratos, kratosErrorText, otpauthUri } from "../lib/kratos";
+import { checkCodeAllowance, refusedText, sentText, type CodeAllowance } from "../lib/loginCodes";
 import { clearSession, getSession, saveSession } from "../lib/session";
 
 type Step = "email" | "code" | "enrol" | "totp" | "finishing";
@@ -32,6 +33,7 @@ export function LoginPage() {
   const [enrolment, setEnrolment] = useState<Enrolment | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [allowance, setAllowance] = useState<CodeAllowance | null>(null);
   const [notice] = useState<LoginNotice | null>(() => consumeLoginNotice());
   const config = getConfig();
 
@@ -113,6 +115,14 @@ export function LoginPage() {
   const sendCode = (values: { email: string }) =>
     run(async () => {
       const address = values.email.trim().toLowerCase();
+      // Ask first: the server drops codes beyond its per-address limit without telling Kratos, so without this the screen would
+      // say "we sent a code" for a code that never goes out. (If the check cannot be answered, sign-in simply goes on.)
+      const allowed = await checkCodeAllowance(address);
+      if (allowed && !allowed.allowed) {
+        setError(refusedText(allowed));
+        return;
+      }
+      setAllowance(allowed);
       const id = await kratos.startLogin();
       await kratos.sendCode(id, address);
       setEmail(address);
@@ -200,9 +210,7 @@ export function LoginPage() {
 
         {step === "code" && (
           <Form layout="vertical" onFinish={submitCode} requiredMark={false}>
-            <Typography.Paragraph>
-              We sent a 6-digit code to <strong>{email}</strong>. It is valid for 5 minutes.
-            </Typography.Paragraph>
+            <Typography.Paragraph>{sentText(email, allowance)}</Typography.Paragraph>
             {config.devHints && (
               <Alert
                 style={{ marginBottom: 12 }}

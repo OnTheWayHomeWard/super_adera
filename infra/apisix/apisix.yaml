@@ -89,6 +89,26 @@ routes:
         redis_password: ${{APISIX_REDIS_PASSWORD}}
     upstream_id: kratos-public
 
+  # Pre-flight for sign-in screens: "may I ask for a code for this address?" (see notification-service LoginCodeGate). Public,
+  # same strict per-IP limit as the submit route above. It answers the same way for every address, registered or not.
+  - id: login-code-check
+    uri: /public/v1/login-codes/check
+    methods: [POST]
+    priority: 20
+    plugins:
+      limit-count:
+        count: 10
+        time_window: 60
+        key_type: var
+        key: remote_addr
+        rejected_code: 429
+        policy: redis
+        redis_host: redis
+        redis_port: 6379
+        redis_username: apisix
+        redis_password: ${{APISIX_REDIS_PASSWORD}}
+    upstream_id: notification-service
+
   # Everything else on the public Kratos API (flow creation, whoami, logout, sessions): looser limit.
   - id: kratos-public
     uri: /kratos/*
