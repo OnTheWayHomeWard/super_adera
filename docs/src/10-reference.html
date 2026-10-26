@@ -101,7 +101,7 @@
 <tr><td><code>ADERA_ENV</code></td><td><code>dev</code></td><td>no</td><td>no</td><td>The one environment this deployment is (dev or prod); another value stops the service starting</td><td>.env via compose (<code>${ADERA_ENV:-dev}</code>), see <code>.env.example</code></td></tr>
 <tr><td><code>ADMIN_REQUIRE_AAL2</code></td><td><code>true</code></td><td>no</td><td>no</td><td>Require the authenticator-app step for staff</td><td>not in .env; compose default <code>true</code></td></tr>
 <tr><td><code>STORAGE_PUBLIC_ENDPOINT</code></td><td><code>http://127.0.0.1:9000</code></td><td>no</td><td>no</td><td>Host used in signed image links (user-service and registry-service)</td><td>not in .env; compose default</td></tr>
-<tr><td><code>FIREBASE_SERVICE_ACCOUNT_B64</code></td><td>empty</td><td>only for real push</td><td>yes</td><td>Listed in <code>.env</code>/<code>.env.example</code>, but docker-compose does <em>not</em> pass it to notification-service; the service reads it from Infisical <code>/notification</code> (not present there yet)</td><td>Infisical (planned); .env placeholder unused</td></tr>
+<tr><td><code>FIREBASE_SERVICE_ACCOUNT_B64</code></td><td>empty</td><td>only for real push</td><td>yes</td><td>Not passed by docker-compose on purpose: notification-service reads it from Infisical <code>/notification</code> at startup (not present there yet). The placeholder was removed from <code>.env.example</code> on 2026-10-26 (an old empty line in <code>.env</code> may remain; it is unused)</td><td>Infisical (planned)</td></tr>
 </tbody></table></div>
 
 <h3 id="env-notification">notification-service</h3>
