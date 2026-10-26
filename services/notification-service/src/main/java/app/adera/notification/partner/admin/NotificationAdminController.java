@@ -41,6 +41,10 @@ public class NotificationAdminController {
 		Map<String, String> errors = new java.util.LinkedHashMap<>();
 		java.sql.Timestamp fromAt = instant(from, "from", errors);
 		java.sql.Timestamp toAt = instant(to, "to", errors);
+		oneOf(status, "status", STATUSES, errors);
+		oneOf(channel, "channel", CHANNELS, errors);
+		oneOf(environment, "environment", ENVIRONMENTS, errors);
+		oneOf(kind, "kind", KINDS, errors);
 		if (!errors.isEmpty()) {
 			throw ApiException.validation(errors);
 		}
@@ -93,6 +97,19 @@ public class NotificationAdminController {
 				+ (last24h ? " AND created_at >= now() - interval '24 hours'" : "") + " GROUP BY " + column)
 			.param("a", app).query().listOfRows().forEach(r -> out.put((String) r.get("k"), ((Number) r.get("n")).longValue()));
 		return out;
+	}
+
+	private static final java.util.Set<String> STATUSES = java.util.Set.of("QUEUED", "PROCESSING", "RETRYING", "SENT", "FAILED", "UNREACHABLE", "SUPPRESSED", "EXPIRED");
+	private static final java.util.Set<String> CHANNELS = java.util.Set.of("SMS", "EMAIL", "IN_APP");
+	private static final java.util.Set<String> ENVIRONMENTS = java.util.Set.of("DEV", "PROD");
+	private static final java.util.Set<String> KINDS = java.util.Set.of("DIRECT", "IN_APP");
+
+	/** A filter value that is not one of the known ones is a mistake, not "no matches" (same rule on every list). */
+	private static void oneOf(String raw, String field, java.util.Set<String> allowed, Map<String, String> errors) {
+		String v = upper(raw);
+		if (v != null && !allowed.contains(v)) {
+			errors.put(field, "must be one of " + String.join(", ", new java.util.TreeSet<>(allowed)));
+		}
 	}
 
 	private static String upper(String s) {

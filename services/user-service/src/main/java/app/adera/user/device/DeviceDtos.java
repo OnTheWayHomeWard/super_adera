@@ -26,6 +26,13 @@ public final class DeviceDtos {
 	/** Identify the device to remove by its token or its installation id (at least one). */
 	public record RemoveRequest(@Size(max = 4096) String fcmToken, @Size(max = 64) String installationId) {
 
+		/** The body's values win; the query parameters fill in what the body did not say. Either may be null. */
+		public static RemoveRequest merge(RemoveRequest body, String queryToken, String queryInstallationId) {
+			String token = body != null && body.fcmToken() != null && !body.fcmToken().isBlank() ? body.fcmToken() : queryToken;
+			String installation = body != null && body.installationId() != null && !body.installationId().isBlank() ? body.installationId() : queryInstallationId;
+			return new RemoveRequest(token, installation);
+		}
+
 		public boolean isEmpty() {
 			return (fcmToken == null || fcmToken.isBlank()) && (installationId == null || installationId.isBlank());
 		}

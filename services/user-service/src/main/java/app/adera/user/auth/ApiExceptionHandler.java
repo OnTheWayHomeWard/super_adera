@@ -43,8 +43,21 @@ public class ApiExceptionHandler {
 		return body(HttpStatus.BAD_REQUEST, "validation_failed", fields);
 	}
 
+	/**
+	 * A value of the wrong kind in an otherwise valid JSON body (for example an unknown enum value like platform "SYMBIAN")
+	 * is a validation problem of that field and lists what is allowed; only JSON that cannot be parsed is invalid_json.
+	 */
 	@ExceptionHandler(HttpMessageNotReadableException.class)
 	ResponseEntity<Map<String, Object>> unreadable(HttpMessageNotReadableException e) {
+		Throwable cause = e.getCause();
+		if (cause instanceof tools.jackson.databind.exc.InvalidFormatException format && format.getTargetType() != null
+				&& format.getTargetType().isEnum() && !format.getPath().isEmpty()) {
+			String field = format.getPath().get(format.getPath().size() - 1).getPropertyName();
+			if (field != null) {
+				String allowed = java.util.Arrays.stream(format.getTargetType().getEnumConstants()).map(Object::toString).collect(java.util.stream.Collectors.joining(", "));
+				return body(HttpStatus.BAD_REQUEST, "validation_failed", Map.of(field, "must be one of " + allowed));
+			}
+		}
 		return body(HttpStatus.BAD_REQUEST, "invalid_json", null);
 	}
 

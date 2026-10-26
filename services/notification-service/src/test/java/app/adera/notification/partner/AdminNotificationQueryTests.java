@@ -95,4 +95,14 @@ class AdminNotificationQueryTests {
 			.andExpect(jsonPath("$.last24h.total").value(0));
 	}
 
+	@Test
+	void anUnknownFilterValueIsRefusedInsteadOfAnEmptyList() throws Exception {
+		for (String param : new String[] { "status", "channel", "environment", "kind" }) {
+			mvc.perform(staff(get("/admin/api/v1/notification/notifications")).param(param, "bogus")).andExpect(status().isBadRequest())
+				.andExpect(jsonPath("$.error").value("validation_failed")).andExpect(jsonPath("$.fields." + param).exists());
+		}
+		mvc.perform(staff(get("/admin/api/v1/notification/notifications")).param("status", "sent").param("channel", "sms").param("environment", "dev").param("kind", "direct"))
+			.andExpect(status().isOk());
+	}
+
 }

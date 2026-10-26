@@ -401,7 +401,10 @@ class UserApiTests {
 		mvc.perform(as(put("/api/v1/me/devices"), id).contentType(MediaType.APPLICATION_JSON).content("{\"fcmToken\":\"\",\"platform\":\"ANDROID\"}"))
 			.andExpect(status().isBadRequest());
 		mvc.perform(as(put("/api/v1/me/devices"), id).contentType(MediaType.APPLICATION_JSON).content("{\"fcmToken\":\"t\",\"platform\":\"SYMBIAN\"}"))
-			.andExpect(status().isBadRequest());
+			.andExpect(status().isBadRequest()).andExpect(jsonPath("$.error").value("validation_failed"))
+			.andExpect(jsonPath("$.fields.platform").value("must be one of ANDROID, IOS, WEB"));
+		mvc.perform(as(put("/api/v1/me/devices"), id).contentType(MediaType.APPLICATION_JSON).content("{not json"))
+			.andExpect(status().isBadRequest()).andExpect(jsonPath("$.error").value("invalid_json"));
 
 		String token = "del-" + UUID.randomUUID();
 		mvc.perform(as(put("/api/v1/me/devices"), id).contentType(MediaType.APPLICATION_JSON).content(device(token, "inst-D"))).andExpect(status().isOk());
@@ -411,6 +414,28 @@ class UserApiTests {
 			.andExpect(jsonPath("$.removed").value(0));
 		mvc.perform(as(delete("/api/v1/me/devices"), id).contentType(MediaType.APPLICATION_JSON).content("{}"))
 			.andExpect(status().isBadRequest());
+	}
+
+	@Test
+	void aDeviceCanBeRemovedWithoutABodyByQueryParameter() throws Exception {
+		UUID id = newUser();
+		kratosKnows(id, "dq-" + id + "@example.com", null);
+		String token = "q-" + UUID.randomUUID();
+		mvc.perform(as(put("/api/v1/me/devices"), id).contentType(MediaType.APPLICATION_JSON).content(device(token, "inst-Q"))).andExpect(status().isOk());
+		mvc.perform(as(delete("/api/v1/me/devices"), id).param("installationId", "inst-Q")).andExpect(status().isOk()).andExpect(jsonPath("$.removed").value(1));
+		assertThat(devices.findByFcmToken(token)).isEmpty();
+
+		mvc.perform(as(put("/api/v1/me/devices"), id).contentType(MediaType.APPLICATION_JSON).content(device(token, null))).andExpect(status().isOk());
+		mvc.perform(as(delete("/api/v1/me/devices"), id).param("fcmToken", token)).andExpect(jsonPath("$.removed").value(1));
+		mvc.perform(as(delete("/api/v1/me/devices"), id).param("fcmToken", token)).andExpect(jsonPath("$.removed").value(0));
+
+		// the body still works, and a body value wins over the query
+		mvc.perform(as(put("/api/v1/me/devices"), id).contentType(MediaType.APPLICATION_JSON).content(device(token, null))).andExpect(status().isOk());
+		mvc.perform(as(delete("/api/v1/me/devices"), id).param("fcmToken", "someone-elses-token").contentType(MediaType.APPLICATION_JSON).content("{\"fcmToken\":\"" + token + "\"}"))
+			.andExpect(jsonPath("$.removed").value(1));
+
+		// nothing to identify the device by: a validation error that names both ways
+		mvc.perform(as(delete("/api/v1/me/devices"), id)).andExpect(status().isBadRequest()).andExpect(jsonPath("$.error").value("validation_failed"));
 	}
 
 	@Test

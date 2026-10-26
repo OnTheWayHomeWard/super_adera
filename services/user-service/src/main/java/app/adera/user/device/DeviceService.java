@@ -73,7 +73,7 @@ public class DeviceService {
 	@Transactional
 	public long remove(UUID userId, DeviceDtos.RemoveRequest request) {
 		if (request == null || request.isEmpty()) {
-			throw new ValidationFailedException("fcmToken", "give fcmToken or installationId");
+			throw new ValidationFailedException("fcmToken", "give installationId or fcmToken (query string or JSON body)");
 		}
 		long removed = 0;
 		if (request.fcmToken() != null && !request.fcmToken().isBlank()) {

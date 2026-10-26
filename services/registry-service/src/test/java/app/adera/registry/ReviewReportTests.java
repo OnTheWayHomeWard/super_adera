@@ -257,4 +257,15 @@ class ReviewReportTests {
 		mvc.perform(as(get("/admin/api/v1/audit").param("targetType", "staff").param("limit", "5"), Role.ADMIN)).andExpect(status().isOk());
 	}
 
+	@Test
+	void anUnknownStatusFilterIsRefusedOnTheReportListLikeOnReviewsAndApps() throws Exception {
+		mvc.perform(as(get("/admin/api/v1/reports").param("status", "bogus"), Role.VIEWER)).andExpect(status().isBadRequest())
+			.andExpect(jsonPath("$.error").value("validation_failed")).andExpect(jsonPath("$.fields.status").value("must be OPEN, REVIEWED or DISMISSED"));
+		mvc.perform(as(get("/admin/api/v1/reviews").param("status", "bogus"), Role.VIEWER)).andExpect(status().isBadRequest()).andExpect(jsonPath("$.fields.status").exists());
+		mvc.perform(as(get("/admin/api/v1/apps").param("status", "bogus"), Role.VIEWER)).andExpect(status().isBadRequest()).andExpect(jsonPath("$.fields.status").exists());
+		for (String ok : new String[] { "open", "REVIEWED", "dismissed", "" }) {
+			mvc.perform(as(get("/admin/api/v1/reports").param("status", ok), Role.VIEWER)).andExpect(status().isOk());
+		}
+	}
+
 }
