@@ -1,13 +1,16 @@
 import { Alert, Card, Descriptions, Spin, Table, Typography } from "antd";
 import { Link, useParams } from "react-router";
 import { ErrorAlert, Mono, PageHeading, StatusTag, Time } from "../../components/common";
+import { appLabel } from "../../lib/format";
 import { useApiQuery } from "../../lib/hooks";
 import { explainNotification } from "../../lib/notificationHelp";
-import type { NotificationDetail } from "../../lib/types";
+import type { AppView, NotificationDetail } from "../../lib/types";
 
 export function NotificationShowPage() {
   const { id = "" } = useParams();
   const q = useApiQuery<NotificationDetail>(["notification", id], `notification/notifications/${id}`);
+  // the same list the Notifications page loads (shared cache), so the app shows by name instead of a bare id
+  const apps = useApiQuery<AppView[]>(["apps"], "apps");
   if (q.isLoading) return <Spin />;
   if (q.error || !q.data) return <div><ErrorAlert error={q.error} title="Could not load the notification" /><Link to="/notifications">Back</Link></div>;
   const n = q.data;
@@ -25,7 +28,7 @@ export function NotificationShowPage() {
       />
       <Card size="small" title="Request">
         <Descriptions size="small" bordered column={{ xs: 1, md: 2 }}>
-          <Descriptions.Item label="App"><Link to={`/apps/${n.appId}?tab=log`}>{n.appId}</Link></Descriptions.Item>
+          <Descriptions.Item label="App"><Link to={`/apps/${n.appId}?tab=log`}>{appLabel(apps.data?.find((a) => a.id === n.appId), n.appId)}</Link></Descriptions.Item>
           <Descriptions.Item label="Partner's external id">{n.externalId}</Descriptions.Item>
           <Descriptions.Item label="Environment">{n.environment}</Descriptions.Item>
           <Descriptions.Item label="Kind / channel">{n.kind} / {n.channel}</Descriptions.Item>

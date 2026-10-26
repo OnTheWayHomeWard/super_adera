@@ -47,3 +47,11 @@ export function download(filename: string, text: string, type = "application/x-p
 export function splitList(text: string | undefined | null): string[] {
   return (text ?? "").split(/[\n,]/).map((s) => s.trim()).filter(Boolean);
 }
+
+/** "Adera Fix (adera-fix)" for an app, so a screen shows what the app is called instead of a bare UUID. */
+export function appLabel(app: { name?: Partial<Record<string, string>> | null; slug?: string | null } | undefined, fallbackId: string): string {
+  if (!app) return fallbackId;
+  const name = i18nText(app.name);
+  if (name && app.slug && name !== app.slug) return `${name} (${app.slug})`;
+  return name || app.slug || fallbackId;
+}
