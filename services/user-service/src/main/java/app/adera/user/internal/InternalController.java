@@ -11,6 +11,7 @@ import app.adera.user.profile.AppUser;
 import app.adera.user.profile.NotFoundException;
 import app.adera.user.profile.ProfileService;
 import app.adera.user.profile.UserRepository;
+import app.adera.user.registry.RegistryAppClient;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
@@ -44,9 +45,11 @@ public class InternalController {
 	private final ProfileService profiles;
 	private final UserRepository users;
 	private final DeviceRepository devices;
+	private final RegistryAppClient registry;
 
 	public InternalController(AliasService aliases, PreferenceService preferences, ProfileService profiles, UserRepository users,
-			DeviceRepository devices) {
+			DeviceRepository devices, RegistryAppClient registry) {
+		this.registry = registry;
 		this.aliases = aliases;
 		this.preferences = preferences;
 		this.profiles = profiles;
@@ -57,6 +60,8 @@ public class InternalController {
 	/** Gives a user their pseudonymous id for an app (creating nothing new if it exists). Used when a user opens an app. */
 	@PostMapping("/aliases")
 	public java.util.Map<String, String> mint(@Valid @RequestBody MintRequest request) {
+		// any status counts (partners integrate against DEV before an app is LIVE), but the app must exist
+		registry.status(request.appId()).orElseThrow(() -> new NotFoundException("mini app"));
 		profiles.getOrCreate(request.userId());
 		return java.util.Map.of("alias", aliases.mint(request.appId(), request.userId()));
 	}

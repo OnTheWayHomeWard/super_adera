@@ -443,7 +443,7 @@ X-Adera-Signature: nWjePDcUU2k2Htyn0OQn0xpy... (base64 RS256 signature)
   "createdAt": "2026-10-25T06:07:26.409313Z",
   "expiresAt": "2026-10-25T07:07:26.356333Z",
   "completedAt": "2026-10-25T06:07:26.409313Z"
-}</code></pre><p>Unmute with <code>{"muteSms":false}</code>. Note: the app id is not checked against the registry, so any UUID returns defaults.</p></section>
+}</code></pre><p>Unmute with <code>{"muteSms":false}</code>. The app id is checked against the registry: an unknown or non-LIVE app is <code>404 not_found</code> (<code>503 service_unavailable</code> if the registry is down).</p></section>
 <section><h2 id="revoke-key">8. Revoke a key</h2><p>Do this first when a partner key may have leaked, then rotate: register a new key, let the partner switch, revoke the old one.</p>
 <pre><code>adm $BASE/admin/api/v1/apps/$APP/keys | jq '.[] | {keyId, environment, status, label}'   # find the key id
 adm -X DELETE $BASE/admin/api/v1/apps/$APP/keys/$KEY_ID | jq '{keyId, status, revokedAt}'</code></pre>

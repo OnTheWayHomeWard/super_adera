@@ -90,6 +90,14 @@ public class InternalController {
 		return new AppContext(appId, app.getSlug(), app.getStatus().name(), env.name(), usable, deny, granted, config.limits(appId), cidrs);
 	}
 
+	/** Does this app exist, and in which status? (user-service checks ids it is given: 404 for an unknown app.) */
+	@GetMapping("/apps/{appId}")
+	@Transactional(readOnly = true)
+	public Map<String, Object> app(@PathVariable UUID appId) {
+		MiniApp app = apps.findById(appId).orElseThrow(() -> new Errors.NotFound("mini app"));
+		return Map.of("appId", app.getId(), "slug", app.getSlug(), "status", app.getStatus().name());
+	}
+
 	/** How other services (user-service) write to the central audit log. Not routed by the gateway. */
 	@PostMapping("/audit")
 	@ResponseStatus(HttpStatus.CREATED)

@@ -212,7 +212,7 @@ Content-Type: application/json;charset=ISO-8859-1
 {
   "error": "unauthorized"
 }</code></pre>
-<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th>Error code</th><th>When it happens</th></tr></thead><tbody><tr><td><strong>401</strong></td><td><code>unauthorized</code></td><td>The required secret header is missing or wrong (body <code>{"error":"unauthorized"}</code>).</td></tr><tr><td><strong>400</strong></td><td><code>validation_failed</code></td><td>A required field is missing (<code>must not be null</code>).</td></tr><tr><td><strong>404</strong></td><td><code>not_found</code></td><td>The user id is not a Kratos identity, so no profile can be created (from code, not captured).</td></tr><tr><td><strong>500</strong></td><td><code>-</code></td><td><code>ALIAS_HMAC_SECRET</code> empty: the service refuses to start, so this cannot happen at runtime.</td></tr></tbody></table></div>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th>Error code</th><th>When it happens</th></tr></thead><tbody><tr><td><strong>404</strong></td><td><code>not_found</code></td><td>The app id is not a known mini app (checked with registry-service; any status counts).</td></tr><tr><td><strong>503</strong></td><td><code>service_unavailable</code></td><td>registry-service could not be reached for that check.</td></tr><tr><td><strong>401</strong></td><td><code>unauthorized</code></td><td>The required secret header is missing or wrong (body <code>{"error":"unauthorized"}</code>).</td></tr><tr><td><strong>400</strong></td><td><code>validation_failed</code></td><td>A required field is missing (<code>must not be null</code>).</td></tr><tr><td><strong>404</strong></td><td><code>not_found</code></td><td>The user id is not a Kratos identity, so no profile can be created (from code, not captured).</td></tr><tr><td><strong>500</strong></td><td><code>-</code></td><td><code>ALIAS_HMAC_SECRET</code> empty: the service refuses to start, so this cannot happen at runtime.</td></tr></tbody></table></div>
 <h4>How to use it</h4><ul><li>The alias minted here is the <code>userId</code> a partner puts into <code>POST /v1/notifications</code> (<a href="08c-partner-api.html">8c</a>).</li><li>Opening a mini app is where this gets called in the finished product; until the frontend bridge exists, staff/test scripts mint aliases by calling this endpoint directly.</li></ul>
 </div></details>
 <details class="endpoint" id="ep-int-get-alias-resolve">
@@ -447,6 +447,17 @@ Content-Type: text/plain; charset=utf-8
   "error_msg": "404 Route Not Found"
 }</code></pre>
 <h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th>Error code</th><th>When it happens</th></tr></thead><tbody><tr><td><strong>401</strong></td><td><code>unauthorized</code></td><td>The required secret header is missing or wrong (body <code>{"error":"unauthorized"}</code>).</td></tr><tr><td><strong>404</strong></td><td><code>not_found</code></td><td>No such key id (notification-service answers <code>401 unknown_key</code> to the partner).</td></tr></tbody></table></div>
+</div></details>
+<details class="endpoint" id="ep-int-get-app">
+<summary><span class="method m-get">GET</span><span class="path">/internal/apps/{appId}</span><span class="sum">Does this mini app exist, and in which status?</span></summary>
+<div class="body"><dl class="meta">
+<dt>Audience</dt><dd>user-service (mute preferences and alias minting check the app id against it); never end users or partners</dd>
+<dt>Client path</dt><dd><strong>none</strong>: not routed by the gateway</dd>
+<dt>Internal path</dt><dd><code>http://registry-service:8080/internal/apps/{appId}</code></dd>
+<dt>Auth</dt><dd>internal secret header, like the other internal endpoints</dd>
+<dt>Implemented in</dt><dd><code>services/registry-service/src/main/java/app/adera/registry/internal/InternalController.java#app</code></dd>
+</dl>
+<h4>Purpose</h4><p>Cheap existence check. Answers 200 <code>{"appId": "...", "slug": "...", "status": "LIVE"}</code> (status DRAFT, LIVE, PAUSED or KILLED) or 404 <code>{"error":"not_found"}</code>. user-service remembers a known app for 60 seconds and never remembers a 404; if this call fails it answers its own caller with 503 <code>service_unavailable</code>.</p>
 </div></details>
 <details class="endpoint" id="ep-int-get-app-context">
 <summary><span class="method m-get">GET</span><span class="path">/internal/apps/{appId}/context</span><span class="sum">What may this app do in this deployment's environment?</span></summary>

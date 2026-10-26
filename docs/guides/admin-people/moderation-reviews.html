@@ -78,7 +78,7 @@ X-Total-Count: 18
     "status": "VISIBLE",
     "updatedAt": "2026-10-26T10:56:44.614665Z"
   }
-]</code></pre><p>No <code>appSlug</code> and no <code>X-Total-Count</code> here (the answer is the review records themselves). An unknown app id gives <code>200 []</code>, not 404. Prefer <code>/reviews?appId=</code> when you need totals.</p>
+]</code></pre><p>No <code>appSlug</code> and no <code>X-Total-Count</code> here (the answer is the review records themselves). An unknown app id gives <code>404 not_found</code> (since 2026-10-26; it used to answer <code>200 []</code>); the cross-app list with <code>?appId=</code> still answers <code>200 []</code> for an id that matches nothing. Prefer <code>/reviews?appId=</code> when you need totals.</p>
 </div></details>
 </section>
 <section><h2 id="moderate">Hide or restore a review</h2>

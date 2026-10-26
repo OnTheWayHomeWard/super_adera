@@ -1,6 +1,7 @@
 package app.adera.user;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -12,8 +13,11 @@ import java.util.Optional;
 import java.util.Random;
 import java.util.UUID;
 
+import app.adera.user.admin.ApiException;
 import app.adera.user.auth.KratosClient;
+import app.adera.user.registry.RegistryAppClient;
 import com.jayway.jsonpath.JsonPath;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -40,6 +44,21 @@ class InternalApiTests {
 
 	@MockitoBean
 	KratosClient kratos;
+
+	@MockitoBean
+	RegistryAppClient registryApps;
+
+	/** Every app id is a LIVE app in registry-service, except the ones a test registers below. */
+	private static final UUID UNKNOWN_APP = UUID.randomUUID();
+	private static final UUID PAUSED_APP = UUID.randomUUID();
+
+	@BeforeEach
+	void registryKnowsEveryApp() {
+		when(registryApps.status(any())).thenAnswer(inv -> {
+			UUID id = inv.getArgument(0);
+			return id.equals(UNKNOWN_APP) ? Optional.empty() : Optional.of(id.equals(PAUSED_APP) ? "PAUSED" : "LIVE");
+		});
+	}
 
 	private static <T extends AbstractMockHttpServletRequestBuilder<T>> T internal(T request) {
 		return request.header("X-Internal-Secret", "int-secret");
@@ -191,6 +210,38 @@ class InternalApiTests {
 		mvc.perform(get("/internal/users/{id}/delivery-context", user).param("appId", app.toString()).header("X-Internal-Secret", "wrong")).andExpect(status().isUnauthorized());
 		// the gateway secret is a different key and must not open the internal door
 		mvc.perform(get("/internal/users/{id}/delivery-context", user).param("appId", app.toString()).header("X-Gateway-Secret", "int-secret")).andExpect(status().isUnauthorized());
+	}
+
+	// ---------- the app must exist ----------
+
+	@Test
+	void mutePreferencesNeedALiveApp() throws Exception {
+		UUID user = newUser();
+		for (UUID app : new UUID[] { UNKNOWN_APP, PAUSED_APP }) {
+			mvc.perform(asUser(get("/api/v1/me/apps/{a}/preferences", app), user)).andExpect(status().isNotFound()).andExpect(jsonPath("$.error").value("not_found"));
+			mvc.perform(asUser(put("/api/v1/me/apps/{a}/preferences", app), user).contentType(MediaType.APPLICATION_JSON).content("{\"muteSms\":true}"))
+				.andExpect(status().isNotFound()).andExpect(jsonPath("$.error").value("not_found"));
+			assertThat(jdbc.sql("SELECT count(*) FROM app_notification_preference WHERE app_id = :a").param("a", app).query(Long.class).single()).as("no row for an unusable app").isZero();
+		}
+		mvc.perform(asUser(put("/api/v1/me/apps/{a}/preferences", UUID.randomUUID()), user).contentType(MediaType.APPLICATION_JSON).content("{\"muteSms\":true}")).andExpect(status().isOk());
+	}
+
+	@Test
+	void aliasesNeedAnExistingAppOfAnyStatus() throws Exception {
+		UUID user = newUser();
+		mvc.perform(internal(post("/internal/aliases")).contentType(MediaType.APPLICATION_JSON).content("{\"appId\":\"" + UNKNOWN_APP + "\",\"userId\":\"" + user + "\"}"))
+			.andExpect(status().isNotFound()).andExpect(jsonPath("$.error").value("not_found"));
+		assertThat(jdbc.sql("SELECT count(*) FROM app_user_alias WHERE app_id = :a").param("a", UNKNOWN_APP).query(Long.class).single()).isZero();
+		assertThat(mint(PAUSED_APP, user)).as("DEV integration works before an app is LIVE").startsWith("u_p_");
+	}
+
+	@Test
+	void anUnreachableRegistryIsServiceUnavailable() throws Exception {
+		UUID user = newUser();
+		org.mockito.Mockito.doThrow(new ApiException(503, "service_unavailable")).when(registryApps).status(any());
+		mvc.perform(asUser(get("/api/v1/me/apps/{a}/preferences", UUID.randomUUID()), user)).andExpect(status().isServiceUnavailable()).andExpect(jsonPath("$.error").value("service_unavailable"));
+		mvc.perform(internal(post("/internal/aliases")).contentType(MediaType.APPLICATION_JSON).content("{\"appId\":\"" + UUID.randomUUID() + "\",\"userId\":\"" + user + "\"}"))
+			.andExpect(status().isServiceUnavailable()).andExpect(jsonPath("$.error").value("service_unavailable"));
 	}
 
 }

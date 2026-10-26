@@ -99,6 +99,7 @@ public class ReviewService {
 
 	@Transactional(readOnly = true)
 	public List<AppReview> all(UUID appId, int page, int size) {
+		apps.findById(appId).orElseThrow(() -> new Errors.NotFound("mini app"));
 		return reviews.findByAppIdOrderByCreatedAtDesc(appId, PageRequest.of(Math.max(0, page), clamp(size)));
 	}
 

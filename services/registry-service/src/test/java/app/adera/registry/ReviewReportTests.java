@@ -209,4 +209,19 @@ class ReviewReportTests {
 			.andExpect(status().isBadRequest()).andExpect(jsonPath("$.fields.reason").exists());
 	}
 
+	@Test
+	void unknownAppsAre404OnTheReviewListAndTheInternalLookup() throws Exception {
+		UUID app = liveApp();
+		UUID user = UUID.randomUUID();
+		mvc.perform(asUser(get("/api/v1/apps/{id}/reviews", UUID.randomUUID()), user)).andExpect(status().isNotFound()).andExpect(jsonPath("$.error").value("not_found"));
+		mvc.perform(asUser(get("/api/v1/apps/{id}/reviews", "no-such-slug"), user)).andExpect(status().isNotFound());
+		mvc.perform(asUser(get("/api/v1/apps/{id}/reviews", app), user)).andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(0));
+
+		mvc.perform(as(get("/admin/api/v1/apps/{id}/reviews", UUID.randomUUID()), Role.VIEWER)).andExpect(status().isNotFound());
+		mvc.perform(as(get("/admin/api/v1/apps/{id}/reviews", app), Role.VIEWER)).andExpect(status().isOk());
+
+		mvc.perform(get("/internal/apps/{id}", app)).andExpect(status().isOk()).andExpect(jsonPath("$.status").value("LIVE")).andExpect(jsonPath("$.appId").value(app.toString()));
+		mvc.perform(get("/internal/apps/{id}", UUID.randomUUID())).andExpect(status().isNotFound()).andExpect(jsonPath("$.error").value("not_found"));
+	}
+
 }
