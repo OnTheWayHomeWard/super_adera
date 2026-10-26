@@ -143,4 +143,33 @@ class ReviewReportTests {
 		mvc.perform(asUser(get("/api/v1/apps/{id}/my-review", app), author)).andExpect(jsonPath("$.status").value("VISIBLE")).andExpect(jsonPath("$.message").doesNotExist());
 	}
 
+	private void setStatus(UUID app, String status) throws Exception {
+		mvc.perform(as(post("/admin/api/v1/apps/{id}/status", app), Role.ADMIN).contentType(MediaType.APPLICATION_JSON).content("{\"status\":\"" + status + "\"}"))
+			.andExpect(status().isOk());
+	}
+
+	@Test
+	void authorsCanReadAndDeleteTheirReviewOfAPausedOrKilledAppButNotEditOrBrowse() throws Exception {
+		for (String state : new String[] { "PAUSED", "KILLED" }) {
+			UUID app = liveApp();
+			UUID author = UUID.randomUUID();
+			mvc.perform(asUser(put("/api/v1/apps/{id}/my-review", app), author).contentType(MediaType.APPLICATION_JSON).content("{\"rating\":3}")).andExpect(status().isOk());
+			setStatus(app, state);
+
+			mvc.perform(asUser(get("/api/v1/apps/{id}/my-review", app), author)).andExpect(status().isOk()).andExpect(jsonPath("$.rating").value(3));
+			// still refused: editing, the public catalog, the public review list and reporting
+			mvc.perform(asUser(put("/api/v1/apps/{id}/my-review", app), author).contentType(MediaType.APPLICATION_JSON).content("{\"rating\":5}")).andExpect(status().isNotFound());
+			mvc.perform(asUser(get("/api/v1/apps/{id}", app), author)).andExpect(status().isNotFound());
+			mvc.perform(asUser(get("/api/v1/apps/{id}/reviews", app), author)).andExpect(status().isNotFound());
+			mvc.perform(asUser(post("/api/v1/apps/{id}/report", app), author).contentType(MediaType.APPLICATION_JSON).content("{\"reason\":\"SPAM\"}")).andExpect(status().isNotFound());
+
+			mvc.perform(asUser(delete("/api/v1/apps/{id}/my-review", app), author)).andExpect(status().isOk());
+			mvc.perform(asUser(get("/api/v1/apps/{id}/my-review", app), author)).andExpect(status().isNotFound());
+		}
+		// a DRAFT app was never published: still 404
+		String res = mvc.perform(as(post("/admin/api/v1/apps"), Role.ADMIN).contentType(MediaType.APPLICATION_JSON)
+			.content("{\"slug\":\"r-draft-" + UUID.randomUUID().toString().substring(0, 6) + "\",\"name\":{\"en\":\"Draft\"}}")).andReturn().getResponse().getContentAsString();
+		mvc.perform(asUser(get("/api/v1/apps/{id}/my-review", (String) JsonPath.read(res, "$.id")), UUID.randomUUID())).andExpect(status().isNotFound());
+	}
+
 }

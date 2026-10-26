@@ -78,7 +78,7 @@ public class AppPublicController {
 
 	@GetMapping("/{idOrSlug}/my-review")
 	public MyReviewView myReview(@RequestHeader("X-User-Id") UUID userId, @PathVariable String idOrSlug) {
-		return MyReviewView.of(reviews.mine(live(idOrSlug).getId(), userId));
+		return MyReviewView.of(reviews.mine(published(idOrSlug).getId(), userId));
 	}
 
 	/** Rate (1-5) and optionally comment. Sending again edits your review. */
@@ -89,7 +89,7 @@ public class AppPublicController {
 
 	@DeleteMapping("/{idOrSlug}/my-review")
 	public Map<String, String> deleteReview(@RequestHeader("X-User-Id") UUID userId, @PathVariable String idOrSlug) {
-		reviews.delete(live(idOrSlug).getId(), userId);
+		reviews.delete(published(idOrSlug).getId(), userId);
 		return Map.of("status", "deleted");
 	}
 
@@ -105,6 +105,15 @@ public class AppPublicController {
 		out.put("reason", result.report().getReason());
 		out.put("createdAt", result.report().getCreatedAt());
 		return out;
+	}
+
+	/** An app that has been published: LIVE, or PAUSED/KILLED afterwards. Authors may still read and delete their own review of it. */
+	private MiniApp published(String idOrSlug) {
+		MiniApp app = apps.getByIdOrSlug(idOrSlug);
+		if (app.getStatus() == MiniApp.Status.DRAFT) {
+			throw new Errors.NotFound("mini app");
+		}
+		return app;
 	}
 
 	private MiniApp live(String idOrSlug) {

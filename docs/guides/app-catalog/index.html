@@ -40,7 +40,7 @@
 <li><strong>Languages.</strong> Three: <code>en</code> (English), <code>am</code> (Amharic), <code>om</code> (Afaan Oromoo). Texts that staff write per language (<code>name</code>, <code>description</code>, permission <code>reason</code>) come as an object keyed by language code; <strong>languages without a text are simply absent</strong>. The user's preferred language is <code>language</code> on their profile (<code>GET /api/v1/me</code>). <a href="list-apps.html#languages">How to pick and fall back</a>.</li>
 <li><strong>Markets.</strong> <code>ET</code> (Ethiopia) and <code>US</code>. The user's market is <code>market</code> on their profile; an app lists the markets it is offered in.</li>
 <li><strong>Paging.</strong> Only the reviews list is paged (<code>page</code> from 0, <code>size</code> 1 to 100). The catalog itself is one unpaged response. There is no total count.</li>
-<li><strong>Only LIVE apps exist for users.</strong> DRAFT, PAUSED and KILLED apps behave exactly like an unknown app: <code>404 not_found</code>.</li>
+<li><strong>Only LIVE apps exist for users.</strong> DRAFT, PAUSED and KILLED apps behave exactly like an unknown app: <code>404 not_found</code> (one exception: an author can still <code>GET</code> and <code>DELETE</code> their own review of a PAUSED or KILLED app).</li>
 </ul>
 
 <h2 id="glossary">Glossary</h2>
