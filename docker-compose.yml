@@ -182,6 +182,7 @@ services:
       INTERNAL_API_SECRET: ${INTERNAL_API_SECRET}
       REGISTRY_URL: http://registry-service:8080
       USER_SERVICE_URL: http://user-service:8080
+      KRATOS_ADMIN_URL: http://kratos:4434          # password reset by phone sets the new password through Kratos' admin API
       FCM_PROVIDER: ${FCM_PROVIDER:-fake}                  # fake | firebase (needs FIREBASE_SERVICE_ACCOUNT_B64 in Infisical)
       PARTNER_ALLOW_PRIVATE_CALLBACKS: ${PARTNER_ALLOW_PRIVATE_CALLBACKS:-false}   # dev e2e only
       OTEL_TRACES_ENDPOINT: http://otel-collector:4318/v1/traces

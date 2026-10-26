@@ -17,11 +17,14 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * Tells a sign-in screen, BEFORE it starts Kratos' send-code step, whether a code for this address would be delivered.
+ * Tells a screen, BEFORE it starts a step that sends a code to an address, whether that code would be delivered. The steps: app
+ * sign-up and verification (a code to the phone/email), a sign-in that comes back "not verified yet" (a fresh code), forgot
+ * password (email: Kratos' recovery flow; phone: {@code /public/v1/password-reset/start}, which calls this gate itself) and the
+ * dashboard staff sign-in (emailed code). The path keeps its original name {@code login-codes} because the dashboard uses it.
  *
  * <p>Why it exists: the real per-recipient limits (see NotificationDispatcher) drop messages silently (the courier answers
  * 200 so Kratos does not retry), and Kratos' flow API cannot tell the client, so a screen said "we sent a code" although
- * nothing was delivered. This gate counts the REQUESTS for an address, whatever the address is, and refuses the request once
+ * nothing was delivered (and the same happens when a verification or recovery code is dropped). This gate counts the REQUESTS for an address, whatever the address is, and refuses the request once
  * the same hourly or daily limit is reached, with the time to wait. Because every address is counted the same way (an
  * unknown one exactly like a registered one), the answer reveals nothing about which accounts exist.
  *

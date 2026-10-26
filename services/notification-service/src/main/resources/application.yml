@@ -62,6 +62,8 @@ adera:
       api-key: ${RESEND_API_KEY:}
       from-email: ${RESEND_FROM_EMAIL:}
       from-name: ${RESEND_FROM_NAME:Adera}
+    kratos:
+      admin-url: ${KRATOS_ADMIN_URL:http://localhost:4434}
     mailpit:
       from-email: ${MAILPIT_FROM_EMAIL:no-reply@adera.local}
       from-name: ${MAILPIT_FROM_NAME:Adera}
