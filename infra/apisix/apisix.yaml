@@ -294,6 +294,7 @@ routes:
         headers:
           set:
             X-Gateway-Secret: ${{USER_GATEWAY_SECRET}}
+            X-Client-IP: $remote_addr
       limit-count:
         count: 300
         time_window: 60

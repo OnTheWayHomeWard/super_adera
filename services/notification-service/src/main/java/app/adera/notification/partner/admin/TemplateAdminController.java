@@ -40,9 +40,9 @@ public class TemplateAdminController {
 
 	@PostMapping
 	public TemplateView create(@RequestHeader("X-Staff-Id") UUID staffId, @RequestHeader("X-Staff-Role") StaffRole role,
-			@RequestBody Map<String, Object> body) {
+			@RequestHeader(value = "X-Client-IP", required = false) String ip, @RequestBody Map<String, Object> body) {
 		role.require(StaffRole.ADMIN);
-		return TemplateView.of(templates.create(body, staffId), clock);
+		return TemplateView.of(templates.create(body, new StaffActor(staffId, role, ip)), clock);
 	}
 
 	@GetMapping("/{id}")
@@ -53,9 +53,9 @@ public class TemplateAdminController {
 	/** Change the words, declared values, category, validity window, or switch it on/off ({"active": false}). */
 	@PatchMapping("/{id}")
 	public TemplateView update(@RequestHeader("X-Staff-Id") UUID staffId, @RequestHeader("X-Staff-Role") StaffRole role,
-			@PathVariable UUID id, @RequestBody Map<String, Object> body) {
+			@RequestHeader(value = "X-Client-IP", required = false) String ip, @PathVariable UUID id, @RequestBody Map<String, Object> body) {
 		role.require(StaffRole.ADMIN);
-		return TemplateView.of(templates.update(id, body, staffId), clock);
+		return TemplateView.of(templates.update(id, body, new StaffActor(staffId, role, ip)), clock);
 	}
 
 }

@@ -62,6 +62,7 @@ class PartnerPlatformTests {
 	@Autowired FakeFcmProvider push;
 	@MockitoBean RegistryClient registry;
 	@MockitoBean UserDirectoryClient directory;
+	@MockitoBean app.adera.notification.partner.admin.AuditClient audit;
 
 	KeyPair partnerKeys;
 	UUID appId;
@@ -197,6 +198,32 @@ class PartnerPlatformTests {
 		mvc.perform(get("/admin/api/v1/notification/templates").param("appId", appId.toString())).andExpect(status().isUnauthorized());
 		mvc.perform(post("/admin/api/v1/notification/templates").header("X-Gateway-Secret", "gw-secret").header("X-Staff-Id", UUID.randomUUID().toString())
 			.header("X-Staff-Role", "VIEWER").contentType(MediaType.APPLICATION_JSON).content("{}")).andExpect(status().isForbidden());
+	}
+
+	@Test
+	void creatingAndEditingATemplateIsAudited() throws Exception {
+		UUID staffId = UUID.randomUUID();
+		String body = "{\"appId\":\"" + appId + "\",\"code\":\"aud-" + UUID.randomUUID().toString().substring(0, 6) + "\",\"kind\":\"DIRECT\",\"category\":\"TRANSACTIONAL\","
+				+ "\"params\":[{\"name\":\"name\",\"maxLength\":30}],\"content\":{\"en\":{\"sms\":\"Hi {name}\",\"body\":\"Hi {name}\"}}}";
+		MvcResult created = mvc.perform(post("/admin/api/v1/notification/templates").header("X-Gateway-Secret", "gw-secret").header("X-Staff-Id", staffId.toString())
+			.header("X-Staff-Role", "ADMIN").header("X-Client-IP", "198.51.100.7").contentType(MediaType.APPLICATION_JSON).content(body)).andExpect(status().isOk()).andReturn();
+		String id = json.readTree(created.getResponse().getContentAsString()).get("id").asString();
+		org.mockito.Mockito.verify(audit).record(eq(staffId.toString()), eq("ADMIN"), eq("template.create"), eq("template"), eq(id), any(), eq("198.51.100.7"));
+		mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch("/admin/api/v1/notification/templates/" + id)
+			.header("X-Gateway-Secret", "gw-secret").header("X-Staff-Id", staffId.toString()).header("X-Staff-Role", "ADMIN").header("X-Client-IP", "198.51.100.7")
+			.contentType(MediaType.APPLICATION_JSON).content("{\"active\":false}")).andExpect(status().isOk());
+		org.mockito.Mockito.verify(audit).record(eq(staffId.toString()), eq("ADMIN"), eq("template.update"), eq("template"), eq(id), any(), eq("198.51.100.7"));
+	}
+
+	@Test
+	void ifTheAuditEntryCannotBeWrittenTheTemplateChangeIsUndone() throws Exception {
+		org.mockito.Mockito.doThrow(new ApiException(503, "audit_unavailable")).when(audit).record(any(), any(), any(), any(), any(), any(), any());
+		String code = "noaud-" + UUID.randomUUID().toString().substring(0, 6);
+		String body = "{\"appId\":\"" + appId + "\",\"code\":\"" + code + "\",\"kind\":\"DIRECT\",\"category\":\"TRANSACTIONAL\",\"params\":[],\"content\":{\"en\":{\"sms\":\"Hi\",\"body\":\"Hi\"}}}";
+		mvc.perform(post("/admin/api/v1/notification/templates").header("X-Gateway-Secret", "gw-secret").header("X-Staff-Id", UUID.randomUUID().toString())
+			.header("X-Staff-Role", "ADMIN").contentType(MediaType.APPLICATION_JSON).content(body)).andExpect(status().isServiceUnavailable())
+			.andExpect(jsonPath("$.error").value("audit_unavailable"));
+		assertThat(jdbc.sql("SELECT COUNT(*) FROM template WHERE code = :c").param("c", code).query(Integer.class).single()).isZero();
 	}
 
 	@Test

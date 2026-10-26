@@ -8,6 +8,8 @@ import java.util.UUID;
 import java.util.regex.Matcher;
 
 import app.adera.notification.partner.ApiException;
+import app.adera.notification.partner.admin.AuditClient;
+import app.adera.notification.partner.admin.StaffActor;
 import app.adera.notification.partner.auth.RegistryClient;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -22,15 +24,18 @@ public class TemplateService {
 	private final TemplateRepository repository;
 	private final RegistryClient registry;
 	private final Clock clock;
+	private final AuditClient audit;
 
-	public TemplateService(TemplateRepository repository, RegistryClient registry, Clock clock) {
+	public TemplateService(TemplateRepository repository, RegistryClient registry, Clock clock, AuditClient audit) {
 		this.repository = repository;
 		this.registry = registry;
 		this.clock = clock;
+		this.audit = audit;
 	}
 
 	@Transactional
-	public Template create(Map<String, Object> body, UUID staffId) {
+	public Template create(Map<String, Object> body, StaffActor actor) {
+		UUID staffId = actor.id();
 		Instant now = clock.instant();
 		UUID appId = appId(body.get("appId"));
 		TemplateRules.Parsed p = TemplateRules.parse(body, true, null, List.of(), now);
@@ -48,12 +53,17 @@ public class TemplateService {
 		}
 		t.setValidFrom(p.validFrom());
 		t.setExpiresAt(p.expiresAt());
-		return repository.save(t);
+		Template saved = repository.save(t);
+		// inside the transaction: if the entry cannot be written the template is not created
+		audit.record(actor.id().toString(), actor.role().name(), "template.create", "template", saved.getId().toString(),
+				Map.of("appId", appId.toString(), "code", p.code(), "kind", p.kind(), "category", p.category()), actor.ip());
+		return saved;
 	}
 
 	/** Changing the words or the declared values bumps the version; kind and code never change. */
 	@Transactional
-	public Template update(UUID id, Map<String, Object> body, UUID staffId) {
+	public Template update(UUID id, Map<String, Object> body, StaffActor actor) {
+		UUID staffId = actor.id();
 		Template t = get(id);
 		Instant now = clock.instant();
 		TemplateRules.Parsed p = TemplateRules.parse(body, false, t.getKind(), t.getParams(), now);
@@ -89,6 +99,14 @@ public class TemplateService {
 			t.bumpVersion();
 		}
 		t.touch(staffId, now);
+		Map<String, Object> meta = new java.util.LinkedHashMap<>();
+		meta.put("appId", t.getAppId().toString());
+		meta.put("code", t.getCode());
+		meta.put("fields", new java.util.ArrayList<>(new java.util.TreeSet<>(body.keySet())));
+		if (p.active() != null) {
+			meta.put("active", p.active());
+		}
+		audit.record(actor.id().toString(), actor.role().name(), "template.update", "template", id.toString(), meta, actor.ip());
 		return t;
 	}
 
