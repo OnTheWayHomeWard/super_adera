@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Registration | Adera guide</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+<button id="menu-btn" type="button" aria-label="Toggle menu">Menu</button>
+<span class="brand">Adera guide: sign-in and account</span>
+<span class="spacer"></span>
+<button id="theme-btn" type="button" aria-label="Toggle light or dark theme">Theme</button>
+</header>
+<div class="layout">
+<nav class="sidebar" aria-label="Pages in this guide">
+<h4>Super app: sign-in and account</h4>
+<ul>
+<li><a href="index.html">Overview</a></li>
+<li><a href="quickstart.html">Quick start</a></li>
+<li><a href="registration.html" class="current">Registration</a><ul><li><a href="#overview">Overview</a></li><li><a href="#rules">Identifiers and password rules</a></li><li><a href="#sequence">Call sequence</a></li><li><a href="#what-it-creates">What it creates</a></li><li><a href="#endpoints">Endpoints</a></li><li><a href="#errors">Errors</a></li><li><a href="#protections">Protections</a></li></ul></li>
+<li><a href="verification.html">Verification</a></li>
+<li><a href="login.html">Login</a></li>
+<li><a href="recovery.html">Forgot password</a></li>
+<li><a href="change-password.html">Change password</a></li>
+<li><a href="session-and-logout.html">Session and logout</a></li>
+<li><a href="profile.html">Profile</a></li>
+<li><a href="extra-data.html">Extra data</a></li>
+<li><a href="location.html">Location</a></li>
+<li><a href="avatar.html">Avatar</a></li>
+<li><a href="devices-and-push-tokens.html">Devices and push tokens</a></li>
+<li><a href="errors.html">Error table</a></li>
+<li><a href="known-issues.html">Known issues and not built yet</a></li>
+</ul>
+</nav>
+<main>
+<h1>Registration</h1>
+<p class="lead">Create an account with a phone number (email optional) and a password: the Kratos native flow, the rules, what is created, and every error.</p>
+<h2 id="overview">Overview</h2>
+<p>A person creates an account with a <strong>phone number</strong> (an <strong>email</strong> is optional, or the only identifier if they have no phone) and a <strong>password</strong>. Registration does <em>not</em> sign them in: the account must first prove it owns the phone or email by typing a code (see Verification), and only then can they sign in with the password (see Login). Staff of the dashboard use a different account type and cannot register here: the gateway refuses <code>identity_schema=default</code> with <code>403</code>.</p>
+<p>The calls are Ory Kratos' <em>native app</em> self-service flow behind the gateway at <code>/kratos/*</code>: <strong>(1)</strong> <code>GET</code> a flow, <strong>(2)</strong> <code>POST</code> the form to the flow id. The flow JSON also carries a <code>ui</code> object (the form description: <code>ui.nodes</code>, <code>ui.messages</code>). It is trimmed in the examples below to what matters; field-level errors are in <code>ui.nodes[].messages</code>, flow-level ones in <code>ui.messages</code>.</p>
+<h2 id="rules">Identifiers and password rules</h2>
+<div class="table-wrap"><table><thead><tr><th>Field</th><th>Rule</th></tr></thead><tbody><tr><td><code>traits.phone_number</code></td><td>international format, e.g. <code>+251911234567</code>. At least one of phone or email is required. It is the sign-in name.</td></tr><tr><td><code>traits.email</code></td><td>optional when a phone is given, otherwise required. Also a sign-in name.</td></tr><tr><td><code>password</code></td><td><strong>at least 6 characters</strong> (message <code>4000032</code>). Nothing else is checked: no digit or symbol rule, no check against lists of leaked passwords, no similarity check against the phone or email. A password like <code>123456</code> is accepted; the client may add its own advice.</td></tr><tr><td><code>method</code></td><td>always <code>"password"</code></td></tr></tbody></table></div>
+<p>A phone or email that already has an account is refused with a flow-level message (<code>ui.messages</code>, id <code>4000007</code>, "An account with the same identifier ... exists already"). This reveals that the address is registered: registration cannot hide that, by design of every sign-up form.</p>
+<h2 id="sequence">Call sequence</h2>
+<ol><li>(optional) <code>POST /public/v1/login-codes/check</code> with the phone: may a code be sent? See <a href="verification.html#code-check">the pre-flight check</a>.</li>
+<li><code>GET /kratos/self-service/registration/api</code> returns a flow with an <code>id</code>.</li>
+<li><code>POST /kratos/self-service/registration?flow=ID</code> with the phone, optional email and password. <code>400</code> = fix the fields and post again to the same flow; <code>200</code> = account created.</li>
+<li>Read <code>continue_with[0].flow.id</code> and <code>.verifiable_address</code>: the verification flow already exists and a code was sent to that address. Go to Verification.</li>
+<li>After verification, sign in (Login). The registration response has <strong>no</strong> <code>session_token</code>.</li></ol>
+<h2 id="what-it-creates">What registration creates</h2>
+<ul><li>A Kratos identity with schema <code>user</code>. Its id is the user id everywhere in the API.</li>
+<li>A profile row in the user service, created right away by a non-blocking web hook (if that call were lost, it is created on the first authenticated call). See Profile.</li>
+<li>A verification code sent by SMS (phone) or email.</li></ul>
+<h2 id="endpoints">Endpoints</h2>
+<details class="endpoint" id="ep-reg-create">
+<summary><span class="method m-get">GET</span><span class="path">/kratos/self-service/registration/api</span><span class="sum">Start a registration flow</span></summary>
+<div class="body"><dl class="meta"><dt>Who may call</dt><dd>anyone, no session needed</dd><dt>Auth</dt><dd>none</dd><dt>Headers</dt><dd><code>Content-Type: application/json</code> on POSTs. Do not send <code>Origin</code> or <code>Cookie</code> from a native app (the gateway strips them anyway)</dd><dt>Rate limit</dt><dd>120 per 60 s per IP (route <code>kratos-public</code>)</dd><dt>Implemented by</dt><dd>Ory Kratos behind the gateway</dd></dl>
+<h4>Purpose</h4>
+<p>Creates the server-side state of one sign-up attempt. You need the <code>id</code>; <code>ui.action</code> is the full submit URL. A flow lives 10 minutes.</p>
+<h4>Parameters</h4>
+<p>None. (The query <code>identity_schema</code> exists in Kratos but the gateway refuses every value except <code>user</code>.)</p>
+<h4>Example request</h4>
+<pre><code>curl -s &quot;$GATEWAY/kratos/self-service/registration/api&quot;</code></pre>
+<h4>Example response</h4>
+<pre class="out"><code>HTTP/1.1 200 OK
+
+{
+  &quot;id&quot;: &quot;f0bab070-469a-4a37-9c58-41ec187eb1d8&quot;,
+  &quot;type&quot;: &quot;api&quot;,
+  &quot;expires_at&quot;: &quot;2026-10-26T21:50:27.30444Z&quot;,
+  &quot;ui&quot;: {
+    &quot;action&quot;: &quot;http://127.0.0.1:9080/kratos/self-service/registration?flow=f0bab070-469a-4a37-9c58-41ec187eb1d8&quot;,
+    &quot;method&quot;: &quot;POST&quot;,
+    &quot;nodes&quot;: [
+      {&quot;group&quot;: &quot;default&quot;, &quot;name&quot;: &quot;csrf_token&quot;, &quot;type&quot;: &quot;hidden&quot;},
+      {&quot;group&quot;: &quot;default&quot;, &quot;name&quot;: &quot;traits.phone_number&quot;, &quot;type&quot;: &quot;tel&quot;},
+      {&quot;group&quot;: &quot;default&quot;, &quot;name&quot;: &quot;traits.email&quot;, &quot;type&quot;: &quot;email&quot;},
+      {&quot;group&quot;: &quot;profile&quot;, &quot;name&quot;: &quot;method&quot;, &quot;type&quot;: &quot;submit&quot;}
+    ],
+    &quot;messages&quot;: null
+  },
+  &quot;state&quot;: &quot;choose_method&quot;
+}</code></pre>
+
+</div>
+</details>
+
+<details class="endpoint" id="ep-reg-submit">
+<summary><span class="method m-post">POST</span><span class="path">/kratos/self-service/registration?flow=ID</span><span class="sum">Create the account</span></summary>
+<div class="body"><dl class="meta"><dt>Who may call</dt><dd>anyone, no session needed</dd><dt>Auth</dt><dd>none</dd><dt>Headers</dt><dd><code>Content-Type: application/json</code> on POSTs. Do not send <code>Origin</code> or <code>Cookie</code> from a native app (the gateway strips them anyway)</dd><dt>Rate limit</dt><dd>5 per 60 s per IP (route <code>kratos-registration-submit</code>); over it: <code>429</code></dd><dt>Implemented by</dt><dd>Ory Kratos behind the gateway</dd></dl>
+<h4>Purpose</h4>
+<p>Creates the identity and sends the first verification code. Why a password: the product decision is that end users sign in with a password and use codes only to prove ownership of the phone/email and to recover a forgotten password.</p>
+<h4>Parameters</h4>
+<div class="table-wrap"><table><thead><tr><th>Field</th><th>Type</th><th>Required</th><th>Notes</th></tr></thead><tbody><tr><td><code>method</code></td><td>string</td><td>yes</td><td><code>"password"</code></td></tr><tr><td><code>password</code></td><td>string</td><td>yes</td><td>6 characters or more</td></tr><tr><td><code>traits.phone_number</code></td><td>string</td><td>phone or email</td><td>international format</td></tr><tr><td><code>traits.email</code></td><td>string</td><td>phone or email</td><td>valid email address</td></tr></tbody></table></div>
+<h4>Example request</h4>
+<pre><code>curl -s -X POST &quot;$GATEWAY/kratos/self-service/registration?flow=$FLOW&quot; \
+  -H &#x27;Content-Type: application/json&#x27; \
+  -d &#x27;{&quot;method&quot;:&quot;password&quot;,&quot;password&quot;:&quot;tadesse&quot;,&quot;traits.phone_number&quot;:&quot;+251903050827&quot;}&#x27;
+</code></pre>
+<h4>Example response</h4>
+<pre class="out"><code>HTTP/1.1 200 OK
+
+{
+  &quot;identity&quot;: {
+    &quot;id&quot;: &quot;bfa0c48c-f574-451f-936a-b02291f5a190&quot;,
+    &quot;schema_id&quot;: &quot;user&quot;,
+    &quot;state&quot;: &quot;active&quot;,
+    &quot;traits&quot;: {&quot;phone_number&quot;: &quot;+251903050827&quot;},
+    &quot;verifiable_addresses&quot;: [
+      {&quot;value&quot;: &quot;+251903050827&quot;, &quot;verified&quot;: false, &quot;via&quot;: &quot;sms&quot;, &quot;status&quot;: &quot;sent&quot;}
+    ],
+    &quot;recovery_addresses&quot;: [
+      {&quot;value&quot;: &quot;+251903050827&quot;, &quot;via&quot;: &quot;sms&quot;}
+    ]
+  },
+  &quot;continue_with&quot;: [
+    {&quot;action&quot;: &quot;show_verification_ui&quot;,
+     &quot;flow&quot;: {&quot;id&quot;: &quot;44fa614f-a431-4863-b936-f4327804d214&quot;, &quot;verifiable_address&quot;: &quot;+251903050827&quot;}}
+  ]
+}</code></pre>
+<h4>Phone and email together</h4><p>Both become verifiable addresses. Kratos sends the first code to <strong>one</strong> of them, named by <code>continue_with[0].flow.verifiable_address</code> (here the phone), and not to both. Read that field instead of assuming. The other address stays unverified until the user signs in with it (see Login and Verification).</p><pre class="out"><code>HTTP/1.1 200 OK
+
+{
+  &quot;identity&quot;: {
+    &quot;id&quot;: &quot;120cae69-3e78-4a88-9f94-78f43ad5accc&quot;,
+    &quot;schema_id&quot;: &quot;user&quot;,
+    &quot;traits&quot;: {&quot;phone_number&quot;: &quot;+251903050828&quot;, &quot;email&quot;: &quot;docb-339b39@example.com&quot;},
+    &quot;verifiable_addresses&quot;: [
+      {&quot;value&quot;: &quot;+251903050828&quot;, &quot;verified&quot;: false, &quot;via&quot;: &quot;sms&quot;, &quot;status&quot;: &quot;sent&quot;},
+      {&quot;value&quot;: &quot;docb-339b39@example.com&quot;, &quot;verified&quot;: false, &quot;via&quot;: &quot;email&quot;, &quot;status&quot;: &quot;pending&quot;}
+    ],
+    &quot;recovery_addresses&quot;: [
+      {&quot;value&quot;: &quot;+251903050828&quot;, &quot;via&quot;: &quot;sms&quot;},
+      {&quot;value&quot;: &quot;docb-339b39@example.com&quot;, &quot;via&quot;: &quot;email&quot;}
+    ]
+  },
+  &quot;continue_with&quot;: [
+    {&quot;action&quot;: &quot;show_verification_ui&quot;,
+     &quot;flow&quot;: {&quot;id&quot;: &quot;65412215-7591-4ed1-8358-35b14b1ce5fd&quot;, &quot;verifiable_address&quot;: &quot;+251903050828&quot;}}
+  ]
+}</code></pre><h4>Password too short (400)</h4><p>The same flow stays usable: fix the field and post again.</p><pre class="out"><code>HTTP/1.1 400 Bad Request
+
+{
+  &quot;id&quot;: &quot;f0bab070-469a-4a37-9c58-41ec187eb1d8&quot;,
+  &quot;type&quot;: &quot;api&quot;,
+  &quot;ui&quot;: {
+    &quot;nodes&quot;: [
+      {&quot;group&quot;: &quot;password&quot;, &quot;name&quot;: &quot;password&quot;, &quot;messages&quot;: [
+        {&quot;id&quot;: 4000032, &quot;type&quot;: &quot;error&quot;, &quot;text&quot;: &quot;The password must be at least 6 characters long, but got 3.&quot;,
+         &quot;context&quot;: {&quot;min_length&quot;: 6, &quot;actual_length&quot;: 3}}]}
+    ]
+  },
+  &quot;state&quot;: &quot;choose_method&quot;
+}</code></pre>
+</div>
+</details>
+
+<h2 id="errors">Errors</h2>
+<div class="table-wrap"><table><thead><tr><th>Status</th><th>Body</th><th>When</th><th>What the app does</th></tr></thead><tbody><tr><td>400</td><td>flow JSON, message <code>4000032</code> on the <code>password</code> node</td><td>password shorter than 6</td><td>show the message, let the user retype, post to the same flow</td></tr><tr><td>400</td><td>flow JSON, message <code>4000007</code> in <code>ui.messages</code></td><td>the phone or email already has an account</td><td>offer Login or Forgot password</td></tr><tr><td>400</td><td>flow JSON, messages <code>4000041</code> (bad phone) / <code>4000040</code> (bad email) / <code>4000002</code> (property missing)</td><td>invalid phone / invalid email / missing identifier</td><td>inline field error</td></tr><tr><td>403</td><td><code>{"error":"forbidden","reason":"only the app-user schema can self-register"}</code></td><td><code>identity_schema</code> other than <code>user</code> on the flow creation</td><td>never send that parameter</td></tr><tr><td>410</td><td>Kratos <code>self_service_flow_expired</code></td><td>flow older than 10 minutes</td><td>start a new flow</td></tr><tr><td>429</td><td>HTML page</td><td>more than 5 registration submits per minute from one IP</td><td>wait a minute, retry</td></tr></tbody></table></div>
+<h2 id="protections">What protects registration</h2>
+<ul><li>Gateway: 5 submits per minute per IP.</li><li>Every verification code goes through the per-recipient send limit (SMS 5 per hour and 10 per day per number; email 10 per hour and 20 per day per address). Over it the message is dropped silently by the notification service (Kratos still answers success): this is why the app should call the pre-flight check first.</li><li>Accounts are unusable until verified, so typing someone else's number creates an account nobody can sign in to, and the owner receives one SMS per request, within the limit above.</li></ul>
+
+<div class="pager"><a class="prev" href="quickstart.html"><small>Previous</small>Quick start</a><a class="next" href="verification.html"><small>Next</small>Verification</a></div>
+<p class="footer">Adera super-app guide: sign-in and account &middot; verified against the dev stack on 2026-10-26</p>
+</main>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

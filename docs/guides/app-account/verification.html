@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Verification | Adera guide</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+<button id="menu-btn" type="button" aria-label="Toggle menu">Menu</button>
+<span class="brand">Adera guide: sign-in and account</span>
+<span class="spacer"></span>
+<button id="theme-btn" type="button" aria-label="Toggle light or dark theme">Theme</button>
+</header>
+<div class="layout">
+<nav class="sidebar" aria-label="Pages in this guide">
+<h4>Super app: sign-in and account</h4>
+<ul>
+<li><a href="index.html">Overview</a></li>
+<li><a href="quickstart.html">Quick start</a></li>
+<li><a href="registration.html">Registration</a></li>
+<li><a href="verification.html" class="current">Verification</a><ul><li><a href="#overview">Overview</a></li><li><a href="#sequence">Call sequence</a></li><li><a href="#messages">The code messages</a></li><li><a href="#code-check">Pre-flight check</a></li><li><a href="#endpoints">Endpoints</a></li><li><a href="#asking-again">Getting a new code</a></li><li><a href="#dev-mode">Reading codes in dev</a></li><li><a href="#errors">Errors</a></li></ul></li>
+<li><a href="login.html">Login</a></li>
+<li><a href="recovery.html">Forgot password</a></li>
+<li><a href="change-password.html">Change password</a></li>
+<li><a href="session-and-logout.html">Session and logout</a></li>
+<li><a href="profile.html">Profile</a></li>
+<li><a href="extra-data.html">Extra data</a></li>
+<li><a href="location.html">Location</a></li>
+<li><a href="avatar.html">Avatar</a></li>
+<li><a href="devices-and-push-tokens.html">Devices and push tokens</a></li>
+<li><a href="errors.html">Error table</a></li>
+<li><a href="known-issues.html">Known issues and not built yet</a></li>
+</ul>
+</nav>
+<main>
+<h1>Verification</h1>
+<p class="lead">Prove that the phone or email belongs to the person: the code, the flow, the pre-flight check, and how to get a new code.</p>
+<h2 id="overview">Overview</h2>
+<p>Verification proves that the person controls the phone number (code by SMS) or email address (code by email) of the account. <strong>An account cannot sign in until the address it signs in with is verified.</strong> The code is 6 digits, valid 10 minutes, and is checked through Kratos' verification flow (<code>method: "code"</code>).</p>
+<p>Where the flow comes from: registration returns it in <code>continue_with</code>. If the user closes the app before typing the code, the next login attempt is refused with <code>session_verified_address_required</code>, and that error carries a <strong>new</strong> verification flow and sends a fresh code (see below).</p>
+<h2 id="sequence">Call sequence</h2>
+<ol><li>Get the verification flow id: from the registration response (<code>continue_with[0].flow.id</code>) or from the refused login (<code>error.details.continue_with[0].flow.id</code>). Both also say which address got the code: <code>verifiable_address</code>.</li>
+<li>The code arrives by SMS or email (text below). Show a code field.</li>
+<li><code>POST /kratos/self-service/verification?flow=ID</code> with <code>{"method":"code","code":"123456"}</code>.</li>
+<li><code>state: "passed_challenge"</code> in the answer = verified. Then the user signs in with the password (Login).</li></ol>
+<div class="callout warn"><p><strong>With a phone and an email on one account</strong> each address must be verified separately, and the address typed at sign-in must be a verified one. Verifying the phone does not verify the email: signing in with the email afterwards is refused (<code>session_verified_address_required</code>) and starts a verification flow for the email. Kratos picks which address gets the code: read <code>verifiable_address</code> from the flow reference, do not assume it is the one the user typed. The native flow offers no field to choose the address.</p></div>
+<h2 id="messages">The code messages</h2>
+<p>SMS: <em>Adera: your verification code is 563901. Do not share it with anyone. It expires in 10 minutes.</em> Email subject: <em>Your Adera verification code: 563901</em>, body in English with the same warning. The messages are sent by our notification service (Kratos courier), so the per-recipient send limits apply.</p>
+<h2 id="code-check">Pre-flight check: may I ask for a code?</h2>
+<p>Kratos cannot tell the app that a code was <em>not</em> sent because the number hit its send limit (the notification service drops it and answers success, so Kratos retries nothing). To avoid a screen that says "code sent" when nothing was, the app calls this public endpoint <strong>before every action that sends a code</strong>: registration, asking for a new verification code, email recovery, and phone password reset (that one calls it by itself). It counts the request against the same hourly and daily limit as the real send.</p>
+<details class="endpoint" id="ep-check">
+<summary><span class="method m-post">POST</span><span class="path">/public/v1/login-codes/check</span><span class="sum">May I ask for a code for this address?</span></summary>
+<div class="body"><dl class="meta"><dt>Who may call</dt><dd>anyone, no session</dd><dt>Auth</dt><dd>none</dd><dt>Rate limit</dt><dd>10 per 60 s per IP (route <code>login-code-check</code>)</dd><dt>Implemented by</dt><dd>notification-service</dd></dl>
+<h4>Purpose</h4>
+<p>Answers whether one more code to this address would be delivered, and how many are left. It answers the same way for every well-formed address, registered or not, so it reveals nothing about which accounts exist. It is advisory: a client that skips it still hits the real limit (silently).</p>
+<h4>Parameters</h4>
+<div class="table-wrap"><table><thead><tr><th>Field</th><th>Type</th><th>Required</th><th>Notes</th></tr></thead><tbody><tr><td><code>identifier</code></td><td>string</td><td>yes</td><td>phone (<code>+251911234567</code>, spaces and dashes are ignored) or email</td></tr></tbody></table></div>
+<h4>Example request</h4>
+<pre><code>curl -s -X POST &quot;$GATEWAY/public/v1/login-codes/check&quot; \
+  -H &#x27;Content-Type: application/json&#x27; -d &#x27;{&quot;identifier&quot;:&quot;+251903050827&quot;}&#x27;</code></pre>
+<h4>Example response</h4>
+<pre class="out"><code>HTTP/1.1 200 OK
+
+{&quot;allowed&quot;: true, &quot;limitPerHour&quot;: 5, &quot;limitPerDay&quot;: 10, &quot;remainingThisHour&quot;: 4, &quot;remainingToday&quot;: 9}</code></pre>
+<h4>Over the limit</h4><p>Status <code>429</code> with a <code>Retry-After</code> header and <code>{"error":"too_many_codes","allowed":false,"retryAfterSeconds":3590,"limitPerHour":5,"limitPerDay":10,"remainingThisHour":0,"remainingToday":9}</code> (field values depend on the address; the keys are exactly these). A malformed identifier gives <code>400 {"error":"validation_failed","fields":{"identifier":"..."}}</code>. The gateway can also answer <code>429</code> as an HTML page when one IP calls it more than 10 times a minute. The path keeps the name <code>login-codes</code> for historical reasons; it now guards every code.</p>
+</div>
+</details>
+
+<h2 id="endpoints">Endpoints</h2>
+<details class="endpoint" id="ep-ver-flow">
+<summary><span class="method m-get">GET</span><span class="path">/kratos/self-service/verification/flows?id=ID</span><span class="sum">Read a verification flow</span></summary>
+<div class="body"><dl class="meta"><dt>Who may call</dt><dd>anyone, no session needed</dd><dt>Auth</dt><dd>none</dd><dt>Headers</dt><dd><code>Content-Type: application/json</code> on POSTs. Do not send <code>Origin</code> or <code>Cookie</code> from a native app (the gateway strips them anyway)</dd><dt>Rate limit</dt><dd>120 per 60 s per IP</dd><dt>Implemented by</dt><dd>Ory Kratos behind the gateway</dd></dl>
+<h4>Purpose</h4>
+<p>Optional: re-reads a flow (state <code>sent_email</code> means "a code was sent and is waited for"; the name says email even for SMS).</p>
+<h4>Parameters</h4>
+<p>Query <code>id</code>: the flow id.</p>
+<h4>Example request</h4>
+<pre><code>curl -s &quot;$GATEWAY/kratos/self-service/verification/flows?id=$VFLOW&quot;</code></pre>
+<h4>Example response</h4>
+<pre class="out"><code>(the flow JSON: id, type &quot;api&quot;, ui.nodes with the code field, state)</code></pre>
+
+</div>
+</details>
+
+<details class="endpoint" id="ep-ver-submit">
+<summary><span class="method m-post">POST</span><span class="path">/kratos/self-service/verification?flow=ID</span><span class="sum">Submit the code</span></summary>
+<div class="body"><dl class="meta"><dt>Who may call</dt><dd>anyone, no session needed</dd><dt>Auth</dt><dd>none</dd><dt>Headers</dt><dd><code>Content-Type: application/json</code> on POSTs. Do not send <code>Origin</code> or <code>Cookie</code> from a native app (the gateway strips them anyway)</dd><dt>Rate limit</dt><dd>10 per 60 s per IP (route <code>kratos-verification-submit</code>)</dd><dt>Implemented by</dt><dd>Ory Kratos behind the gateway</dd></dl>
+<h4>Purpose</h4>
+<p>Checks the code; on success the address is marked verified. Kratos allows a few wrong tries per code, then the code is dead and a new one must be requested.</p>
+<h4>Parameters</h4>
+<div class="table-wrap"><table><thead><tr><th>Field</th><th>Type</th><th>Required</th><th>Notes</th></tr></thead><tbody><tr><td><code>method</code></td><td>string</td><td>yes</td><td><code>"code"</code></td></tr><tr><td><code>code</code></td><td>string</td><td>yes</td><td>the 6 digits</td></tr></tbody></table></div>
+<h4>Example request</h4>
+<pre><code>curl -s -X POST &quot;$GATEWAY/kratos/self-service/verification?flow=$VFLOW&quot; \
+  -H &#x27;Content-Type: application/json&#x27; -d &#x27;{&quot;method&quot;:&quot;code&quot;,&quot;code&quot;:&quot;563901&quot;}&#x27;</code></pre>
+<h4>Example response</h4>
+<pre class="out"><code>HTTP/1.1 200 OK
+
+{
+  &quot;id&quot;: &quot;4fa6a848-0ed6-44b2-b615-116f66406050&quot;,
+  &quot;type&quot;: &quot;api&quot;,
+  &quot;active&quot;: &quot;code&quot;,
+  &quot;ui&quot;: {&quot;messages&quot;: [
+    {&quot;id&quot;: 1080002, &quot;type&quot;: &quot;success&quot;, &quot;text&quot;: &quot;You successfully verified your email address.&quot;}]},
+  &quot;state&quot;: &quot;passed_challenge&quot;
+}</code></pre>
+<h4>Wrong, expired or reused code</h4><p>Status <code>200</code> (not an error status!) with message <code>4070006</code> in <code>ui.messages</code> and <code>state</code> still <code>sent_email</code>:</p><pre class="out"><code>HTTP/1.1 200 OK
+
+{
+  &quot;id&quot;: &quot;4fa6a848-0ed6-44b2-b615-116f66406050&quot;,
+  &quot;type&quot;: &quot;api&quot;,
+  &quot;active&quot;: &quot;code&quot;,
+  &quot;ui&quot;: {&quot;messages&quot;: [
+    {&quot;id&quot;: 4070006, &quot;type&quot;: &quot;error&quot;, &quot;text&quot;: &quot;The verification code is invalid or has already been used. Please try again.&quot;}]},
+  &quot;state&quot;: &quot;sent_email&quot;
+}</code></pre>
+</div>
+</details>
+
+<h2 id="asking-again">Getting a new code</h2>
+<p>Trigger a login with the password (Login): while the address is unverified Kratos answers the error below and sends a new code (the answer is <code>403</code> at the gateway while the body says <code>"code": 400</code>; test the <code>error.id</code>, not the status).</p>
+<pre class="out"><code>HTTP/1.1 403 Forbidden
+
+{
+  &quot;error&quot;: {
+    &quot;id&quot;: &quot;session_verified_address_required&quot;,
+    &quot;code&quot;: 400,
+    &quot;status&quot;: &quot;Bad Request&quot;,
+    &quot;reason&quot;: &quot;Your account&#x27;s email or phone address are not verified yet. Please check your email or phone inbox or re-request verification.&quot;,
+    &quot;details&quot;: {
+      &quot;continue_with&quot;: [
+        {&quot;action&quot;: &quot;show_verification_ui&quot;,
+         &quot;flow&quot;: {&quot;id&quot;: &quot;4fa6a848-0ed6-44b2-b615-116f66406050&quot;,
+                  &quot;verifiable_address&quot;: &quot;+251903050827&quot;,
+                  &quot;url&quot;: &quot;http://localhost:3000/verification?flow=4fa6a848-0ed6-44b2-b615-116f66406050&quot;}}
+      ]
+    },
+    &quot;message&quot;: &quot;your email or phone address is not yet verified&quot;
+  }
+}</code></pre>
+<p>The native verification flow has no working "resend" button for phones (its resend form only accepts an email address field), so the app uses this route for phones. For an email-only account the same route applies. The new code is sent to the address named in <code>verifiable_address</code>.</p>
+<h2 id="dev-mode">Reading codes in the dev stack</h2>
+<p>In dev nothing real is sent: SMS go to the console, email to Mailpit (<code>http://127.0.0.1:8025</code>). The notification service also lists them:</p>
+<pre class="out"><code>GET http://127.0.0.1:8085/dev/messages?to=%2B251903050827      (dev stack only)
+
+[{&quot;at&quot;: &quot;2026-10-26T21:41:29.234862277Z&quot;, &quot;channel&quot;: &quot;sms&quot;, &quot;to&quot;: &quot;+251903050827&quot;, &quot;subject&quot;: null,
+  &quot;body&quot;: &quot;Adera: your verification code is 563901. Do not share it with anyone. It expires in 10 minutes.\n&quot;}]</code></pre>
+<p>The list is newest first. Codes are sent a moment after the request, so poll for a message newer than the one you saw before. The endpoint does not exist in production.</p>
+<h2 id="errors">Errors</h2>
+<div class="table-wrap"><table><thead><tr><th>Status</th><th>Body</th><th>When</th><th>What the app does</th></tr></thead><tbody><tr><td>200</td><td>flow JSON with message <code>4070006</code>, state <code>sent_email</code></td><td>wrong, expired or already used code</td><td>let the user retype or ask for a new code</td></tr><tr><td>403</td><td><code>error.id = session_verified_address_required</code></td><td>sign-in with an unverified address</td><td>continue the verification flow in <code>details.continue_with</code></td></tr><tr><td>410</td><td>Kratos <code>self_service_flow_expired</code></td><td>flow older than 10 minutes</td><td>trigger a new code through a login attempt</td></tr><tr><td>429</td><td>HTML page</td><td>more than 10 verification submits a minute from one IP</td><td>wait</td></tr></tbody></table></div>
+
+<div class="pager"><a class="prev" href="registration.html"><small>Previous</small>Registration</a><a class="next" href="login.html"><small>Next</small>Login</a></div>
+<p class="footer">Adera super-app guide: sign-in and account &middot; verified against the dev stack on 2026-10-26</p>
+</main>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

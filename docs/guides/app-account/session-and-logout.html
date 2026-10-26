@@ -18,7 +18,11 @@
 <h4>Super app: sign-in and account</h4>
 <ul><li><a href="index.html">Overview</a></li>
 <li><a href="quickstart.html">Quick start</a></li>
-<li><a href="authentication.html">Registration and login</a></li>
+<li><a href="registration.html">Registration</a></li>
+<li><a href="verification.html">Verification</a></li>
+<li><a href="login.html">Login</a></li>
+<li><a href="recovery.html">Forgot password</a></li>
+<li><a href="change-password.html">Change password</a></li>
 <li><a href="session-and-logout.html" class="current">Session and logout</a><ul><li><a href="#overview">Overview</a></li><li><a href="#store-and-send">What to store and what to send</a></li><li><a href="#startup">App start-up and the three answers that matter</a></li><li><a href="#refresh">Session lifetime and renewing a session</a></li><li><a href="#endpoints">Endpoints</a></li><li><a href="#account-status">When the account is suspended or deleted</a></li></ul></li>
 <li><a href="profile.html">Profile</a></li>
 <li><a href="extra-data.html">Extra data</a></li>
@@ -34,10 +38,10 @@
 <h2 id="overview">Overview</h2>
 <p>A successful sign-in returns a <code>session_token</code>. It is an opaque string that stands for one <strong>session</strong> (one login on one device). The gateway turns it into the user's id on every call, so the app never sends a user id: it sends the token and the server decides who you are.</p>
 <div class="table-wrap"><table><thead><tr><th>Fact</th><th>Value</th></tr></thead><tbody>
-<tr><td>Who issues it</td><td>Ory Kratos, after the code step of registration or login</td></tr>
-<tr><td>Lifetime</td><td><strong>30 days</strong> from the moment the code was entered (<code>session.lifespan: 720h</code>); <code>session.expires_at</code> tells the exact instant</td></tr>
+<tr><td>Who issues it</td><td>Ory Kratos, after the password step of login (or after a recovery, see Forgot password)</td></tr>
+<tr><td>Lifetime</td><td><strong>30 days</strong> from the moment the password was entered (<code>session.lifespan: 720h</code>); <code>session.expires_at</code> tells the exact instant</td></tr>
 <tr><td>Sliding?</td><td><strong>No.</strong> Using the API does not extend it. Only a refresh login (below) or a new login does.</td></tr>
-<tr><td>Assurance level</td><td>customers are always <code>aal1</code> (one factor: the code)</td></tr>
+<tr><td>Assurance level</td><td>customers are always <code>aal1</code> (one factor: the password)</td></tr>
 <tr><td>One per login</td><td>each sign-in on each phone is its own session; they are independent and can be listed and revoked</td></tr>
 <tr><td>User id</td><td><code>session.identity.id</code>; the same value as <code>id</code> in <code>GET /api/v1/me</code></td></tr>
 </tbody></table></div>
@@ -57,9 +61,9 @@
 </tbody></table></div>
 <p>Never treat a network failure or a <code>5xx</code> as "logged out". Only a <code>401</code> from the gateway means the token is dead.</p>
 <h2 id="refresh">Session lifetime and renewing a session</h2>
-<p>A session ends 30 days after login. The app can simply send the person through sign-in again when a call returns <code>401</code>. To renew <em>without</em> creating a new session, Kratos supports a <strong>refresh login</strong>: start a login flow with <code>?refresh=true</code> and the current token, then do the normal code steps. Verified result:</p>
-<ol><li><code>GET /kratos/self-service/login/api?refresh=true</code> with header <code>X-Session-Token: $TOKEN</code> answers <code>200</code>, flow with <code>"refresh": true</code>.</li><li><code>POST /kratos/self-service/login?flow=ID</code> with the identifier (step 1: code sent) and then with the code (step 2), both with the same <code>X-Session-Token</code> header.</li><li>Step 2 answers <code>200</code> with the <strong>same</strong> <code>session_token</code> and the same session id, but <code>authenticated_at</code> and <code>expires_at</code> are now moved 30 days forward (captured: <code>expires_at</code> went from 2026-11-25T10:54:50Z to 2026-11-25T10:55:40Z, <code>authenticated_at</code> to the new time). The old token value keeps working (it is the same token).</li></ol>
-<p>Because it costs a code (an SMS), use it sparingly: for instance when the person opens the app inside the last days of the 30 and you want to avoid a surprise logout; otherwise just let a <code>401</code> lead to a normal sign-in. Starting a <em>normal</em> login while sending a valid token fails with <code>400 session_already_available</code> ("you are already logged in ... forget to set ?refresh=true"). A flow created with <code>refresh=true</code> and <em>no</em> session simply behaves like a normal login flow.</p>
+<p>A session ends 30 days after login. The app can simply send the person through sign-in again when a call returns <code>401</code>. To renew <em>without</em> creating a new session, Kratos supports a <strong>refresh login</strong>: start a login flow with <code>?refresh=true</code> and the current token, then submit the password again. Verified result (seeded user, through the gateway):</p>
+<ol><li><code>GET /kratos/self-service/login/api?refresh=true</code> with header <code>X-Session-Token: $TOKEN</code> answers <code>200</code>, flow with <code>"refresh": true</code>.</li><li><code>POST /kratos/self-service/login?flow=ID</code> with <code>{"method":"password","identifier":"...","password":"..."}</code> and the same <code>X-Session-Token</code> header.</li><li>It answers <code>200</code> with the <strong>same</strong> <code>session_token</code> and session id; <code>authenticated_at</code> is now and <code>expires_at</code> is 30 days later. The old token value keeps working.</li></ol>
+<p>The same refresh login is how the app re-proves the password when Kratos asks for a recent login (see Change password). Starting a <em>normal</em> login while sending a valid token fails with <code>400 session_already_available</code>. A flow created with <code>refresh=true</code> and <em>no</em> session simply behaves like a normal login flow. Use it sparingly: asking the user for the password is friction; usually let a <code>401</code> lead to a normal sign-in.</p>
 <h2 id="endpoints">Endpoints</h2>
 <details class="endpoint" id="ep-logout">
 <summary><span class="method m-post">POST</span><span class="path">/api/v1/me/logout</span><span class="sum">Log out this device (the call the app should use)</span></summary>
@@ -118,7 +122,7 @@ Content-Type: application/json; charset=utf-8
   "authenticated_at": "2026-10-26T10:49:43.584653Z",
   "authenticator_assurance_level": "aal1",
   "authentication_methods": [
-    { "method": "code", "aal": "aal1", "completed_at": "2026-10-26T10:49:43.584652703Z" }
+    { "method": "password", "aal": "aal1", "completed_at": "2026-10-26T10:49:43.584652703Z" }
   ],
   "issued_at": "2026-10-26T10:49:43.584653Z",
   "identity": {
@@ -173,7 +177,7 @@ Content-Type: application/json; charset=utf-8
     "expires_at": "2026-11-25T11:00:54.879779Z",
     "authenticated_at": "2026-10-26T11:00:54.879779Z",
     "authenticator_assurance_level": "aal1",
-    "authentication_methods": [ { "method": "code", "aal": "aal1", "completed_at": "2026-10-26T11:00:54.879488637Z" } ],
+    "authentication_methods": [ { "method": "password", "aal": "aal1", "completed_at": "2026-10-26T11:00:54.879488637Z" } ],
     "issued_at": "2026-10-26T11:00:54.879779Z",
     "identity": { "id": "7e2a27b3-2f89-41c5-9f50-e0bc98da755a", "traits": { "email": "d***@example.com" }, "...": "..." },
     "devices": [ { "id": "5af2b213-...", "ip_address": "17x.x.x.x", "user_agent": "...", "location": "" } ]
@@ -270,7 +274,7 @@ Content-Type: application/json; charset=utf-8
 </tbody></table></div>
 <p><strong>What the app should do on 403:</strong> show a blocking screen ("Your account is suspended. Contact support."), stop all background calls, and let the person sign out with <code>DELETE /kratos/self-service/logout/api</code> (the combined logout is refused). Do not retry. The two codes are stable and safe to switch on.</p>
 
-<div class="pager"><a class="prev" href="authentication.html"><small>Previous</small>Registration and login</a><a class="next" href="profile.html"><small>Next</small>Profile</a></div>
+<div class="pager"><a class="prev" href="change-password.html"><small>Previous</small>Change password</a><a class="next" href="profile.html"><small>Next</small>Profile</a></div>
 <p class="footer">Adera super-app guide: sign-in and account &middot; verified against the dev stack on 2026-10-26</p>
 </main>
 </div>

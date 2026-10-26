@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Forgot password | Adera guide</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+<button id="menu-btn" type="button" aria-label="Toggle menu">Menu</button>
+<span class="brand">Adera guide: sign-in and account</span>
+<span class="spacer"></span>
+<button id="theme-btn" type="button" aria-label="Toggle light or dark theme">Theme</button>
+</header>
+<div class="layout">
+<nav class="sidebar" aria-label="Pages in this guide">
+<h4>Super app: sign-in and account</h4>
+<ul>
+<li><a href="index.html">Overview</a></li>
+<li><a href="quickstart.html">Quick start</a></li>
+<li><a href="registration.html">Registration</a></li>
+<li><a href="verification.html">Verification</a></li>
+<li><a href="login.html">Login</a></li>
+<li><a href="recovery.html" class="current">Forgot password</a><ul><li><a href="#overview">Overview</a></li><li><a href="#email-route">Email route</a></li><li><a href="#phone-route">Phone route</a></li><li><a href="#enumeration">Enumeration</a></li><li><a href="#errors">Limits at a glance</a></li></ul></li>
+<li><a href="change-password.html">Change password</a></li>
+<li><a href="session-and-logout.html">Session and logout</a></li>
+<li><a href="profile.html">Profile</a></li>
+<li><a href="extra-data.html">Extra data</a></li>
+<li><a href="location.html">Location</a></li>
+<li><a href="avatar.html">Avatar</a></li>
+<li><a href="devices-and-push-tokens.html">Devices and push tokens</a></li>
+<li><a href="errors.html">Error table</a></li>
+<li><a href="known-issues.html">Known issues and not built yet</a></li>
+</ul>
+</nav>
+<main>
+<h1>Forgot password</h1>
+<p class="lead">Recover an account: by email through Kratos recovery (returns a short privileged session), by phone through our reset endpoints, and what is and is not enforced about the channel.</p>
+<h2 id="overview">Overview</h2>
+<p>A user who forgot the password asks for a code and chooses a new password. There are <strong>two routes</strong>, because Kratos' recovery flow accepts only an <em>email address</em> (its input is validated as an email; a phone number is refused with message <code>4000040</code>):</p>
+<div class="table-wrap"><table><thead><tr><th></th><th>Email route (Kratos recovery flow)</th><th>Phone route (our endpoints)</th></tr></thead><tbody><tr><td>Code sent to</td><td>the email address typed (by email)</td><td>the phone typed (by SMS)</td></tr><tr><td>Calls</td><td><code>GET /kratos/self-service/recovery/api</code>, <code>POST /kratos/self-service/recovery?flow=ID</code> twice, then the settings flow</td><td><code>POST /public/v1/password-reset/start</code>, <code>POST /public/v1/password-reset/finish</code></td></tr><tr><td>After the right code</td><td>Kratos hands over a <strong>short privileged session token</strong> and a settings flow id; the app sets the new password in the settings flow</td><td>the new password is sent in the same call as the code; the account is changed and <strong>signed out everywhere</strong>; <strong>no session is returned</strong>: the app signs the user in with the new password</td></tr><tr><td>Works for</td><td>accounts that have an email</td><td>accounts that have a phone</td></tr></tbody></table></div>
+<div class="callout warn"><p><strong>Which channel is used when the account has both a phone and an email? What is and is not enforced.</strong> Kratos sends the recovery code to the address the user <em>types</em>; it has no setting that makes it prefer the phone. So nothing on the server forces the phone: if a user with both types the email in the email route, the code goes to the email. The preference is implemented only by the client: ask for the <strong>phone number first</strong> and use the phone route; offer "use email instead" only when the user says they have no phone or cannot receive SMS, and use the email route for accounts that have only an email. Recovery by email is therefore always available to anyone who knows the address, also for accounts that also have a phone.</p></div>
+<h2 id="email-route">Email route</h2>
+<ol><li>(optional) <code>POST /public/v1/login-codes/check</code> with the email (see Verification).</li>
+<li><code>GET /kratos/self-service/recovery/api</code>: flow id.</li>
+<li><code>POST /kratos/self-service/recovery?flow=ID</code> with <code>{"method":"code","email":"..."}</code>: the answer is the same whether or not the address has an account (no enumeration): state <code>sent_email</code> and message <code>1060003</code>. Nothing is sent for an unknown address (the gateway-side config sets <code>notify_unknown_recipients: false</code>).</li>
+<li>The user types the code: <code>POST /kratos/self-service/recovery?flow=ID</code> with <code>{"method":"code","code":"..."}</code> on the <strong>same flow</strong>. Wrong code: <code>200</code> with message <code>4060006</code>. Right code: <code>200</code> with <code>continue_with</code> holding <code>set_ory_session_token</code> and <code>show_settings_ui</code>.</li>
+<li>Store the token as the session (it is a real session, method <code>code_recovery</code>, and counts as a recent login). Open the settings flow by id and set the password (see Change password, request <code>method: "password"</code>).</li></ol>
+<details class="endpoint" id="ep-rec-create">
+<summary><span class="method m-get">GET</span><span class="path">/kratos/self-service/recovery/api</span><span class="sum">Start a recovery flow</span></summary>
+<div class="body"><dl class="meta"><dt>Who may call</dt><dd>anyone, no session needed</dd><dt>Auth</dt><dd>none</dd><dt>Headers</dt><dd><code>Content-Type: application/json</code> on POSTs. Do not send <code>Origin</code> or <code>Cookie</code> from a native app (the gateway strips them anyway)</dd><dt>Rate limit</dt><dd>120 per 60 s per IP</dd><dt>Implemented by</dt><dd>Ory Kratos behind the gateway</dd></dl>
+<h4>Purpose</h4>
+<p>Creates the recovery flow (valid 10 minutes).</p>
+<h4>Parameters</h4>
+<p>None.</p>
+<h4>Example request</h4>
+<pre><code>curl -s &quot;$GATEWAY/kratos/self-service/recovery/api&quot;</code></pre>
+<h4>Example response</h4>
+<pre class="out"><code>(flow JSON: id, active &quot;code&quot;, ui node &quot;email&quot;, state &quot;choose_method&quot;)</code></pre>
+
+</div>
+</details>
+
+<details class="endpoint" id="ep-rec-send">
+<summary><span class="method m-post">POST</span><span class="path">/kratos/self-service/recovery?flow=ID</span><span class="sum">Send the recovery code to an email</span></summary>
+<div class="body"><dl class="meta"><dt>Who may call</dt><dd>anyone, no session needed</dd><dt>Auth</dt><dd>none</dd><dt>Headers</dt><dd><code>Content-Type: application/json</code> on POSTs. Do not send <code>Origin</code> or <code>Cookie</code> from a native app (the gateway strips them anyway)</dd><dt>Rate limit</dt><dd>5 per 60 s per IP <strong>and</strong> 5 per 15 minutes per <code>email</code> (route <code>kratos-recovery-submit</code>)</dd><dt>Implemented by</dt><dd>Ory Kratos behind the gateway</dd></dl>
+<h4>Purpose</h4>
+<p>Sends a code by email to a registered address.</p>
+<h4>Parameters</h4>
+<div class="table-wrap"><table><thead><tr><th>Field</th><th>Type</th><th>Required</th><th>Notes</th></tr></thead><tbody><tr><td><code>method</code></td><td>string</td><td>yes</td><td><code>"code"</code></td></tr><tr><td><code>email</code></td><td>string</td><td>yes</td><td>a valid email address (not a phone)</td></tr></tbody></table></div>
+<h4>Example request</h4>
+<pre><code>curl -s -X POST &quot;$GATEWAY/kratos/self-service/recovery?flow=$RFLOW&quot; \
+  -H &#x27;Content-Type: application/json&#x27; -d &#x27;{&quot;method&quot;:&quot;code&quot;,&quot;email&quot;:&quot;doc2-339b39@example.com&quot;}&#x27;</code></pre>
+<h4>Example response</h4>
+<pre class="out"><code>HTTP/1.1 200 OK
+
+{
+  &quot;id&quot;: &quot;4b8d7771-a342-42bc-85f2-bcbf53ccc2a7&quot;,
+  &quot;type&quot;: &quot;api&quot;,
+  &quot;expires_at&quot;: &quot;2026-10-26T21:51:32.954918Z&quot;,
+  &quot;active&quot;: &quot;code&quot;,
+  &quot;ui&quot;: {&quot;messages&quot;: [
+    {&quot;id&quot;: 1060003, &quot;type&quot;: &quot;info&quot;,
+     &quot;text&quot;: &quot;An email containing a recovery code has been sent to the email address you provided. If you have not received an email, check the spelling of the address and make sure to use the address you registered with.&quot;}]},
+  &quot;state&quot;: &quot;sent_email&quot;
+}</code></pre>
+<h4>Unknown email</h4><p>Exactly the same answer (the same body apart from ids) and no email. The user finds out only by not receiving a message.</p><h4>A phone number typed here</h4><pre class="out"><code>HTTP/1.1 400 Bad Request
+
+{&quot;id&quot;: &quot;d50d378a-734f-4dc7-aebb-836c6ad66dfe&quot;, &quot;type&quot;: &quot;api&quot;,
+ &quot;ui&quot;: {&quot;nodes&quot;: [{&quot;group&quot;: &quot;code&quot;, &quot;name&quot;: &quot;email&quot;, &quot;messages&quot;: [
+   {&quot;id&quot;: 4000040, &quot;type&quot;: &quot;error&quot;, &quot;text&quot;: &quot;Enter a valid email address&quot;, &quot;context&quot;: {&quot;value&quot;: &quot;+251903050827&quot;}}]}]},
+ &quot;state&quot;: &quot;choose_method&quot;}</code></pre>
+</div>
+</details>
+
+<details class="endpoint" id="ep-rec-code">
+<summary><span class="method m-post">POST</span><span class="path">/kratos/self-service/recovery?flow=ID</span><span class="sum">Submit the code: get the privileged session</span></summary>
+<div class="body"><dl class="meta"><dt>Who may call</dt><dd>anyone, no session needed</dd><dt>Auth</dt><dd>none</dd><dt>Headers</dt><dd><code>Content-Type: application/json</code> on POSTs. Do not send <code>Origin</code> or <code>Cookie</code> from a native app (the gateway strips them anyway)</dd><dt>Rate limit</dt><dd>same route and limits as the previous call</dd><dt>Implemented by</dt><dd>Ory Kratos behind the gateway</dd></dl>
+<h4>Purpose</h4>
+<p>Checks the code and, if right, creates the session that lets the user set a new password. Send only <code>code</code>, never <code>email</code> together with it (sending <code>email</code> again would invalidate the code and send a new one).</p>
+<h4>Parameters</h4>
+<div class="table-wrap"><table><thead><tr><th>Field</th><th>Type</th><th>Required</th><th>Notes</th></tr></thead><tbody><tr><td><code>method</code></td><td>string</td><td>yes</td><td><code>"code"</code></td></tr><tr><td><code>code</code></td><td>string</td><td>yes</td><td>6 digits, valid 10 minutes</td></tr></tbody></table></div>
+<h4>Example request</h4>
+<pre><code>curl -s -X POST &quot;$GATEWAY/kratos/self-service/recovery?flow=$RFLOW&quot; \
+  -H &#x27;Content-Type: application/json&#x27; -d &#x27;{&quot;method&quot;:&quot;code&quot;,&quot;code&quot;:&quot;123456&quot;}&#x27;</code></pre>
+<h4>Example response</h4>
+<pre class="out"><code>HTTP/1.1 200 OK
+
+{
+  &quot;id&quot;: &quot;4b8d7771-a342-42bc-85f2-bcbf53ccc2a7&quot;,
+  &quot;type&quot;: &quot;api&quot;,
+  &quot;state&quot;: &quot;passed_challenge&quot;,
+  &quot;continue_with&quot;: [
+    {&quot;action&quot;: &quot;set_ory_session_token&quot;, &quot;ory_session_token&quot;: &quot;ory_st_xxxxxxxx&quot;},
+    {&quot;action&quot;: &quot;show_settings_ui&quot;,
+     &quot;flow&quot;: {&quot;id&quot;: &quot;9256e3e5-64f9-4278-b958-34ae3360dea0&quot;,
+              &quot;url&quot;: &quot;http://localhost:3000/settings?flow=9256e3e5-64f9-4278-b958-34ae3360dea0&quot;}}
+  ]
+}</code></pre>
+<h4>Wrong, expired or used code</h4><pre class="out"><code>HTTP/1.1 200 OK
+
+{&quot;id&quot;: &quot;4b8d7771-a342-42bc-85f2-bcbf53ccc2a7&quot;, &quot;type&quot;: &quot;api&quot;, &quot;active&quot;: &quot;code&quot;,
+ &quot;ui&quot;: {&quot;messages&quot;: [{&quot;id&quot;: 4060006, &quot;type&quot;: &quot;error&quot;, &quot;text&quot;: &quot;The recovery code is invalid or has already been used. Please try again.&quot;}]},
+ &quot;state&quot;: &quot;sent_email&quot;}</code></pre><p>Kratos limits the wrong tries per code; after that the user must ask for a new code (post the email again).</p>
+</div>
+</details>
+
+<h2 id="phone-route">Phone route</h2>
+<p>Why it exists: phone-only accounts (the main case in the target market) could not recover through Kratos at all. The code is generated, sent by SMS and checked by our notification service (stored hashed; 10 minutes; <strong>5 wrong tries</strong> kill it; single use). The password is then set through Kratos' admin API and every session of the account is revoked.</p>
+<details class="endpoint" id="ep-ph-start">
+<summary><span class="method m-post">POST</span><span class="path">/public/v1/password-reset/start</span><span class="sum">Send the reset code by SMS</span></summary>
+<div class="body"><dl class="meta"><dt>Who may call</dt><dd>anyone, no session</dd><dt>Auth</dt><dd>none</dd><dt>Rate limit</dt><dd>5 per 60 s per IP <strong>and</strong> 5 per 15 minutes per <code>identifier</code> (route <code>password-reset-start</code>)</dd><dt>Implemented by</dt><dd>notification-service</dd></dl>
+<h4>Purpose</h4>
+<p>Sends an SMS code if the phone belongs to an active app account. The answer is the same <code>202</code> for every well-formed phone (registered or not, staff or not), so it cannot be used to find accounts. It also counts against the per-number send limit (the same one the pre-flight check uses): over it the answer is <code>429 {"error":"too_many_codes","retryAfterSeconds":N}</code>.</p>
+<h4>Parameters</h4>
+<div class="table-wrap"><table><thead><tr><th>Field</th><th>Type</th><th>Required</th><th>Notes</th></tr></thead><tbody><tr><td><code>identifier</code></td><td>string</td><td>yes</td><td>a phone like <code>+251911234567</code>; an email is refused with <code>400</code></td></tr></tbody></table></div>
+<h4>Example request</h4>
+<pre><code>curl -s -X POST &quot;$GATEWAY/public/v1/password-reset/start&quot; \
+  -H &#x27;Content-Type: application/json&#x27; -d &#x27;{&quot;identifier&quot;:&quot;+251903050827&quot;}&#x27;</code></pre>
+<h4>Example response</h4>
+<pre class="out"><code>HTTP/1.1 202 Accepted
+
+{&quot;expiresInSeconds&quot;: 600, &quot;status&quot;: &quot;sent&quot;}</code></pre>
+<p>The SMS (dev stack: <code>/dev/messages</code>):</p><pre class="out"><code>Adera: your password reset code is 914548. Do not share it with anyone. It expires in 10 minutes. If you did not ask for it, ignore this message.</code></pre><h4>Same answer for an unknown phone</h4><pre class="out"><code>HTTP/1.1 202 Accepted
+
+{&quot;expiresInSeconds&quot;: 600, &quot;status&quot;: &quot;sent&quot;}   (for +251900009998, no account: no SMS is sent)</code></pre><h4>An email in the phone endpoint (400)</h4><pre class="out"><code>HTTP/1.1 400 Bad Request
+
+{&quot;error&quot;: &quot;validation_failed&quot;, &quot;fields&quot;: {&quot;identifier&quot;: &quot;a phone number like +251911234567; for an email address use Kratos&#x27; recovery flow&quot;}}</code></pre>
+</div>
+</details>
+
+<details class="endpoint" id="ep-ph-finish">
+<summary><span class="method m-post">POST</span><span class="path">/public/v1/password-reset/finish</span><span class="sum">Check the code and set the new password</span></summary>
+<div class="body"><dl class="meta"><dt>Who may call</dt><dd>anyone, no session</dd><dt>Auth</dt><dd>none</dd><dt>Rate limit</dt><dd>10 per 60 s per IP <strong>and</strong> 10 per 15 minutes per <code>identifier</code> (route <code>password-reset-finish</code>)</dd><dt>Implemented by</dt><dd>notification-service, then Kratos admin API</dd></dl>
+<h4>Purpose</h4>
+<p>Verifies the code and sets the new password in one step, signs the account out everywhere. Unknown phone, wrong code, expired code, used code and "too many tries" all answer the same <code>invalid_code</code>. The password rule is checked <em>before</em> the code is touched, so a too-short password does not use up the code or a try.</p>
+<h4>Parameters</h4>
+<div class="table-wrap"><table><thead><tr><th>Field</th><th>Type</th><th>Required</th><th>Notes</th></tr></thead><tbody><tr><td><code>identifier</code></td><td>string</td><td>yes</td><td>the phone</td></tr><tr><td><code>code</code></td><td>string</td><td>yes</td><td>6 digits</td></tr><tr><td><code>password</code></td><td>string</td><td>yes</td><td>6 characters or more</td></tr></tbody></table></div>
+<h4>Example request</h4>
+<pre><code>curl -s -X POST &quot;$GATEWAY/public/v1/password-reset/finish&quot; \
+  -H &#x27;Content-Type: application/json&#x27; \
+  -d &#x27;{&quot;identifier&quot;:&quot;+251903050827&quot;,&quot;code&quot;:&quot;914548&quot;,&quot;password&quot;:&quot;phonepass1&quot;}&#x27;</code></pre>
+<h4>Example response</h4>
+<pre class="out"><code>HTTP/1.1 200 OK
+
+{&quot;status&quot;: &quot;password_changed&quot;}</code></pre>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th>Body</th><th>When</th></tr></thead><tbody><tr><td>400</td><td><code>{"error":"invalid_code"}</code></td><td>wrong / expired / already used code, unknown phone, 5 wrong tries used</td></tr><tr><td>400</td><td><code>{"error":"validation_failed","fields":{"password":"must be at least 6 characters"}}</code></td><td>short password (the code stays valid)</td></tr><tr><td>400</td><td><code>{"error":"validation_failed","fields":{"identifier":"..."}}</code></td><td>not a phone</td></tr><tr><td>429</td><td>HTML page</td><td>gateway limit</td></tr><tr><td>503</td><td><code>{"error":"service_unavailable"}</code></td><td>Kratos or a dependency unreachable</td></tr></tbody></table></div><p>A second use of the same code returns <code>400 {"error":"invalid_code"}</code>. After success, sign in with the new password (Login); every old session token answers <code>401</code>. Staff accounts and suspended accounts get no SMS and cannot be reset here.</p>
+</div>
+</details>
+
+<h2 id="enumeration">Does recovery reveal which accounts exist?</h2>
+<p>No, in both routes: the answers to "send a code" are identical for known and unknown addresses (email: same <code>200</code> and message; phone: same <code>202</code>), and nothing is sent to unknown ones. The remaining signals are timing (a send takes longer than a no-op) and the registration form, which does reveal an existing identifier (message <code>4000007</code>).</p>
+<h2 id="errors">Errors and limits at a glance</h2>
+<div class="table-wrap"><table><thead><tr><th>Where</th><th>Limit</th><th>Key</th></tr></thead><tbody><tr><td><code>POST /kratos/self-service/recovery</code></td><td>5 per 60 s; 5 per 15 min</td><td>IP; email typed</td></tr><tr><td><code>/public/v1/password-reset/start</code></td><td>5 per 60 s; 5 per 15 min</td><td>IP; phone</td></tr><tr><td><code>/public/v1/password-reset/finish</code></td><td>10 per 60 s; 10 per 15 min</td><td>IP; phone</td></tr><tr><td>code lifetime</td><td>10 minutes</td><td>code</td></tr><tr><td>SMS sends</td><td>5 per hour, 10 per day</td><td>phone</td></tr><tr><td>email sends</td><td>10 per hour, 20 per day</td><td>address</td></tr></tbody></table></div>
+
+<div class="pager"><a class="prev" href="login.html"><small>Previous</small>Login</a><a class="next" href="change-password.html"><small>Next</small>Change password</a></div>
+<p class="footer">Adera super-app guide: sign-in and account &middot; verified against the dev stack on 2026-10-26</p>
+</main>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

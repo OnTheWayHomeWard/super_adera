@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Login | Adera guide</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+<button id="menu-btn" type="button" aria-label="Toggle menu">Menu</button>
+<span class="brand">Adera guide: sign-in and account</span>
+<span class="spacer"></span>
+<button id="theme-btn" type="button" aria-label="Toggle light or dark theme">Theme</button>
+</header>
+<div class="layout">
+<nav class="sidebar" aria-label="Pages in this guide">
+<h4>Super app: sign-in and account</h4>
+<ul>
+<li><a href="index.html">Overview</a></li>
+<li><a href="quickstart.html">Quick start</a></li>
+<li><a href="registration.html">Registration</a></li>
+<li><a href="verification.html">Verification</a></li>
+<li><a href="login.html" class="current">Login</a><ul><li><a href="#overview">Overview</a></li><li><a href="#sequence">Call sequence</a></li><li><a href="#endpoints">Endpoints</a></li><li><a href="#use-token">Use the session</a></li><li><a href="#errors">Errors</a></li><li><a href="#protections">Guessing protections</a></li></ul></li>
+<li><a href="recovery.html">Forgot password</a></li>
+<li><a href="change-password.html">Change password</a></li>
+<li><a href="session-and-logout.html">Session and logout</a></li>
+<li><a href="profile.html">Profile</a></li>
+<li><a href="extra-data.html">Extra data</a></li>
+<li><a href="location.html">Location</a></li>
+<li><a href="avatar.html">Avatar</a></li>
+<li><a href="devices-and-push-tokens.html">Devices and push tokens</a></li>
+<li><a href="errors.html">Error table</a></li>
+<li><a href="known-issues.html">Known issues and not built yet</a></li>
+</ul>
+</nav>
+<main>
+<h1>Login</h1>
+<p class="lead">Sign in with phone or email and password: the flow, the session token, what a wrong password and an unverified account look like, and the guessing protections.</p>
+<h2 id="overview">Overview</h2>
+<p>A returning user signs in with the <strong>phone number or email and the password</strong>. No code is involved. The answer carries a <code>session_token</code> valid <strong>30 days</strong>; the app sends it as <code>Authorization: Bearer ...</code> on every call. Signing in with a code is not available to app users (a code login attempt answers <code>4000035</code>, "does not exist or has not setup sign in with code").</p>
+<h2 id="sequence">Call sequence</h2>
+<ol><li><code>GET /kratos/self-service/login/api</code> returns a flow id (valid 10 minutes).</li>
+<li><code>POST /kratos/self-service/login?flow=ID</code> with <code>{"method":"password","identifier":"+251903050827","password":"..."}</code>.</li>
+<li><code>200</code>: store <code>session_token</code> in the platform's secure storage. <code>400</code>: show the message and let the user retry on the same flow. <code>403 session_verified_address_required</code>: go to Verification.</li>
+<li>Call the API with the token (below).</li></ol>
+<h2 id="endpoints">Endpoints</h2>
+<details class="endpoint" id="ep-login-create">
+<summary><span class="method m-get">GET</span><span class="path">/kratos/self-service/login/api</span><span class="sum">Start a login flow</span></summary>
+<div class="body"><dl class="meta"><dt>Who may call</dt><dd>anyone, no session needed</dd><dt>Auth</dt><dd>none</dd><dt>Headers</dt><dd><code>Content-Type: application/json</code> on POSTs. Do not send <code>Origin</code> or <code>Cookie</code> from a native app (the gateway strips them anyway)</dd><dt>Rate limit</dt><dd>120 per 60 s per IP</dd><dt>Implemented by</dt><dd>Ory Kratos behind the gateway</dd></dl>
+<h4>Purpose</h4>
+<p>Creates the server-side state of one sign-in attempt.</p>
+<h4>Parameters</h4>
+<p>Do not send a session token (Kratos then answers <code>session_already_available</code>) unless you add <code>refresh=true</code>.</p>
+<h4>Example request</h4>
+<pre><code>curl -s &quot;$GATEWAY/kratos/self-service/login/api&quot;</code></pre>
+<h4>Example response</h4>
+<pre class="out"><code>(flow JSON: id, ui.action, state &quot;choose_method&quot;)</code></pre>
+
+</div>
+</details>
+
+<details class="endpoint" id="ep-login-submit">
+<summary><span class="method m-post">POST</span><span class="path">/kratos/self-service/login?flow=ID</span><span class="sum">Sign in with the password</span></summary>
+<div class="body"><dl class="meta"><dt>Who may call</dt><dd>anyone, no session needed</dd><dt>Auth</dt><dd>none</dd><dt>Headers</dt><dd><code>Content-Type: application/json</code> on POSTs. Do not send <code>Origin</code> or <code>Cookie</code> from a native app (the gateway strips them anyway)</dd><dt>Rate limit</dt><dd>10 per 60 s per IP <strong>and</strong> 10 per 15 minutes per <code>identifier</code> (route <code>kratos-login-submit</code>); over it: <code>429</code></dd><dt>Implemented by</dt><dd>Ory Kratos behind the gateway</dd></dl>
+<h4>Purpose</h4>
+<p>Checks the password of the account that has this phone or email as sign-in name, and the verified state of that address.</p>
+<h4>Parameters</h4>
+<div class="table-wrap"><table><thead><tr><th>Field</th><th>Type</th><th>Required</th><th>Notes</th></tr></thead><tbody><tr><td><code>method</code></td><td>string</td><td>yes</td><td><code>"password"</code></td></tr><tr><td><code>identifier</code></td><td>string</td><td>yes</td><td>the phone or email, exactly as registered</td></tr><tr><td><code>password</code></td><td>string</td><td>yes</td><td></td></tr></tbody></table></div>
+<h4>Example request</h4>
+<pre><code>curl -s -X POST &quot;$GATEWAY/kratos/self-service/login?flow=$FLOW&quot; \
+  -H &#x27;Content-Type: application/json&#x27; \
+  -d &#x27;{&quot;method&quot;:&quot;password&quot;,&quot;identifier&quot;:&quot;+251903050827&quot;,&quot;password&quot;:&quot;tadesse&quot;}&#x27;</code></pre>
+<h4>Example response</h4>
+<pre class="out"><code>HTTP/1.1 200 OK
+
+{
+  &quot;session_token&quot;: &quot;ory_st_xxxxxxxx&quot;,
+  &quot;session&quot;: {
+    &quot;id&quot;: &quot;d024e81a-2dbc-4928-bea6-f5bf649311d5&quot;,
+    &quot;active&quot;: true,
+    &quot;authenticated_at&quot;: &quot;2026-10-26T21:41:30.538759894Z&quot;,
+    &quot;expires_at&quot;: &quot;2026-11-25T21:41:30.538759894Z&quot;,
+    &quot;authenticator_assurance_level&quot;: &quot;aal1&quot;,
+    &quot;authentication_methods&quot;: [{&quot;method&quot;: &quot;password&quot;, &quot;aal&quot;: &quot;aal1&quot;, &quot;completed_at&quot;: &quot;2026-10-26T21:41:30.538644112Z&quot;}]
+  },
+  &quot;continue_with&quot;: null
+}</code></pre>
+<h4>Wrong password, or unknown phone/email (400)</h4><p>The two cases answer <strong>identically</strong> (same message id <code>4000006</code>, same text), so the answer does not reveal whether an account exists. Real answer for a wrong password; the one for a never-registered number differs only in the ids and timestamps.</p><pre class="out"><code>HTTP/1.1 400 Bad Request
+
+{
+  &quot;id&quot;: &quot;004d1c29-c35e-453a-9854-a41e95359892&quot;,
+  &quot;type&quot;: &quot;api&quot;,
+  &quot;expires_at&quot;: &quot;2026-10-26T21:51:30.543147Z&quot;,
+  &quot;ui&quot;: {&quot;nodes&quot;: [], &quot;messages&quot;: [
+    {&quot;id&quot;: 4000006, &quot;type&quot;: &quot;error&quot;,
+     &quot;text&quot;: &quot;The provided credentials are invalid, check for spelling mistakes in your password or username, email address, or phone number.&quot;}]},
+  &quot;refresh&quot;: false,
+  &quot;requested_aal&quot;: &quot;aal1&quot;,
+  &quot;state&quot;: &quot;choose_method&quot;
+}</code></pre><h4>Address not verified yet</h4><p>See Verification: status <code>403</code>, <code>error.id</code> <code>session_verified_address_required</code>, with a fresh verification flow and code. Note that the check is on the address you signed in with: an account with a verified email and an unverified phone can sign in with the email but not with the phone.</p>
+</div>
+</details>
+
+<h2 id="use-token">Use the session</h2>
+<details class="endpoint" id="ep-me">
+<summary><span class="method m-get">GET</span><span class="path">/api/v1/me</span><span class="sum">Call the API with the token</span></summary>
+<div class="body"><dl class="meta"><dt>Who may call</dt><dd>a signed-in user</dd><dt>Auth</dt><dd><code>Authorization: Bearer &lt;session_token&gt;</code></dd><dt>Rate limit</dt><dd>300 per 60 s per IP</dd><dt>Implemented by</dt><dd>user-service</dd></dl>
+<h4>Purpose</h4>
+<p>Shows the token works and returns the profile created at registration (see Profile).</p>
+<h4>Parameters</h4>
+<p>None.</p>
+<h4>Example request</h4>
+<pre><code>curl -s &quot;$GATEWAY/api/v1/me&quot; -H &quot;Authorization: Bearer $TOKEN&quot;</code></pre>
+<h4>Example response</h4>
+<pre class="out"><code>HTTP/1.1 200 OK
+
+{&quot;id&quot;: &quot;bfa0c48c-f574-451f-936a-b02291f5a190&quot;, &quot;email&quot;: null, &quot;phone&quot;: &quot;+251903050827&quot;, &quot;firstName&quot;: null, &quot;lastName&quot;: null,
+ &quot;gender&quot;: null, &quot;dateOfBirth&quot;: null, &quot;language&quot;: &quot;en&quot;, &quot;market&quot;: &quot;ET&quot;, &quot;timezone&quot;: &quot;Africa/Addis_Ababa&quot;,
+ &quot;avatarImageId&quot;: null, &quot;avatarUrl&quot;: null, &quot;location&quot;: null, &quot;verificationTier&quot;: &quot;CONTACT&quot;, &quot;status&quot;: &quot;ACTIVE&quot;,
+ &quot;termsAcceptedVersion&quot;: null, &quot;termsAcceptedAt&quot;: null, &quot;extra&quot;: {}, &quot;createdAt&quot;: &quot;2026-10-26T21:40:27.617299Z&quot;,
+ &quot;updatedAt&quot;: &quot;2026-10-26T21:40:27.617299Z&quot;}</code></pre>
+
+</div>
+</details>
+
+<h2 id="errors">Errors</h2>
+<div class="table-wrap"><table><thead><tr><th>Status</th><th>Body</th><th>When</th><th>What the app does</th></tr></thead><tbody><tr><td>400</td><td>flow JSON, message <code>4000006</code></td><td>wrong password or unknown identifier (indistinguishable)</td><td>"Wrong phone/email or password"; offer Forgot password</td></tr><tr><td>403</td><td><code>error.id = session_verified_address_required</code></td><td>address not verified</td><td>verification flow from <code>details.continue_with</code></td></tr><tr><td>400</td><td><code>{"error":{"id":"session_already_available",...}}</code></td><td>flow created while sending a valid token</td><td>do not send the token</td></tr><tr><td>410</td><td>Kratos <code>self_service_flow_expired</code></td><td>flow older than 10 minutes</td><td>start a new flow</td></tr><tr><td>429</td><td>HTML page</td><td>more than 10 login submits a minute from one IP, or more than 10 tries in 15 minutes for the same identifier</td><td>tell the user to wait; there is no <code>Retry-After</code></td></tr><tr><td>401 / 403 on API calls</td><td>see Session and logout</td><td>dead session / suspended or deleted account</td><td></td></tr></tbody></table></div>
+<h2 id="protections">Guessing passwords: what protects an account</h2>
+<p>Kratos has <strong>no account lockout</strong>. The brakes are at the gateway only: (a) 10 sign-in submits per minute per IP, and (b) 10 submits per 15 minutes for the same phone/email whatever the IP (the identifier is read from the request body), so rotating IPs does not help against one target. With a 6-character minimum and no complexity rule, a determined attacker can still try about 40 passwords per target per hour, and the limit also lets an attacker block a victim's sign-in for 15 minutes by spamming wrong tries (a denial of service on one account). Not built: lockout with notification, CAPTCHA, device trust, second factor for customers. Behind a real proxy the gateway must see the real client IP (a production checklist item).</p>
+
+<div class="pager"><a class="prev" href="verification.html"><small>Previous</small>Verification</a><a class="next" href="recovery.html"><small>Next</small>Forgot password</a></div>
+<p class="footer">Adera super-app guide: sign-in and account &middot; verified against the dev stack on 2026-10-26</p>
+</main>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

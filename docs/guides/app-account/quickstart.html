@@ -18,7 +18,11 @@
 <h4>Super app: sign-in and account</h4>
 <ul><li><a href="index.html">Overview</a></li>
 <li><a href="quickstart.html" class="current">Quick start</a><ul><li><a href="#prereq">Before you start</a></li><li><a href="#first-run">First run: register, fill the profile, register the device, log out</a></li><li><a href="#returning">Second run: the same person signs in again</a></li><li><a href="#what-the-app-does">The same sequence as an app does it</a></li><li><a href="#cleanup">Cleaning up after a test</a></li></ul></li>
-<li><a href="authentication.html">Registration and login</a></li>
+<li><a href="registration.html">Registration</a></li>
+<li><a href="verification.html">Verification</a></li>
+<li><a href="login.html">Login</a></li>
+<li><a href="recovery.html">Forgot password</a></li>
+<li><a href="change-password.html">Change password</a></li>
 <li><a href="session-and-logout.html">Session and logout</a></li>
 <li><a href="profile.html">Profile</a></li>
 <li><a href="extra-data.html">Extra data</a></li>
@@ -30,22 +34,26 @@
 </nav>
 <main>
 <h1>Quick start: first run, copy and paste</h1>
-<p class="lead">A complete first-run sequence you can paste into a shell: sign up with a phone code, use the profile, location, device and avatar APIs, log out, and sign in again.</p>
+<p class="lead">A complete first-run sequence you can paste into a shell: sign up with a password, verify the phone with a code, sign in, use the profile, location, device and avatar APIs, log out, and sign in again.</p>
 <h2 id="prereq">Before you start</h2>
-<ul><li>A shell with <code>curl</code> and <code>jq</code>. The dev gateway is <code>http://127.0.0.1:9080</code> (<code>$GATEWAY</code>).</li><li>The dev stack runs in dev mode: the SMS provider is the console (nothing is sent) and the notification service exposes <code>/dev/messages</code> so you can read the one-time code. In production the person receives the code by SMS or email and step 3 is replaced by the user typing it.</li><li>A small image file named <code>photo.jpg</code> in the current directory for the avatar step (any JPEG, PNG, GIF or BMP under 5 MiB).</li><li>Use a phone number of your own (international format). Every sign-in step counts against the gateway limit of 10 submits per minute per IP and the per-number SMS limit of 5 per hour, so do not run this in a loop.</li><li>The whole script below was run end to end against the dev stack on 2026-10-26 (registration, profile, location, device, avatar, logout, then a returning login); the outputs in this guide come from those runs.</li></ul>
+<ul><li>A shell with <code>curl</code> and <code>jq</code>. The dev gateway is <code>http://127.0.0.1:9080</code> (<code>$GATEWAY</code>).</li><li>The dev stack runs in dev mode: the SMS provider is the console (nothing is sent) and the notification service exposes <code>/dev/messages</code> so you can read the verification code. In production the person receives it by SMS or email and step 3 is replaced by the user typing it.</li></ul>
 <h2 id="first-run">First run: register, fill the profile, register the device, log out</h2>
 <p>Copy the block into a shell (it is plain bash). Each step prints what to look at. Variables set early (<code>$TOKEN</code>, <code>$USER_ID</code>) are reused by later steps.</p>
 <pre><code>export GATEWAY=http://127.0.0.1:9080
 export PHONE='+2519XXXXXXXX'        # a number of your own, international format (any well-formed number works in dev)
+export PASSWORD='tadesse'           # 6 or more characters, nothing else required
 
 # 1. Start a registration flow (valid 10 minutes)
 FLOW=$(curl -s "$GATEWAY/kratos/self-service/registration/api" | jq -r .id)
-echo "flow: $FLOW"
 
-# 2. Submit the phone: Kratos sends the code. HTTP 400 with state "sent_email" is the SUCCESS answer.
-curl -s -X POST "$GATEWAY/kratos/self-service/registration?flow=$FLOW" \
+# 2. Create the account: phone + password (6+ characters). HTTP 200 = created, but NO session yet:
+#    the response names the verification flow and the address that got the code.
+RESP=$(curl -s -X POST "$GATEWAY/kratos/self-service/registration?flow=$FLOW" \
   -H 'Content-Type: application/json' \
-  -d "{\"method\":\"code\",\"traits.phone_number\":\"$PHONE\"}" | jq '{state, message: .ui.messages[0].id}'
+  -d "{\"method\":\"password\",\"password\":\"$PASSWORD\",\"traits.phone_number\":\"$PHONE\"}")
+VFLOW=$(echo "$RESP" | jq -r '.continue_with[0].flow.id')
+export USER_ID=$(echo "$RESP" | jq -r .identity.id)
+echo "verification flow: $VFLOW  code sent to: $(echo "$RESP" | jq -r '.continue_with[0].flow.verifiable_address')"
 
 # 3. DEV ONLY: read the code the console SMS provider "sent" (in production the user receives an SMS)
 sleep 2
@@ -53,12 +61,14 @@ CODE=$(curl -s "http://127.0.0.1:8085/dev/messages?to=$(jq -rn --arg p "$PHONE" 
   | jq -r 'max_by(.at).body' | grep -oE '[0-9]{6}' | head -1)
 echo "code: $CODE"
 
-# 4. Submit phone + code: HTTP 200 returns the session token
-RESP=$(curl -s -X POST "$GATEWAY/kratos/self-service/registration?flow=$FLOW" \
+# 4. Verify the phone with the code, then sign in with the password: HTTP 200 returns the session token
+curl -s -X POST "$GATEWAY/kratos/self-service/verification?flow=$VFLOW" \
+  -H 'Content-Type: application/json' -d "{\"method\":\"code\",\"code\":\"$CODE\"}" | jq .state
+LFLOW=$(curl -s "$GATEWAY/kratos/self-service/login/api" | jq -r .id)
+RESP=$(curl -s -X POST "$GATEWAY/kratos/self-service/login?flow=$LFLOW" \
   -H 'Content-Type: application/json' \
-  -d "{\"method\":\"code\",\"traits.phone_number\":\"$PHONE\",\"code\":\"$CODE\"}")
+  -d "{\"method\":\"password\",\"identifier\":\"$PHONE\",\"password\":\"$PASSWORD\"}")
 export TOKEN=$(echo "$RESP" | jq -r .session_token)
-export USER_ID=$(echo "$RESP" | jq -r .session.identity.id)
 echo "user id: $USER_ID   session expires: $(echo "$RESP" | jq -r .session.expires_at)"
 
 # 5. Read my profile (the profile row was created by the registration web hook)
@@ -94,29 +104,21 @@ curl -s -o /dev/null -w "logout: %{http_code}\n" -X POST "$GATEWAY/api/v1/me/log
   -d '{"fcmToken":"dev-fcm-token-1","installationId":"my-install-0001"}'
 # the old token is dead now (HTTP 401)
 curl -s -o /dev/null -w "after logout: %{http_code}\n" "$GATEWAY/api/v1/me" -H "Authorization: Bearer $TOKEN"</code></pre>
-<p>What you should see: step 2 prints <code>{"state":"sent_email","message":1040005}</code> (the code was sent); step 4 prints the user id and the 30-day expiry; step 5 shows a fresh profile with <code>firstName: null</code>, <code>language: "en"</code>, <code>market: "ET"</code>, <code>status: "ACTIVE"</code>; step 6 shows the updated fields and <code>termsAcceptedAt</code> set by the server; step 7 prints the location then <code>null</code>; step 8 prints the device and <code>1</code>; step 9 prints an <code>avatarImageId</code>, then <code>file</code> reports a 512x512 JPEG; logout prints <code>204</code> and the old token gives <code>401</code>.</p>
+<p>What you should see: step 2 prints the verification flow id and the phone the code went to; step 3 prints the 6-digit code; step 4 prints <code>"passed_challenge"</code>, then the user id and the 30-day expiry; step 5 shows a fresh profile with <code>firstName: null</code>, <code>language: "en"</code>, <code>market: "ET"</code>, <code>status: "ACTIVE"</code>; step 6 shows the updated fields and <code>termsAcceptedAt</code> set by the server; step 7 prints the location then <code>null</code>; step 8 prints the device and <code>1</code>; step 9 prints an <code>avatarImageId</code>, then <code>file</code> reports a 512x512 JPEG; logout prints <code>204</code> and the old token gives <code>401</code>.</p>
 <h2 id="returning">Second run: the same person signs in again</h2>
-<p>A returning user uses the login endpoints and the field <code>identifier</code>. The profile you saved is still there.</p>
-<pre><code># Returning user: the same flow with the login endpoints and "identifier"
-FLOW=$(curl -s "$GATEWAY/kratos/self-service/login/api" | jq -r .id)
-curl -s -X POST "$GATEWAY/kratos/self-service/login?flow=$FLOW" \
-  -H 'Content-Type: application/json' \
-  -d "{\"method\":\"code\",\"identifier\":\"$PHONE\"}" | jq '{state, message: .ui.messages[0].id}'
-# (dev) read the newest code for $PHONE as in step 3, then:
-sleep 2
-CODE=$(curl -s "http://127.0.0.1:8085/dev/messages?to=$(jq -rn --arg p "$PHONE" '$p|@uri')" \
-  | jq -r 'max_by(.at).body' | grep -oE '[0-9]{6}' | head -1)
+<p>A returning user needs only the login flow and the password. No code. The profile you saved is still there.</p>
+<pre><code>FLOW=$(curl -s "$GATEWAY/kratos/self-service/login/api" | jq -r .id)
 export TOKEN=$(curl -s -X POST "$GATEWAY/kratos/self-service/login?flow=$FLOW" \
   -H 'Content-Type: application/json' \
-  -d "{\"method\":\"code\",\"identifier\":\"$PHONE\",\"code\":\"$CODE\"}" | jq -r .session_token)
+  -d "{\"method\":\"password\",\"identifier\":\"$PHONE\",\"password\":\"$PASSWORD\"}" | jq -r .session_token)
 curl -s "$GATEWAY/api/v1/me" -H "Authorization: Bearer $TOKEN" | jq '{id, firstName, language}'</code></pre>
-<p>Expected: <code>{"state":"sent_email","message":1010014}</code>, then <code>{"id":"...","firstName":"Selam","language":"am"}</code>. If the login flow answers message <code>4000035</code> instead, the number has no account: use the registration flow (the app should try login first, then fall back to registration; see Registration and login).</p>
+<p>Expected: <code>{"id":"...","firstName":"Selam","language":"am"}</code>. A wrong password or an unknown phone answers <code>400</code> with message <code>4000006</code> (the same for both); an account whose phone was never verified answers <code>403 session_verified_address_required</code> (see Login and Verification). Forgot the password? See Forgot password.</p>
 <h2 id="what-the-app-does">The same sequence as an app does it</h2>
-<ol><li>Launch: read the token from secure storage. None: show sign-in. Present: <code>GET /api/v1/me</code>. <code>200</code>: go on. <code>401</code>: delete the token, show sign-in. <code>403</code>: blocking screen. <code>5xx</code>/offline: retry, keep the token.</li><li>Sign-in screen: ask for phone or email once. <code>GET /kratos/self-service/login/api</code>, <code>POST</code> the identifier. <code>4000035</code>: switch to the registration flow with the same identifier. <code>1010014</code>/<code>1040005</code>: show the code screen with a 5-minute countdown.</li><li>Code screen: <code>POST</code> identifier plus code to the same flow. <code>200</code>: store <code>session_token</code> (and <code>session.expires_at</code>). <code>400</code> with <code>4010008</code>/<code>4040003</code>: wrong code, let them retry. <code>429</code>: wait and retry.</li><li>After sign-in: <code>GET /api/v1/me</code>; if <code>firstName</code> is <code>null</code> run onboarding (<code>PATCH /api/v1/me</code>, optional <code>PUT /location</code>, optional avatar).</li><li>Push: get the FCM token and <code>PUT /api/v1/me/devices</code> (with a stored installation id); repeat on every token refresh.</li><li>Sign out: <code>POST /api/v1/me/logout</code> with the FCM token and installation id, then clear local state.</li></ol>
+<ol><li>Launch: read the token from secure storage. None: show sign-in. Present: <code>GET /api/v1/me</code>. <code>200</code>: go on. <code>401</code>: delete the token, show sign-in. <code>403</code>: blocking screen. <code>5xx</code>/offline: retry, keep the token.</li><li>Sign-in screen: phone (or email) and password. <code>POST</code> them to a login flow. <code>200</code>: store <code>session_token</code> (and <code>session.expires_at</code>). <code>400</code> <code>4000006</code>: "wrong phone/email or password" (offer Forgot password and Register). <code>403 session_verified_address_required</code>: show the code screen for the verification flow in the error. <code>429</code>: wait.</li><li>Register screen: phone, optional email, password (6+). Call <code>POST /public/v1/login-codes/check</code> first, then register; then show the code screen (10-minute code) for the verification flow in <code>continue_with</code>, submit the code, then sign in with the same password.</li><li>After sign-in: <code>GET /api/v1/me</code>; if <code>firstName</code> is <code>null</code> run onboarding (<code>PATCH /api/v1/me</code>, optional <code>PUT /location</code>, optional avatar).</li><li>Push: get the FCM token and <code>PUT /api/v1/me/devices</code> (with a stored installation id); repeat on every token refresh.</li><li>Sign out: <code>POST /api/v1/me/logout</code> with the FCM token and installation id, then clear local state.</li></ol>
 <h2 id="cleanup">Cleaning up after a test</h2>
 <p>The script logs the session out. The account itself stays (the platform has no customer-facing account deletion yet, see Known issues and not built yet). In the dev stack the test account can be removed by the platform owner; do not reuse the seeded demo accounts for experiments.</p>
 
-<div class="pager"><a class="prev" href="index.html"><small>Previous</small>Overview</a><a class="next" href="authentication.html"><small>Next</small>Registration and login</a></div>
+<div class="pager"><a class="prev" href="index.html"><small>Previous</small>Overview</a><a class="next" href="registration.html"><small>Next</small>Registration</a></div>
 <p class="footer">Adera super-app guide: sign-in and account &middot; verified against the dev stack on 2026-10-26</p>
 </main>
 </div>

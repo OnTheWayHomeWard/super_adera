@@ -18,7 +18,11 @@
 <h4>Super app: sign-in and account</h4>
 <ul><li><a href="index.html">Overview</a></li>
 <li><a href="quickstart.html">Quick start</a></li>
-<li><a href="authentication.html">Registration and login</a></li>
+<li><a href="registration.html">Registration</a></li>
+<li><a href="verification.html">Verification</a></li>
+<li><a href="login.html">Login</a></li>
+<li><a href="recovery.html">Forgot password</a></li>
+<li><a href="change-password.html">Change password</a></li>
 <li><a href="session-and-logout.html">Session and logout</a></li>
 <li><a href="profile.html">Profile</a></li>
 <li><a href="extra-data.html">Extra data</a></li>
@@ -96,11 +100,17 @@
 <h2 id="kratos-errors">Table: /kratos/* (sign-in, sessions)</h2>
 <div class="table-wrap"><table><thead><tr><th>Status</th><th>Body</th><th>When</th><th>Client action</th></tr></thead><tbody>
 <tr><td>200</td><td>flow JSON, or <code>{session_token, session, ...}</code></td><td>a flow was created, or the last step succeeded</td><td>on <code>session_token</code> store it</td></tr>
-<tr><td>400</td><td>flow JSON, <code>state: sent_email</code>, message <code>1040005</code> (registration) / <code>1010014</code> (login)</td><td><strong>success</strong>: the code was sent</td><td>show the code screen</td></tr>
-<tr><td>400</td><td>flow JSON, messages <code>4040003</code> / <code>4010008</code></td><td>wrong, expired or reused code</td><td>retype or resend</td></tr>
-<tr><td>400</td><td>flow JSON, <code>4000041</code> / <code>4000040</code> / <code>4000002</code></td><td>invalid phone / invalid email / no identifier</td><td>inline field error</td></tr>
-<tr><td>400</td><td>flow JSON, <code>4000035</code></td><td>login for an unknown identifier</td><td>start registration instead</td></tr>
-<tr><td>400</td><td>flow JSON, <code>4000007</code></td><td>registration step 2 for an identifier that already has an account</td><td>start login instead</td></tr>
+<tr><td>200</td><td>flow JSON with <code>state: sent_email</code> and message <code>1060003</code> (recovery, email route)</td><td>a recovery code was "sent" (also for an unknown address)</td><td>show the code screen</td></tr>
+<tr><td>400</td><td>flow JSON, message <code>4000032</code> on <code>password</code></td><td>password shorter than 6 (registration, settings)</td><td>inline field error</td></tr>
+<tr><td>400</td><td>flow JSON, <code>ui.messages</code> <code>4000006</code></td><td>login: wrong password or unknown identifier (indistinguishable)</td><td>"wrong phone/email or password"</td></tr>
+<tr><td>403</td><td><code>{"error":{"id":"session_verified_address_required",...}}</code> with <code>details.continue_with</code></td><td>login with an address that is not verified; a fresh code was sent</td><td>go to the verification flow named there</td></tr>
+<tr><td>200</td><td>flow JSON, message <code>4070006</code> / <code>4060006</code>, state <code>sent_email</code></td><td>wrong, expired or used verification / recovery code (an error shown with status 200)</td><td>retype or ask for a new code</td></tr>
+<tr><td>400</td><td>flow JSON, <code>4000041</code> / <code>4000040</code> / <code>4000002</code></td><td>invalid phone / invalid email (also a phone typed in the recovery email field) / missing identifier</td><td>inline field error</td></tr>
+<tr><td>400</td><td>flow JSON, <code>ui.messages</code> <code>4000007</code></td><td>registration for an identifier that already has an account</td><td>offer login</td></tr>
+<tr><td>400</td><td>flow JSON, <code>4000035</code></td><td>sign-in by code (not available to app users)</td><td>do not offer it</td></tr>
+<tr><td>403</td><td><code>{"error":"forbidden","reason":"only the app-user schema can self-register"}</code></td><td>registration flow created with another <code>identity_schema</code></td><td>do not send it</td></tr>
+<tr><td>400</td><td><code>{"error":"invalid_code"}</code></td><td><code>/public/v1/password-reset/finish</code>: wrong, expired, used code, unknown phone, too many tries</td><td>ask for a new code</td></tr>
+<tr><td>429</td><td><code>{"error":"too_many_codes","retryAfterSeconds":N,...}</code> + <code>Retry-After</code></td><td><code>login-codes/check</code> or <code>password-reset/start</code>: send limit of that address reached</td><td>show the wait time</td></tr>
 <tr><td>400</td><td>flow JSON, <code>4010002</code></td><td>a finished login flow was submitted again</td><td>drop the flow</td></tr>
 <tr><td>400</td><td><code>{"error":{"id":"session_already_available",...}}</code></td><td>login flow created while sending a valid session without <code>refresh=true</code></td><td>do not send the token, or add <code>refresh=true</code></td></tr>
 <tr><td>401</td><td><code>{"error":{"code":401,"status":"Unauthorized","reason":"No valid session credentials found in the request."}}</code></td><td>whoami, sessions calls with a dead token</td><td>sign in again</td></tr>
@@ -108,19 +118,25 @@
 <tr><td>404</td><td><code>{"error":{"code":404,"status":"Not Found","message":"Unable to locate the resource"}}</code></td><td>unknown flow id</td><td>start a new flow</td></tr>
 <tr><td>410</td><td>Kratos <code>self_service_flow_expired</code></td><td>flow older than 10 minutes (per the Kratos API; not waited out here)</td><td>start a new flow</td></tr>
 <tr><td>204</td><td>no body</td><td>logout / revoke succeeded</td><td>-</td></tr>
-<tr><td>429</td><td>HTML page</td><td>10 submits per minute per IP exceeded, or 120 other calls per minute</td><td>back off, retry</td></tr>
+<tr><td>429</td><td>HTML page</td><td>a per-route limit exceeded (see the limits table), or 120 other Kratos calls per minute</td><td>back off, retry</td></tr>
 </tbody></table></div>
 <p>Staff-only responses of Kratos that customers never meet (second-factor <code>session_aal2_required</code> on whoami) are not part of this guide.</p>
 <h2 id="limits-summary">Table: all limits in one place</h2>
 <div class="table-wrap"><table><thead><tr><th>Where</th><th>Limit</th><th>Key</th><th>Over the limit</th></tr></thead><tbody>
-<tr><td><code>POST /kratos/self-service/*</code> (submits)</td><td>10 per 60 s</td><td>client IP</td><td>429 HTML</td></tr>
+<tr><td><code>POST /kratos/self-service/login</code></td><td>10 per 60 s; 10 per 15 min</td><td>client IP; the identifier</td><td>429 HTML</td></tr>
+<tr><td><code>POST /kratos/self-service/registration</code></td><td>5 per 60 s</td><td>client IP</td><td>429 HTML</td></tr>
+<tr><td><code>POST /kratos/self-service/recovery</code></td><td>5 per 60 s; 5 per 15 min</td><td>client IP; the email</td><td>429 HTML</td></tr>
+<tr><td><code>POST /kratos/self-service/verification</code>, <code>/settings</code></td><td>10 per 60 s each</td><td>client IP</td><td>429 HTML</td></tr>
+<tr><td><code>POST /public/v1/password-reset/start</code></td><td>5 per 60 s; 5 per 15 min</td><td>client IP; the phone</td><td>429 HTML</td></tr>
+<tr><td><code>POST /public/v1/password-reset/finish</code></td><td>10 per 60 s; 10 per 15 min</td><td>client IP; the phone</td><td>429 HTML</td></tr>
+<tr><td><code>POST /public/v1/login-codes/check</code></td><td>10 per 60 s</td><td>client IP</td><td>429 HTML</td></tr>
 <tr><td>other <code>/kratos/*</code></td><td>120 per 60 s</td><td>client IP</td><td>429 HTML</td></tr>
 <tr><td><code>/api/v1/me/avatar</code></td><td>20 per 60 s</td><td>client IP</td><td>429 HTML</td></tr>
 <tr><td>other <code>/api/v1/me*</code></td><td>300 per 60 s</td><td>client IP</td><td>429 HTML</td></tr>
 <tr><td>SMS codes</td><td>5 per hour, 10 per day</td><td>recipient number</td><td>silently no SMS</td></tr>
 <tr><td>Email codes</td><td>10 per hour, 20 per day</td><td>recipient address</td><td>silently no email</td></tr>
-<tr><td>one-time code</td><td>valid 5 minutes, single use</td><td>code</td><td>4040003 / 4010008</td></tr>
-<tr><td>flow (registration, login)</td><td>10 minutes</td><td>flow</td><td>410</td></tr>
+<tr><td>verification / recovery / phone-reset code</td><td>valid 10 minutes, single use</td><td>code</td><td>4070006 / 4060006 / <code>invalid_code</code></td></tr>
+<tr><td>flow (registration, login, recovery, settings after login)</td><td>10 minutes</td><td>flow</td><td>410</td></tr>
 <tr><td>session</td><td>30 days</td><td>token</td><td>401</td></tr>
 <tr><td>avatar file</td><td>5 MiB; 12000 px side; 40 megapixels; output at most 512 px</td><td>upload</td><td>413 / 400</td></tr>
 <tr><td><code>extra</code></td><td>16384 bytes</td><td>profile</td><td>400</td></tr>
