@@ -3,6 +3,7 @@ package app.adera.registry;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
@@ -527,6 +528,46 @@ class RegistryApiTests {
 		mvc.perform(patch("/admin/api/v1/staff/{id}", only).header("X-Staff-Id", only.toString()).header("X-Staff-Role", "SUPER_ADMIN")
 			.contentType(MediaType.APPLICATION_JSON).content("{\"status\":\"DISABLED\"}"))
 			.andExpect(status().isConflict()).andExpect(jsonPath("$.error").value("cannot_demote_self"));
+	}
+
+	@Test
+	void addingAnExistingStaffEmailCannotBypassTheSuperAdminProtections() throws Exception {
+		staffRepo.deleteAll();
+		UUID only = UUID.randomUUID();
+		String email = "boss-" + only + "@example.com";
+		staffRepo.save(new Staff(only, email, Role.SUPER_ADMIN, null, Instant.now()));
+		when(kratos.findByEmail(email)).thenReturn(Optional.of(new KratosClient.IdentityRef(only, email, "SUPER_ADMIN")));
+
+		// another super admin tries to demote the only super admin by "adding" them again with a lower role
+		mvc.perform(post("/admin/api/v1/staff").header("X-Staff-Id", UUID.randomUUID().toString()).header("X-Staff-Role", "SUPER_ADMIN")
+			.contentType(MediaType.APPLICATION_JSON).content(json(Map.of("email", email, "role", "VIEWER"))))
+			.andExpect(status().isConflict()).andExpect(jsonPath("$.error").value("last_super_admin"));
+		// the same, done by themselves
+		mvc.perform(post("/admin/api/v1/staff").header("X-Staff-Id", only.toString()).header("X-Staff-Role", "SUPER_ADMIN")
+			.contentType(MediaType.APPLICATION_JSON).content(json(Map.of("email", email, "role", "ADMIN"))))
+			.andExpect(status().isConflict()).andExpect(jsonPath("$.error").value("cannot_demote_self"));
+		// nothing changed, in Kratos or in the registry
+		verify(kratos, never()).setRole(any(), any());
+		org.assertj.core.api.Assertions.assertThat(staffRepo.findById(only).orElseThrow().getRole()).isEqualTo(Role.SUPER_ADMIN);
+	}
+
+	@Test
+	void addingAnExistingStaffEmailStillWorksWhenItIsNotALoss() throws Exception {
+		staffRepo.deleteAll();
+		UUID boss = UUID.randomUUID();
+		staffRepo.save(new Staff(boss, "boss-" + boss + "@example.com", Role.SUPER_ADMIN, null, Instant.now()));
+		UUID member = UUID.randomUUID();
+		String email = "member-" + member + "@example.com";
+		staffRepo.save(new Staff(member, email, Role.VIEWER, null, Instant.now()));
+		when(kratos.findByEmail(email)).thenReturn(Optional.of(new KratosClient.IdentityRef(member, email, "VIEWER")));
+		// promoting an existing member (or re-adding with the same role) is fine and idempotent
+		mvc.perform(as(post("/admin/api/v1/staff"), Role.SUPER_ADMIN).contentType(MediaType.APPLICATION_JSON).content(json(Map.of("email", email, "role", "ADMIN"))))
+			.andExpect(status().isOk()).andExpect(jsonPath("$.role").value("ADMIN"));
+		// demoting one of two super admins is allowed
+		mvc.perform(as(post("/admin/api/v1/staff"), Role.SUPER_ADMIN).contentType(MediaType.APPLICATION_JSON).content(json(Map.of("email", email, "role", "SUPER_ADMIN"))))
+			.andExpect(status().isOk());
+		mvc.perform(as(post("/admin/api/v1/staff"), Role.SUPER_ADMIN).contentType(MediaType.APPLICATION_JSON).content(json(Map.of("email", email, "role", "VIEWER"))))
+			.andExpect(status().isOk()).andExpect(jsonPath("$.role").value("VIEWER"));
 	}
 
 	// ---------- gateway verification of staff sessions ----------

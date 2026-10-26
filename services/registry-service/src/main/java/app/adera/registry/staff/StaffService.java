@@ -52,6 +52,11 @@ public class StaffService {
 		String email = normalise(rawEmail);
 		Instant now = clock.instant();
 		KratosClient.IdentityRef identity = kratos.findByEmail(email).orElse(null);
+		Staff existing = identity == null ? null : staff.findById(identity.id()).orElse(null);
+		if (existing != null) {
+			// "adding" someone who is already staff is a role change: it must obey the same rules as PATCH /staff/{id}
+			guardSuperAdminLoss(existing, role, Staff.Status.ACTIVE, actor);
+		}
 		if (identity == null) {
 			identity = kratos.createStaffIdentity(email, role);
 		}
@@ -99,14 +104,7 @@ public class StaffService {
 		if (!errors.isEmpty()) {
 			throw new Errors.ValidationFailed(errors);
 		}
-		boolean losesSuperAdmin = member.getRole() == Role.SUPER_ADMIN && member.getStatus() == Staff.Status.ACTIVE
-				&& (newRole != Role.SUPER_ADMIN || newStatus != Staff.Status.ACTIVE);
-		if (losesSuperAdmin && (actor != null && identityId.equals(actor.id()))) {
-			throw new Errors.Conflict("cannot_demote_self");
-		}
-		if (losesSuperAdmin && staff.countByRoleAndStatus(Role.SUPER_ADMIN, Staff.Status.ACTIVE) <= 1) {
-			throw new Errors.Conflict("last_super_admin");
-		}
+		guardSuperAdminLoss(member, newRole, newStatus, actor);
 		Instant now = clock.instant();
 		if (newStatus == Staff.Status.DISABLED) {
 			kratos.setRole(identityId, null);
@@ -119,6 +117,18 @@ public class StaffService {
 		member.setStatus(newStatus, now);
 		audit.record(actor, "staff.update", "staff", identityId.toString(), Map.of("role", newRole.name(), "status", newStatus.name()));
 		return member;
+	}
+
+	/** Nobody may demote or disable themselves, and the last active SUPER_ADMIN may never be demoted or disabled. */
+	private void guardSuperAdminLoss(Staff member, Role newRole, Staff.Status newStatus, Actor actor) {
+		boolean losesSuperAdmin = member.getRole() == Role.SUPER_ADMIN && member.getStatus() == Staff.Status.ACTIVE
+				&& (newRole != Role.SUPER_ADMIN || newStatus != Staff.Status.ACTIVE);
+		if (losesSuperAdmin && (actor != null && member.getIdentityId().equals(actor.id()))) {
+			throw new Errors.Conflict("cannot_demote_self");
+		}
+		if (losesSuperAdmin && staff.countByRoleAndStatus(Role.SUPER_ADMIN, Staff.Status.ACTIVE) <= 1) {
+			throw new Errors.Conflict("last_super_admin");
+		}
 	}
 
 	static String normalise(String email) {
