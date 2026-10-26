@@ -76,7 +76,7 @@
 <li><code>max_per_user_per_day</code>, <code>max_per_day</code>, <code>max_distinct_users_per_day</code>: do not retry in a loop. Queue the message and try again after <strong>00:00 UTC</strong>, or drop it if it is no longer useful. Consider combining several events into one message per user per day: that is the point of the per-user limit.</li>
 <li><code>max_total</code>: never resolves by waiting. Ask Adera staff to raise the limit.</li>
 <li>If you see <code>429</code> without the <code>{"error":"quota_exceeded"}</code> body, it is the gateway's per-IP rate limit (600 per minute): slow down.</li>
-<li>Partners cannot read their limits or their remaining quota through the API; staff can see usage per channel (<code>GET /admin/api/v1/notification/usage?appId=...</code>, fields <code>lifetime</code>, <code>today</code>, <code>distinct_users_today</code>) and set limits (<code>PUT /admin/api/v1/apps/{id}/notification-limits/{channel}</code>, role ADMIN, audit action <code>limit.set</code>, effective within about 15 seconds). Ask staff for your numbers.</li>
+<li>Partners cannot read their limits or their remaining quota through the API; staff can see usage per channel (<code>GET /admin/api/v1/notification/usage?appId=...</code>, fields <code>lifetime</code>, <code>today</code>, <code>distinctUsersToday</code>) and set limits (<code>PUT /admin/api/v1/apps/{id}/notification-limits/{channel}</code>, role ADMIN, audit action <code>limit.set</code>, effective within about 15 seconds). Ask staff for your numbers.</li>
 </ul>
 
 <h2 id="muted">Muted users: <code>200 SUPPRESSED</code></h2>

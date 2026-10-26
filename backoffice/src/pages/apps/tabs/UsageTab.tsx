@@ -50,7 +50,7 @@ export function UsageTab({ detail }: Pick<TabProps, "detail">) {
         columns={[
           { title: "Channel", render: (_, c) => <b>{c}</b> },
           { title: "Sent today vs max per day", render: (_, c) => <Meter used={rows.get(c)?.today ?? 0} limit={limits.get(c)?.maxPerDay} /> },
-          { title: "Users reached today vs max distinct users", render: (_, c) => <Meter used={rows.get(c)?.distinct_users_today ?? 0} limit={limits.get(c)?.maxDistinctUsersPerDay} /> },
+          { title: "Users reached today vs max distinct users", render: (_, c) => <Meter used={rows.get(c)?.distinctUsersToday ?? 0} limit={limits.get(c)?.maxDistinctUsersPerDay} /> },
           { title: "Lifetime vs max total", render: (_, c) => <Meter used={rows.get(c)?.lifetime ?? 0} limit={limits.get(c)?.maxTotal} /> },
           { title: "Per-user daily cap", render: (_, c) => limitText(limits.get(c)?.maxPerUserPerDay) },
         ]}

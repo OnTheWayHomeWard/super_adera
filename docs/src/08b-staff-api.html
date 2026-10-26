@@ -1947,13 +1947,13 @@ X-Request-Id: d8267fa8-7248-4193-9306-25e97a79a8ea
     "channel": "IN_APP",
     "lifetime": 1,
     "today": 1,
-    "distinct_users_today": 1
+    "distinctUsersToday": 1
   },
   {
     "channel": "SMS",
     "lifetime": 2,
     "today": 2,
-    "distinct_users_today": 1
+    "distinctUsersToday": 1
   }
 ]</code></pre>
 <h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th><code>error</code></th><th>When it happens</th></tr></thead><tbody><tr><td>200</td><td>-</td><td>OK. An empty list means nothing was counted yet.</td></tr><tr><td>401</td><td><code>unauthorized</code></td><td>No <code>Authorization</code> header, or an invalid, expired or revoked session token. Returned by the gateway's forward-auth (from registry-service).</td></tr><tr><td>403</td><td><code>mfa_required</code></td><td>The session is only aal1 (emailed code only), or Kratos refuses it because an authenticator app is enrolled but not used in this session. Do the authenticator step.</td></tr><tr><td>403</td><td><code>not_staff</code></td><td>A valid session, but the person is not an ACTIVE staff member (customers get this).</td></tr></tbody></table></div>

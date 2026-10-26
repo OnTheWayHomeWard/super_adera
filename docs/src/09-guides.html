@@ -470,16 +470,16 @@ adm $BASE/admin/api/v1/apps/$APP | jq .notificationLimits</code></pre>
     "channel": "IN_APP",
     "lifetime": 1,
     "today": 1,
-    "distinct_users_today": 1
+    "distinctUsersToday": 1
   },
   {
     "channel": "SMS",
     "lifetime": 2,
     "today": 2,
-    "distinct_users_today": 1
+    "distinctUsersToday": 1
   }
 ]</code></pre>
-<p><code>today</code> and <code>distinct_users_today</code> are UTC-day counts, <code>lifetime</code> is the total. A partner over a limit gets <code>429 quota_exceeded</code> (real example):</p><pre class="out"><code>HTTP/1.1 429 Too Many Requests
+<p><code>today</code> and <code>distinctUsersToday</code> are UTC-day counts, <code>lifetime</code> is the total. A partner over a limit gets <code>429 quota_exceeded</code> (real example):</p><pre class="out"><code>HTTP/1.1 429 Too Many Requests
 Content-Type: application/json
 X-Request-Id: 9b7a8ca6-4c1d-4edc-945b-79bf05798cfe
 X-Adera-Key-Id: adera-sig-202610

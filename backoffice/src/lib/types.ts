@@ -151,7 +151,7 @@ export interface UsageRow {
   channel: Channel;
   lifetime: number;
   today: number;
-  distinct_users_today: number;
+  distinctUsersToday: number;
 }
 
 export interface Review {

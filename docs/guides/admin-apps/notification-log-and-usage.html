@@ -197,22 +197,22 @@ HTTP 404  {"error": "not_found"}</code></pre>
     "channel": "EMAIL",
     "lifetime": 1,
     "today": 1,
-    "distinct_users_today": 1
+    "distinctUsersToday": 1
   },
   {
     "channel": "IN_APP",
     "lifetime": 1,
     "today": 1,
-    "distinct_users_today": 1
+    "distinctUsersToday": 1
   },
   {
     "channel": "SMS",
     "lifetime": 1,
     "today": 1,
-    "distinct_users_today": 1
+    "distinctUsersToday": 1
   }
 ]</code></pre>
-<ul><li><code>today</code> = messages accepted today (UTC) on that channel; <code>distinct_users_today</code> = different users reached today; <code>lifetime</code> = all messages ever on that channel in that environment. Compare them with <code>maxPerDay</code>, <code>maxDistinctUsersPerDay</code> and <code>maxTotal</code> from the app detail (<code>notificationLimits</code>).</li><li>Note the one <strong>snake_case</strong> field name, <code>distinct_users_today</code>; the others are lower camel case. Use the names exactly as shown.</li><li>A channel appears only after its first message; an app that never sent anything gets an empty list <code>[]</code>, and so does the other environment:</li></ul>
+<ul><li><code>today</code> = messages accepted today (UTC) on that channel; <code>distinctUsersToday</code> = different users reached today; <code>lifetime</code> = all messages ever on that channel in that environment. Compare them with <code>maxPerDay</code>, <code>maxDistinctUsersPerDay</code> and <code>maxTotal</code> from the app detail (<code>notificationLimits</code>).</li><li>Note the one <strong>snake_case</strong> field name, <code>distinctUsersToday</code>; the others are lower camel case. Use the names exactly as shown.</li><li>A channel appears only after its first message; an app that never sent anything gets an empty list <code>[]</code>, and so does the other environment:</li></ul>
 <pre class="out"><code>GET .../usage?appId=$APP_ID&amp;environment=prod
 
 []</code></pre>

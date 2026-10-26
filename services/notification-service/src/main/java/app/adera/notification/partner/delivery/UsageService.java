@@ -76,9 +76,9 @@ public class UsageService {
 	public java.util.List<Map<String, Object>> summary(UUID appId, String environment) {
 		LocalDate day = Instant.now().atZone(ZoneOffset.UTC).toLocalDate();
 		return jdbc.sql("""
-				SELECT t.channel, t.total AS lifetime,
+				SELECT t.channel, t.total AS "lifetime",
 				       COALESCE((SELECT SUM(sent) FROM usage_daily d WHERE d.app_id = t.app_id AND d.environment = t.environment AND d.channel = t.channel AND d.day = :d), 0) AS today,
-				       COALESCE((SELECT COUNT(*) FROM usage_daily d WHERE d.app_id = t.app_id AND d.environment = t.environment AND d.channel = t.channel AND d.day = :d), 0) AS distinct_users_today
+				       COALESCE((SELECT COUNT(*) FROM usage_daily d WHERE d.app_id = t.app_id AND d.environment = t.environment AND d.channel = t.channel AND d.day = :d), 0) AS "distinctUsersToday"
 				FROM usage_total t WHERE t.app_id = :a AND t.environment = :e ORDER BY t.channel""")
 			.param("a", appId).param("e", environment).param("d", java.sql.Date.valueOf(day)).query().listOfRows();
 	}

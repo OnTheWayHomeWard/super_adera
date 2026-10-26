@@ -105,4 +105,17 @@ class AdminNotificationQueryTests {
 			.andExpect(status().isOk());
 	}
 
+	@Test
+	void usageUsesCamelCaseKeys() throws Exception {
+		UUID app = UUID.randomUUID();
+		jdbc.sql("INSERT INTO usage_total (app_id, environment, channel, total) VALUES (:a, 'DEV', 'SMS', 7)").param("a", app).update();
+		for (int i = 0; i < 2; i++) {
+			jdbc.sql("INSERT INTO usage_daily (app_id, environment, channel, day, user_id, sent) VALUES (:a, 'DEV', 'SMS', current_date, :u, 3)").param("a", app).param("u", UUID.randomUUID()).update();
+		}
+		String body = mvc.perform(staff(get("/admin/api/v1/notification/usage")).param("appId", app.toString()).param("environment", "DEV")).andExpect(status().isOk())
+			.andExpect(jsonPath("$[0].channel").value("SMS")).andExpect(jsonPath("$[0].lifetime").value(7)).andExpect(jsonPath("$[0].today").value(6))
+			.andExpect(jsonPath("$[0].distinctUsersToday").value(2)).andReturn().getResponse().getContentAsString();
+		assertThat(body).doesNotContain("distinct_users_today").doesNotContain("_");
+	}
+
 }
