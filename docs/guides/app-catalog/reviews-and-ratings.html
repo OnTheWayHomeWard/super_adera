@@ -32,11 +32,21 @@
 <p>Staff can set a review to <code>HIDDEN</code> (spam, abuse) and back to <code>VISIBLE</code>. What the user side shows (verified by hiding a review of a throwaway app):</p>
 <ul>
 <li>The reviews list does not contain it, and it no longer counts in <code>ratingAvg</code>/<code>ratingCount</code>.</li>
-<li><strong>The author is not told.</strong> <code>GET my-review</code> still returns it as normal (no status field exists), so the author's screen shows their review as published.</li>
-<li>If the author edits it, it <strong>stays hidden</strong>: an edit does not bring it back.</li>
+<li><strong>The author is told.</strong> <code>GET my-review</code> and the response of <code>PUT my-review</code> carry <code>"status": "VISIBLE"</code> or <code>"status": "HIDDEN"</code>. A hidden review also has a <code>message</code> ("Hidden by moderators: ... Editing it does not restore it."). Verified on a throwaway app.</li>
+<li>If the author edits it, it <strong>stays hidden</strong>: an edit does not bring it back (only staff can restore it). The PUT answers 200 with <code>"status": "HIDDEN"</code> and the same <code>message</code>, so the screen can say so.</li>
 <li>If the author deletes it and writes a new one, the new one is visible.</li>
 </ul>
-<p>So the client cannot show "your review was removed". If you show "Your review" in the app, say nothing about visibility; to make a hidden review obvious to its author you would need a new field from the backend.</p>
+<p>Example (hidden review, author's view):</p>
+<pre class="out"><code>{
+  "id": "fa668738-7c00-4ea2-85a3-746eed2d2dcf",
+  "rating": 4,
+  "comment": "Works well.",
+  "status": "HIDDEN",
+  "message": "Hidden by moderators: it is not shown to other users and does not count in the rating. Editing it does not restore it.",
+  "createdAt": "2026-10-26T17:32:44.081901Z",
+  "updatedAt": "2026-10-26T17:32:44.129735Z"
+}</code></pre>
+<p>Show a clear "removed by moderators" state when <code>status</code> is <code>HIDDEN</code>. The public list <code>GET .../reviews</code> never contains hidden reviews and has no <code>status</code> field.</p>
 <h2 id="ui">UI recommendations</h2>
 <ul>
 <li>Store page: stars and count from the app; "Rate this app" row (5 tappable stars) that opens a sheet with an optional comment field (2000 character counter). If <code>my-review</code> exists, pre-fill and title it "Edit your review" with a "Delete" action.</li>
@@ -86,6 +96,7 @@ Content-Type: application/json
   "id": "446fcaed-807a-4dce-9a7e-e9fc4c7cb534",
   "rating": 4,
   "comment": "Works well.",
+  "status": "VISIBLE",
   "createdAt": "2026-10-26T10:51:32.249809Z",
   "updatedAt": "2026-10-26T10:51:32.249809Z"
 }</code></pre>
@@ -111,6 +122,7 @@ Content-Type: application/json
   "id": "446fcaed-807a-4dce-9a7e-e9fc4c7cb534",
   "rating": 4,
   "comment": "Works well.",
+  "status": "VISIBLE",
   "createdAt": "2026-10-26T10:51:32.249809178Z",
   "updatedAt": "2026-10-26T10:51:32.249809178Z"
 }</code></pre>

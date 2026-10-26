@@ -992,7 +992,7 @@ X-Request-Id: abf188d3-efc7-40f5-b91b-cb5a010ef583
 <dt>Rate limit</dt><dd>300 per 60 s per client IP (gateway route <code>apps-catalog</code>); over the limit the gateway answers <code>429</code></dd>
 <dt>Implemented in</dt><dd><code>services/registry-service/src/main/java/app/adera/registry/app/AppPublicController.java#myReview</code></dd>
 </dl>
-<h4>Purpose</h4><p>The caller's review of this app, so the app can show it pre-filled for editing. One review per user and app.</p>
+<h4>Purpose</h4><p>The caller's review of this app, so the app can show it pre-filled for editing. One review per user and app. The view carries <code>status</code>: <code>VISIBLE</code>, or <code>HIDDEN</code> (with a <code>message</code>) when staff removed the review from the public list; editing a hidden review does not unhide it (an admin decision). The PUT response has the same fields.</p>
 <h4>Request parameters</h4><div class="table-wrap"><table><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why it exists</th></tr></thead><tbody><tr><td><code>idOrSlug</code></td><td>path</td><td>string</td><td>yes</td><td>the app's UUID or its permanent slug</td><td>Slugs are friendlier in links; ids never change meaning.</td></tr></tbody></table></div>
 <h4>Example request</h4>
 <pre><code>curl -s "$GATEWAY/api/v1/apps/docs-demo-2015/my-review" \
@@ -1007,6 +1007,7 @@ X-Request-Id: 568430a1-9f01-4cc7-8266-48227d43d100
   "id": "8b9cf0ab-47e1-42e8-98ac-e68d41300478",
   "rating": 4,
   "comment": null,
+  "status": "VISIBLE",
   "createdAt": "2026-10-25T05:46:21.925685Z",
   "updatedAt": "2026-10-25T05:46:22.190499Z"
 }</code></pre>
@@ -1049,6 +1050,7 @@ X-Request-Id: cebbd5e7-6fb9-481a-a58c-829d15c583f7
   "id": "8b9cf0ab-47e1-42e8-98ac-e68d41300478",
   "rating": 5,
   "comment": "Fast and friendly.",
+  "status": "VISIBLE",
   "createdAt": "2026-10-25T05:46:21.925685301Z",
   "updatedAt": "2026-10-25T05:46:21.925685301Z"
 }</code></pre>
@@ -1067,6 +1069,7 @@ X-Request-Id: 4fea5ab2-0063-4efc-af83-b965c727f869
   "id": "8b9cf0ab-47e1-42e8-98ac-e68d41300478",
   "rating": 4,
   "comment": null,
+  "status": "VISIBLE",
   "createdAt": "2026-10-25T05:46:21.925685Z",
   "updatedAt": "2026-10-25T05:46:22.190498671Z"
 }</code></pre>

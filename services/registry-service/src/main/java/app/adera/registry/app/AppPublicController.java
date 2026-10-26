@@ -33,6 +33,22 @@ public class AppPublicController {
 
 	}
 
+	/**
+	 * The author's own view of their review: the same fields plus {@code status} (VISIBLE, or HIDDEN when staff removed it
+	 * from the public list). {@code message} is only present while hidden and says that editing does not bring it back.
+	 */
+	@com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+	public record MyReviewView(UUID id, int rating, String comment, String status, String message, Instant createdAt, Instant updatedAt) {
+
+		static final String HIDDEN_MESSAGE = "Hidden by moderators: it is not shown to other users and does not count in the rating. Editing it does not restore it.";
+
+		static MyReviewView of(AppReview r) {
+			boolean hidden = "HIDDEN".equals(r.getStatus());
+			return new MyReviewView(r.getId(), r.getRating(), r.getComment(), r.getStatus(), hidden ? HIDDEN_MESSAGE : null, r.getCreatedAt(), r.getUpdatedAt());
+		}
+
+	}
+
 	private final AppService apps;
 	private final ReviewService reviews;
 
@@ -61,14 +77,14 @@ public class AppPublicController {
 	}
 
 	@GetMapping("/{idOrSlug}/my-review")
-	public ReviewView myReview(@RequestHeader("X-User-Id") UUID userId, @PathVariable String idOrSlug) {
-		return ReviewView.of(reviews.mine(live(idOrSlug).getId(), userId));
+	public MyReviewView myReview(@RequestHeader("X-User-Id") UUID userId, @PathVariable String idOrSlug) {
+		return MyReviewView.of(reviews.mine(live(idOrSlug).getId(), userId));
 	}
 
 	/** Rate (1-5) and optionally comment. Sending again edits your review. */
 	@PutMapping("/{idOrSlug}/my-review")
-	public ReviewView review(@RequestHeader("X-User-Id") UUID userId, @PathVariable String idOrSlug, @RequestBody Map<String, Object> body) {
-		return ReviewView.of(reviews.upsert(live(idOrSlug).getId(), userId, body));
+	public MyReviewView review(@RequestHeader("X-User-Id") UUID userId, @PathVariable String idOrSlug, @RequestBody Map<String, Object> body) {
+		return MyReviewView.of(reviews.upsert(live(idOrSlug).getId(), userId, body));
 	}
 
 	@DeleteMapping("/{idOrSlug}/my-review")

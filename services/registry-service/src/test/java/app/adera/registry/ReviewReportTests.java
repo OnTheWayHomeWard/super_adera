@@ -118,4 +118,29 @@ class ReviewReportTests {
 		assertThat(JsonPath.<String>read(third, "$.reportId")).isNotEqualTo(JsonPath.<String>read(first, "$.reportId"));
 	}
 
+	@Test
+	void theAuthorSeesTheStatusOfTheirReviewAndEditingDoesNotUnhideIt() throws Exception {
+		UUID app = liveApp();
+		UUID author = UUID.randomUUID();
+		String put = mvc.perform(asUser(put("/api/v1/apps/{id}/my-review", app), author).contentType(MediaType.APPLICATION_JSON).content("{\"rating\":1,\"comment\":\"bad\"}"))
+			.andExpect(status().isOk()).andExpect(jsonPath("$.status").value("VISIBLE")).andExpect(jsonPath("$.message").doesNotExist())
+			.andReturn().getResponse().getContentAsString();
+		String reviewId = JsonPath.read(put, "$.id");
+		mvc.perform(asUser(get("/api/v1/apps/{id}/my-review", app), author)).andExpect(jsonPath("$.status").value("VISIBLE"));
+
+		mvc.perform(as(patch("/admin/api/v1/reviews/{id}", reviewId), Role.ADMIN).contentType(MediaType.APPLICATION_JSON).content("{\"status\":\"HIDDEN\"}")).andExpect(status().isOk());
+		mvc.perform(asUser(get("/api/v1/apps/{id}/my-review", app), author)).andExpect(status().isOk())
+			.andExpect(jsonPath("$.status").value("HIDDEN")).andExpect(jsonPath("$.message").isNotEmpty());
+
+		// editing keeps it hidden and says so; the public list and the rating still exclude it
+		mvc.perform(asUser(put("/api/v1/apps/{id}/my-review", app), author).contentType(MediaType.APPLICATION_JSON).content("{\"rating\":5,\"comment\":\"fine\"}"))
+			.andExpect(status().isOk()).andExpect(jsonPath("$.rating").value(5)).andExpect(jsonPath("$.status").value("HIDDEN")).andExpect(jsonPath("$.message").isNotEmpty());
+		mvc.perform(asUser(get("/api/v1/apps/{id}/reviews", app), UUID.randomUUID())).andExpect(jsonPath("$.length()").value(0))
+			.andExpect(jsonPath("$[0].status").doesNotExist());
+		mvc.perform(asUser(get("/api/v1/apps/{id}", app), author)).andExpect(jsonPath("$.ratingCount").value(0));
+
+		mvc.perform(as(patch("/admin/api/v1/reviews/{id}", reviewId), Role.ADMIN).contentType(MediaType.APPLICATION_JSON).content("{\"status\":\"VISIBLE\"}")).andExpect(status().isOk());
+		mvc.perform(asUser(get("/api/v1/apps/{id}/my-review", app), author)).andExpect(jsonPath("$.status").value("VISIBLE")).andExpect(jsonPath("$.message").doesNotExist());
+	}
+
 }
