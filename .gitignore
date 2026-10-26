@@ -21,3 +21,12 @@ tests/e2e/.staff-totp-*.json
 # seed_scenarios.py: its state (ids) and partner private keys
 tests/e2e/.seed-scenarios-state.json*
 tests/e2e/.seed-keys/
+
+# build output and caches
+target/
+dist/
+__pycache__/
+*.pyc
+backoffice/tests/ui/out/
+backoffice/tests/.smoke-totp-*
+.DS_Store
