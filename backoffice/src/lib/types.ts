@@ -191,6 +191,8 @@ export interface AuditEvent {
   action: string;
   targetType: string | null;
   targetId: string | null;
+  /** The mini app the entry is about (its keys, reviews, reports and templates included); null for staff or user changes. */
+  appId?: string | null;
   meta: Record<string, unknown>;
   ip: string | null;
   at: string;

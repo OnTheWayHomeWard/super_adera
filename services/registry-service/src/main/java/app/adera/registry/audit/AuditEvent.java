@@ -35,6 +35,10 @@ public class AuditEvent {
 	@Column(name = "target_id")
 	private String targetId;
 
+	/** The mini app this entry is about (the target itself, or the app a key/review/report/template belongs to). */
+	@Column(name = "app_id")
+	private UUID appId;
+
 	@JdbcTypeCode(SqlTypes.JSON)
 	@Column(nullable = false, columnDefinition = "jsonb")
 	private Map<String, Object> meta = new LinkedHashMap<>();
@@ -56,11 +60,28 @@ public class AuditEvent {
 		this.targetType = targetType;
 		this.targetId = targetId;
 		this.meta = meta == null ? new LinkedHashMap<>() : meta;
+		this.appId = appIdOf(targetType, targetId, this.meta);
 		this.ip = ip;
 		this.at = at;
 	}
 
+	/** The app target itself, else {@code meta.appId} when it is a valid uuid; otherwise null. */
+	static UUID appIdOf(String targetType, String targetId, Map<String, Object> meta) {
+		Object candidate = "mini_app".equals(targetType) ? targetId : meta.get("appId");
+		if (candidate == null) {
+			return null;
+		}
+		try {
+			return UUID.fromString(String.valueOf(candidate));
+		}
+		catch (IllegalArgumentException e) {
+			return null;
+		}
+	}
+
 	public UUID getId() { return id; }
+
+	public UUID getAppId() { return appId; }
 
 	public UUID getActorId() { return actorId; }
 

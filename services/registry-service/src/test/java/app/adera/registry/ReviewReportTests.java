@@ -224,4 +224,37 @@ class ReviewReportTests {
 		mvc.perform(get("/internal/apps/{id}", UUID.randomUUID())).andExpect(status().isNotFound()).andExpect(jsonPath("$.error").value("not_found"));
 	}
 
+	@Test
+	void keyReviewAndReportAuditEntriesAreFoundThroughTheAppId() throws Exception {
+		UUID app = liveApp();
+		UUID other = liveApp();
+		UUID author = UUID.randomUUID();
+
+		String key = mvc.perform(as(post("/admin/api/v1/apps/{id}/keys/generate", app), Role.ADMIN).contentType(MediaType.APPLICATION_JSON).content("{\"environment\":\"DEV\"}"))
+			.andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+		String keyId = JsonPath.read(key, "$.key.keyId");
+		mvc.perform(as(delete("/admin/api/v1/apps/{id}/keys/{k}", app, keyId), Role.ADMIN)).andExpect(status().isOk());
+		String reviewId = JsonPath.read(mvc.perform(asUser(put("/api/v1/apps/{id}/my-review", app), author).contentType(MediaType.APPLICATION_JSON).content("{\"rating\":2}"))
+			.andReturn().getResponse().getContentAsString(), "$.id");
+		mvc.perform(as(patch("/admin/api/v1/reviews/{id}", reviewId), Role.ADMIN).contentType(MediaType.APPLICATION_JSON).content("{\"status\":\"HIDDEN\"}")).andExpect(status().isOk());
+		String reportId = JsonPath.read(report(app, author, "{\"reason\":\"SPAM\"}"), "$.reportId");
+		handle(reportId, "{\"status\":\"DISMISSED\"}", Role.ADMIN);
+		mvc.perform(as(patch("/admin/api/v1/apps/{id}", other), Role.ADMIN).contentType(MediaType.APPLICATION_JSON).content("{\"priority\":7}")).andExpect(status().isOk());
+
+		for (String param : new String[] { "appId", "target" }) {
+			String res = mvc.perform(as(get("/admin/api/v1/audit").param(param, app.toString()).param("limit", "100"), Role.ADMIN)).andExpect(status().isOk())
+				.andReturn().getResponse().getContentAsString();
+			assertThat(JsonPath.<java.util.List<String>>read(res, "$[*].action")).as("?" + param + "=<appId>")
+				.contains("key.register", "key.revoke", "review.moderate", "report.handle").doesNotContain("staff.create");
+			assertThat(JsonPath.<java.util.List<String>>read(res, "$[*].appId")).containsOnly(app.toString());
+			assertThat(JsonPath.<java.util.List<String>>read(res, "$[?(@.action=='key.revoke')].targetId")).containsExactly(keyId);
+		}
+		// the other app's entries are not mixed in; a bad id is a clear 400
+		String otherLog = mvc.perform(as(get("/admin/api/v1/audit").param("appId", other.toString()), Role.ADMIN)).andReturn().getResponse().getContentAsString();
+		assertThat(JsonPath.<java.util.List<String>>read(otherLog, "$[*].action")).doesNotContain("key.register", "review.moderate");
+		mvc.perform(as(get("/admin/api/v1/audit").param("appId", "nope"), Role.ADMIN)).andExpect(status().isBadRequest()).andExpect(jsonPath("$.fields.appId").exists());
+		// entries not about an app have no appId
+		mvc.perform(as(get("/admin/api/v1/audit").param("targetType", "staff").param("limit", "5"), Role.ADMIN)).andExpect(status().isOk());
+	}
+
 }

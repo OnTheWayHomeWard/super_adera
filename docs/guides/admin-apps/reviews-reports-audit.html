@@ -259,7 +259,7 @@ X-Total-Count: 8
     "at": "2026-10-26T11:07:49.560389Z"
   }
 ]</code></pre>
-<p>Events about keys have the <em>key id</em> as target. To list them filter by type (and by actor if you like):</p>
+<p>Events about keys have the <em>key id</em> as target, and also carry the app id (<code>appId</code>), so <code>?appId=&lt;app id&gt;</code> lists them with the app's other events. To list only key events filter by type (and by actor if you like):</p>
 <pre><code>curl -sS -X GET "$GATEWAY/admin/api/v1/audit?targetType=partner_key&amp;actor=$STAFF_ID&amp;limit=2" \
   -H "Authorization: Bearer $TOKEN"</code></pre>
 <pre class="out"><code>HTTP 200 OK

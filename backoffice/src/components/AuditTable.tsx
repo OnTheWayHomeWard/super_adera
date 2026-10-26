@@ -23,13 +23,17 @@ export function targetLink(e: Pick<AuditEvent, "targetType" | "targetId">): stri
   return null;
 }
 
-/** The audit log with filters (actor, action, target, date range). Pass `target` to pin it to one thing. */
-export function AuditTable({ pinnedTarget, staff }: { pinnedTarget?: string; staff?: { id: string; email: string }[] }) {
+/**
+ * The audit log with filters (actor, action, target, date range). `pinnedApp` shows everything ABOUT one mini app (the app
+ * itself plus its keys, reviews, reports and templates); `pinnedTarget` pins it to one target id.
+ */
+export function AuditTable({ pinnedTarget, pinnedApp, staff }: { pinnedTarget?: string; pinnedApp?: string; staff?: { id: string; email: string }[] }) {
   const canRead = useCan("audit.read");
   const [applied, setApplied] = useState<Filters>({});
   const permanent = useMemo(() => {
     const out: { field: string; operator: "eq"; value: string }[] = [];
     if (pinnedTarget) out.push({ field: "target", operator: "eq", value: pinnedTarget });
+    if (pinnedApp) out.push({ field: "appId", operator: "eq", value: pinnedApp });
     const f = applied;
     if (f.actor) out.push({ field: "actor", operator: "eq", value: f.actor });
     if (f.action) out.push({ field: "action", operator: "eq", value: f.action });
@@ -38,7 +42,7 @@ export function AuditTable({ pinnedTarget, staff }: { pinnedTarget?: string; sta
     if (f.range?.[0]) out.push({ field: "from", operator: "eq", value: f.range[0].toDate().toISOString() });
     if (f.range?.[1]) out.push({ field: "to", operator: "eq", value: f.range[1].toDate().toISOString() });
     return out;
-  }, [applied, pinnedTarget]);
+  }, [applied, pinnedTarget, pinnedApp]);
 
   const { tableProps, tableQuery } = useTable<AuditEvent>({
     resource: "audit",
@@ -69,7 +73,7 @@ export function AuditTable({ pinnedTarget, staff }: { pinnedTarget?: string; sta
         </Form.Item>
         {!pinnedTarget && (
           <Form.Item name="target" label="Target id">
-            <Input allowClear placeholder="App, user, key or staff id" style={{ width: 280 }} />
+            <Input allowClear placeholder={pinnedApp ? "Key, review or report id" : "App, user, key or staff id"} style={{ width: 280 }} />
           </Form.Item>
         )}
         <Form.Item name="range" label="Between">
@@ -91,7 +95,10 @@ export function AuditTable({ pinnedTarget, staff }: { pinnedTarget?: string; sta
           </Space>
         </Form.Item>
       </Form>
-      <p style={{ opacity: 0.7, marginTop: 0 }}>The action filter matches the start of the action name (app. matches app.create, app.status...).</p>
+      <p style={{ opacity: 0.7, marginTop: 0 }}>
+        The action filter matches the start of the action name (app. matches app.create, app.status...).
+        {pinnedApp ? " This view includes the changes to the app's partner keys, reviews, reports and templates." : " Filtering by an app id also shows the changes to that app's keys, reviews, reports and templates."}
+      </p>
       <ErrorAlert error={tableQuery.error} />
       <Table<AuditEvent>
         {...tableProps}

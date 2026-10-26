@@ -142,7 +142,7 @@ POST /admin/api/v1/apps/{appId}/keys  {"environment":"DEV","publicKeyPem":"&lt;P
 HTTP 409  {"error": "too_many_active_keys", "fields": {"max": "5"}}</code></pre>
 <p>The three <code>z_key_...</code> examples above are, in order: a key in the old <code>BEGIN RSA PUBLIC KEY</code> format (made with <code>openssl rsa -RSAPublicKey_out</code>), an elliptic-curve key, and a 1024-bit RSA key.</p>
 <h4>Effects, audit</h4>
-<ul><li>The key works for the partner within about 15 seconds. Audit: <code>key.register</code>, target type <code>partner_key</code>, target id the <em>key id</em>, meta <code>{"appId", "environment", "fingerprint"}</code>.</li><li>To find the audit events of an app's keys, filter the audit log by <code>targetType=partner_key</code> (or by the key id); they are <em>not</em> found by filtering on the app id, because their target is the key.</li><li>Reversible: revoke the key.</li></ul>
+<ul><li>The key works for the partner within about 15 seconds. Audit: <code>key.register</code>, target type <code>partner_key</code>, target id the <em>key id</em>, meta <code>{"appId", "environment", "fingerprint"}</code>.</li><li>To find the audit events of an app's keys, filter the audit log by <code>appId=&lt;app id&gt;</code> (every entry now records its app; the App's Audit tab uses it too), or by <code>targetType=partner_key</code> / the key id.</li><li>Reversible: revoke the key.</li></ul>
 <h4>Scenario</h4>
 <p>A partner sends <code>partner-public.pem</code>. You register it for PROD with an expiry one year out and a label naming the partner's system, read the fingerprint back to them, and then wait for their first signed call.</p>
 </div></details>

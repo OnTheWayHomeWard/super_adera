@@ -26,13 +26,14 @@ public class AuditController {
 
 	/**
 	 * Newest first. Filters: actor (staff id), action (starts-with, e.g. "app." or "app.status"), target (an app id,
-	 * staff id, key id...), targetType, from (inclusive) and to (exclusive) as ISO instants. Admin and above.
+	 * staff id, key id... or an app id: then every entry ABOUT that app is returned, including its keys, reviews, reports and
+	 * templates), appId (strictly the entries about one app), targetType, from (inclusive) and to (exclusive) as ISO instants. Admin and above.
 	 */
 	@GetMapping
 	public org.springframework.http.ResponseEntity<List<Map<String, Object>>> latest(@RequestHeader("X-Staff-Role") Role role, @RequestParam(defaultValue = "50") int limit,
 			@RequestParam(defaultValue = "0") int offset, @RequestParam(required = false) String actor,
 			@RequestParam(required = false) String action, @RequestParam(required = false) String target,
-			@RequestParam(required = false) String targetType, @RequestParam(required = false) String from,
+			@RequestParam(required = false) String targetType, @RequestParam(required = false) String appId, @RequestParam(required = false) String from,
 			@RequestParam(required = false) String to) {
 		role.require(Role.ADMIN);
 		Map<String, String> errors = new java.util.LinkedHashMap<>();
@@ -48,12 +49,21 @@ public class AuditController {
 				errors.put("actor", "must be a staff id (uuid)");
 			}
 		}
+		UUID app = null;
+		if (blank(appId) != null) {
+			try {
+				app = UUID.fromString(appId.trim());
+			}
+			catch (IllegalArgumentException e) {
+				errors.put("appId", "must be an app id (uuid)");
+			}
+		}
 		Instant fromAt = instant(from, "from", errors);
 		Instant toAt = instant(to, "to", errors);
 		if (!errors.isEmpty()) {
 			throw new Errors.ValidationFailed(errors);
 		}
-		AuditQuery.Filter filter = new AuditQuery.Filter(actorId, blank(action), blank(target), blank(targetType), fromAt, toAt);
+		AuditQuery.Filter filter = new AuditQuery.Filter(actorId, blank(action), blank(target), blank(targetType), app, fromAt, toAt);
 		return org.springframework.http.ResponseEntity.ok().header("X-Total-Count", String.valueOf(query.count(filter)))
 			.body(query.search(filter, limit, offset));
 	}
