@@ -116,7 +116,7 @@ public class ReviewService {
 
 	/** Reporting the same app again while an earlier report is still open returns that report (no pile-ups). */
 	@Transactional
-	public AppReport report(UUID appId, UUID userId, Map<String, Object> body) {
+	public ReportResult report(UUID appId, UUID userId, Map<String, Object> body) {
 		liveApp(appId);
 		String reason = String.valueOf(body.get("reason")).toUpperCase(Locale.ROOT);
 		if (!REASONS.contains(reason)) {
@@ -126,8 +126,15 @@ public class ReviewService {
 		if (details != null && details.length() > 2000) {
 			throw new Errors.ValidationFailed("details", "max 2000 characters");
 		}
-		return reports.findFirstByAppIdAndUserIdAndStatus(appId, userId, "OPEN")
-			.orElseGet(() -> reports.save(new AppReport(appId, userId, reason, details == null || details.isEmpty() ? null : details, clock.instant())));
+		AppReport existing = reports.findFirstByAppIdAndUserIdAndStatus(appId, userId, "OPEN").orElse(null);
+		if (existing != null) {
+			return new ReportResult(existing, true);
+		}
+		return new ReportResult(reports.save(new AppReport(appId, userId, reason, details == null || details.isEmpty() ? null : details, clock.instant())), false);
+	}
+
+	/** The report a user's request ended up with; {@code alreadyReported} when an earlier OPEN report of theirs was returned instead. */
+	public record ReportResult(AppReport report, boolean alreadyReported) {
 	}
 
 	@Transactional(readOnly = true)

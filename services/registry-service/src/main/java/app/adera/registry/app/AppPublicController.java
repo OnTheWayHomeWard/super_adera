@@ -79,8 +79,16 @@ public class AppPublicController {
 
 	/** The "report this app" option from the 3-dot menu. */
 	@PostMapping("/{idOrSlug}/report")
-	public Map<String, String> report(@RequestHeader("X-User-Id") UUID userId, @PathVariable String idOrSlug, @RequestBody Map<String, Object> body) {
-		return Map.of("status", "received", "reportId", reviews.report(live(idOrSlug).getId(), userId, body).getId().toString());
+	public Map<String, Object> report(@RequestHeader("X-User-Id") UUID userId, @PathVariable String idOrSlug, @RequestBody Map<String, Object> body) {
+		ReviewService.ReportResult result = reviews.report(live(idOrSlug).getId(), userId, body);
+		Map<String, Object> out = new java.util.LinkedHashMap<>();
+		out.put("status", "received");
+		out.put("received", true);
+		out.put("alreadyReported", result.alreadyReported());
+		out.put("reportId", result.report().getId().toString());
+		out.put("reason", result.report().getReason());
+		out.put("createdAt", result.report().getCreatedAt());
+		return out;
 	}
 
 	private MiniApp live(String idOrSlug) {

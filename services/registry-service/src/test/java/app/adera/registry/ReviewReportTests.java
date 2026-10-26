@@ -97,4 +97,25 @@ class ReviewReportTests {
 			.andExpect(jsonPath("$[0].action").value("report.handle")).andExpect(jsonPath("$[0].meta.status").value("OPEN"));
 	}
 
+	@Test
+	void aSecondReportWhileOneIsOpenReturnsTheExistingOneAndSaysSo() throws Exception {
+		UUID app = liveApp();
+		UUID user = UUID.randomUUID();
+		String first = report(app, user, "{\"reason\":\"BROKEN\"}");
+		assertThat(JsonPath.<Boolean>read(first, "$.received")).isTrue();
+		assertThat(JsonPath.<Boolean>read(first, "$.alreadyReported")).isFalse();
+		assertThat(JsonPath.<String>read(first, "$.status")).isEqualTo("received");
+
+		mvc.perform(asUser(post("/api/v1/apps/{id}/report", app), user).contentType(MediaType.APPLICATION_JSON).content("{\"reason\":\"SCAM\",\"details\":\"new words\"}"))
+			.andExpect(status().isOk()).andExpect(jsonPath("$.received").value(true)).andExpect(jsonPath("$.alreadyReported").value(true))
+			.andExpect(jsonPath("$.reportId").value((String) JsonPath.read(first, "$.reportId")))
+			.andExpect(jsonPath("$.reason").value("BROKEN"));
+
+		// once staff handled it, the next report is a new one again
+		handle(JsonPath.read(first, "$.reportId"), "{\"status\":\"DISMISSED\"}", Role.ADMIN);
+		String third = report(app, user, "{\"reason\":\"SCAM\"}");
+		assertThat(JsonPath.<Boolean>read(third, "$.alreadyReported")).isFalse();
+		assertThat(JsonPath.<String>read(third, "$.reportId")).isNotEqualTo(JsonPath.<String>read(first, "$.reportId"));
+	}
+
 }

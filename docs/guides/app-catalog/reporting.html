@@ -47,12 +47,16 @@ Content-Type: application/json
 
 {
   "status": "received",
-  "reportId": "7f450156-3652-442f-81be-c26610225c93"
+  "received": true,
+  "alreadyReported": false,
+  "reportId": "7f450156-3652-442f-81be-c26610225c93",
+  "reason": "BROKEN",
+  "createdAt": "2026-10-26T17:30:36.332808709Z"
 }</code></pre>
 <p>The success status is <strong>200</strong>, not 201. <code>reportId</code> is an opaque id; there is no endpoint for the user to read it back, so you only need it for support conversations.</p>
 <h4>Duplicate rule</h4>
-<p>One <strong>open</strong> report per user per app. If the user reports the same app again while their earlier report is still <code>OPEN</code> (staff have not handled it), the server does not create a second one: it answers 200 with the <strong>same</strong> <code>reportId</code>, and the new reason and details are <strong>silently discarded</strong>. Verified: after <code>BROKEN</code>, sending <code>{"reason":"SCAM"}</code> returned the same id (the stored reason stayed <code>BROKEN</code>). Once staff mark the report REVIEWED or DISMISSED, the user can report the app again and a new report is created.</p>
-<p>Client advice: after a successful report show "Thanks, we received your report" and keep the menu item enabled but remember locally (per app) that a report was sent, then show "You already reported this app" instead of letting the user write a second, lost, message. The server gives no way to ask "have I already reported this app?".</p>
+<p>One <strong>open</strong> report per user per app. If the user reports the same app again while their earlier report is still <code>OPEN</code> (staff have not handled it), the server does not create a second one: it answers 200 with the <strong>same</strong> <code>reportId</code> and the explicit flag <code>"alreadyReported": true</code> (a first report has <code>false</code>); <code>reason</code> and <code>createdAt</code> are those of the existing report. The new reason and details are <strong>not stored</strong>. Verified: after <code>BROKEN</code>, sending <code>{"reason":"SCAM"}</code> returned <code>alreadyReported: true</code>, the same id and <code>"reason": "BROKEN"</code>. Once staff mark the report REVIEWED or DISMISSED, the user can report the app again and a new report is created.</p>
+<p>Client advice: after a successful report show "Thanks, we received your report" and keep the menu item enabled but remember locally (per app) that a report was sent, then show "You already reported this app" when you get <code>alreadyReported: true</code> (or earlier, from your local memory, instead of letting the user write a second message that is not stored). The server gives no way to ask "have I already reported this app?".</p>
 <h4>Example: invalid reason</h4><pre><code>curl -s -X POST "$GATEWAY/api/v1/apps/doc-tmp-store/report" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d '{"reason": "NOPE"}'</code></pre>
 <pre class="out"><code>HTTP/1.1 400 Bad Request
 

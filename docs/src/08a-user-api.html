@@ -1151,8 +1151,12 @@ X-RateLimit-Remaining: 286
 X-Request-Id: b568ee38-91de-4394-aba0-fe5694b08004
 
 {
+  "status": "received",
+  "received": true,
+  "alreadyReported": false,
   "reportId": "d8ecdf00-b332-40c3-8bd7-43c5e9d65c37",
-  "status": "received"
+  "reason": "BROKEN",
+  "createdAt": "2026-10-26T17:30:36.332808709Z"
 }</code></pre>
 <h4>Example: reporting again while the first is open</h4>
 <pre><code>curl -s -X POST "$GATEWAY/api/v1/apps/docs-demo-2015/report" \
@@ -1166,9 +1170,13 @@ X-RateLimit-Remaining: 285
 X-Request-Id: bdd05219-cf37-48a9-82e9-a8adb03535df
 
 {
+  "status": "received",
+  "received": true,
+  "alreadyReported": true,
   "reportId": "d8ecdf00-b332-40c3-8bd7-43c5e9d65c37",
-  "status": "received"
-}</code></pre><p class="masked">Same reportId as above: the second request did not create a second report.</p>
+  "reason": "BROKEN",
+  "createdAt": "2026-10-26T17:30:36.332809Z"
+}</code></pre><p class="masked">Same reportId as above and <code>alreadyReported: true</code>: the second request did not create a second report and its content was not stored.</p>
 <h4>Example: invalid reason</h4>
 <pre><code>curl -s -X POST "$GATEWAY/api/v1/apps/docs-demo-2015/report" \
   -H "Authorization: Bearer $TOKEN" \
