@@ -113,6 +113,24 @@ class AdminUsersTests {
 	}
 
 	@Test
+	void adminsFindAPhoneTypedInTheLocalFormat() throws Exception {
+		String tail = String.valueOf(10_000_000 + new java.util.Random().nextInt(89_999_999));
+		UUID id = user("Local" + tag(), "Phone", "local-" + tag() + "@example.com", "+2519" + tail);
+		for (String q : new String[] { "09" + tail, "09" + tail.substring(0, 4) + " " + tail.substring(4), "0 9" + tail.substring(0, 2) + "-" + tail.substring(2),
+				"002519" + tail, "+2519" + tail, "2519" + tail, "9" + tail }) {
+			mvc.perform(as(get("/admin/api/v1/users").param("q", q), "ADMIN")).andExpect(jsonPath("$.items[0].id").value(id.toString()));
+			mvc.perform(as(get("/admin/api/v1/users").param("q", q), "SUPER_ADMIN")).andExpect(jsonPath("$.total").value(1));
+		}
+		// a VIEWER still cannot search phone numbers, in any format
+		for (String q : new String[] { "09" + tail, "+2519" + tail }) {
+			mvc.perform(as(get("/admin/api/v1/users").param("q", q), "VIEWER")).andExpect(jsonPath("$.total").value(0));
+		}
+		// a different number is not matched
+		mvc.perform(as(get("/admin/api/v1/users").param("q", "09" + (Integer.parseInt(tail.substring(0, 4)) == 9999 ? "1111" : String.valueOf(Integer.parseInt(tail.substring(0, 4)) + 1)) + tail.substring(4)), "ADMIN"))
+			.andExpect(jsonPath("$.total").value(0));
+	}
+
+	@Test
 	void viewersGetMaskedContactDetailsAndSearchOnlyByNameOrId() throws Exception {
 		String t = tag();
 		UUID id = user("Hana" + t, "Girma", "hana." + t + "@example.com", "+251911234567");

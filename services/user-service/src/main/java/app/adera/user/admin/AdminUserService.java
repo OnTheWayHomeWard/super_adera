@@ -38,6 +38,21 @@ public class AdminUserService {
 		this.clock = clock;
 	}
 
+	/**
+	 * Phones are stored as +251..., staff type them as they are written locally. Ethiopian national format has one leading 0
+	 * (0912 345 678) and the international call prefix is 00 (00251 912 345 678); both are dropped so the rest matches the
+	 * stored digits. Anything else is left alone.
+	 */
+	static String nationalToInternational(String digits) {
+		if (digits.startsWith("00")) {
+			return digits.substring(2);
+		}
+		if (digits.startsWith("0")) {
+			return digits.substring(1);
+		}
+		return digits;
+	}
+
 	@Transactional(readOnly = true)
 	public Map<String, Object> list(StaffRole role, String q, String status, int page, int size) {
 		int pageSize = Math.max(1, Math.min(size, 100));
@@ -72,9 +87,9 @@ public class AdminUserService {
 				where.append(" AND (" + (contactVisible ? "lower(email) LIKE :like ESCAPE '\\' OR lower(phone_e164) LIKE :like ESCAPE '\\' OR " : "")
 						+ "lower(first_name) LIKE :like ESCAPE '\\' OR lower(last_name) LIKE :like ESCAPE '\\'"
 						+ " OR lower(coalesce(first_name, '') || ' ' || coalesce(last_name, '')) LIKE :like ESCAPE '\\'");
-				String digits = term.replaceAll("[^0-9]", "");
-				if (contactVisible && digits.length() >= 3 && digits.length() == term.replaceAll("[\\s+()-]", "").length()) {
-					// a phone typed with spaces or dashes still matches
+				String digits = nationalToInternational(term.replaceAll("[^0-9]", ""));
+				if (contactVisible && digits.length() >= 3 && term.replaceAll("[^0-9]", "").length() == term.replaceAll("[\\s+()-]", "").length()) {
+					// a phone typed with spaces or dashes, or in the local format (0912...), still matches
 					params.put("digits", "%" + digits + "%");
 					where.append(" OR regexp_replace(phone_e164, '[^0-9]', '', 'g') LIKE :digits");
 				}
