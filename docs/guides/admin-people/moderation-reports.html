@@ -58,13 +58,13 @@
     "createdAt": "2026-10-26T10:56:44.627339Z"
   }
 ]</code></pre><p>Array, newest first. Total matches in <code>X-Total-Count</code> (as for reviews).</p>
-<div class="table-wrap"><table><thead><tr><th>Field</th><th>Meaning</th></tr></thead><tbody><tr><td><code>id</code></td><td>Report id, the key for PATCH and for the audit filter.</td></tr><tr><td><code>appId</code>, <code>appSlug</code></td><td>The reported app.</td></tr><tr><td><code>userId</code></td><td>Who reported (not masked; look up in Users).</td></tr><tr><td><code>reason</code></td><td><code>SPAM</code>, <code>SCAM</code>, <code>INAPPROPRIATE</code>, <code>BROKEN</code> or <code>OTHER</code>.</td></tr><tr><td><code>details</code></td><td>Free text from the user (up to 2000 chars) or null. Untrusted input.</td></tr><tr><td><code>status</code></td><td><code>OPEN</code>, <code>REVIEWED</code> or <code>DISMISSED</code>.</td></tr><tr><td><code>handledBy</code>, <code>handledAt</code></td><td>The staff id (join with the staff list or the audit log to get an email) and time of the <strong>last status change</strong>; both null for a report nobody touched.</td></tr><tr><td><code>createdAt</code></td><td>When the user filed it.</td></tr></tbody></table></div><h4>Errors</h4><pre class="out"><code>HTTP/1.1 200 OK
+<div class="table-wrap"><table><thead><tr><th>Field</th><th>Meaning</th></tr></thead><tbody><tr><td><code>id</code></td><td>Report id, the key for PATCH and for the audit filter.</td></tr><tr><td><code>appId</code>, <code>appSlug</code></td><td>The reported app.</td></tr><tr><td><code>userId</code></td><td>Who reported (not masked; look up in Users).</td></tr><tr><td><code>reason</code></td><td><code>SPAM</code>, <code>SCAM</code>, <code>INAPPROPRIATE</code>, <code>BROKEN</code> or <code>OTHER</code>.</td></tr><tr><td><code>details</code></td><td>Free text from the user (up to 2000 chars) or null. Untrusted input.</td></tr><tr><td><code>status</code></td><td><code>OPEN</code>, <code>REVIEWED</code> or <code>DISMISSED</code>.</td></tr><tr><td><code>handledBy</code>, <code>handledAt</code></td><td>The staff id (join with the staff list or the audit log to get an email) and time of the <strong>last status change</strong>; both null for a report nobody touched.</td></tr><tr><td><code>createdAt</code></td><td>When the user filed it.</td></tr><tr><td><code>handlingReason</code></td><td>Staff-only note given when the report was last handled or reopened (<code>null</code> when none). Not the user's <code>reason</code>. Never shown to users.</td></tr></tbody></table></div><h4>Errors</h4><pre class="out"><code>HTTP/1.1 200 OK
 
 []</code></pre><p>(An unknown <code>status</code> filter returns an empty array, so a typo looks like an empty queue.)</p>
 </div></details>
 </section>
 <section><h2 id="handle">Handle a report</h2>
-<details class="endpoint" id="ep-report-handle"><summary><span class="method m-patch">PATCH</span><span class="path">/admin/api/v1/reports/{reportId}</span><span class="sum">Mark a report REVIEWED, DISMISSED, or reopen it (OPEN)</span></summary><div class="body"><dl class="meta"><dt>Why</dt><dd>Close the loop: tell the team that someone looked at it and what the outcome was.</dd><dt>Auth</dt><dd>Staff aal2 Bearer, role <strong>ADMIN</strong> or SUPER_ADMIN</dd><dt>Audit action</dt><dd><code>report.handle</code> (target type <code>app_report</code>, meta <code>{status, appId}</code>)</dd><dt>Reversible</dt><dd>Yes: any status can be set from any status</dd><dt>Backoffice</dt><dd>Moderation > Reports: <em>Resolve</em> (REVIEWED), <em>Dismiss</em> (DISMISSED, asks for confirmation), <em>Reopen</em> (OPEN)</dd></dl><h4>Body</h4><div class="table-wrap"><table><thead><tr><th>Field</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why it exists</th></tr></thead><tbody><tr><td><code>status</code></td><td>string</td><td>yes</td><td><code>OPEN</code>, <code>REVIEWED</code>, <code>DISMISSED</code> (any case)</td><td>The outcome.</td></tr></tbody></table></div><p>Like reviews, there is no field for a comment or reason; other fields are ignored.</p>
+<details class="endpoint" id="ep-report-handle"><summary><span class="method m-patch">PATCH</span><span class="path">/admin/api/v1/reports/{reportId}</span><span class="sum">Mark a report REVIEWED, DISMISSED, or reopen it (OPEN)</span></summary><div class="body"><dl class="meta"><dt>Why</dt><dd>Close the loop: tell the team that someone looked at it and what the outcome was.</dd><dt>Auth</dt><dd>Staff aal2 Bearer, role <strong>ADMIN</strong> or SUPER_ADMIN</dd><dt>Audit action</dt><dd><code>report.handle</code> (target type <code>app_report</code>, meta <code>{status, appId, reason?}</code>)</dd><dt>Reversible</dt><dd>Yes: any status can be set from any status</dd><dt>Backoffice</dt><dd>Moderation > Reports: <em>Resolve</em> (REVIEWED), <em>Dismiss</em> (DISMISSED, asks for confirmation), <em>Reopen</em> (OPEN)</dd></dl><h4>Body</h4><div class="table-wrap"><table><thead><tr><th>Field</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why it exists</th></tr></thead><tbody><tr><td><code>status</code></td><td>string</td><td>yes</td><td><code>OPEN</code>, <code>REVIEWED</code>, <code>DISMISSED</code> (any case)</td><td>The outcome.</td></tr><tr><td><code>reason</code></td><td>string</td><td>no</td><td>Optional text, max 500 characters</td><td>Why you did it, at most 500 characters (longer: 400 <code>validation_failed</code>, <code>fields.reason</code>). Stored as <code>handlingReason</code>, returned in the admin lists, written to the audit entry as <code>meta.reason</code>; <strong>never shown to users</strong>.</td></tr></tbody></table></div><p>Other fields in the body are ignored.</p>
 <h4>Request</h4><pre><code>curl -sS -X PATCH "$GATEWAY/admin/api/v1/reports/$REPORT_ID" \
   -H "Authorization: Bearer $ADMIN_TOKEN" -H "Content-Type: application/json" \
   -d '{"status":"REVIEWED"}'</code></pre><h4>Response 200 (REVIEWED)</h4><pre class="out"><code>HTTP/1.1 200 OK
@@ -91,7 +91,27 @@
   "handledBy": null,
   "id": "347e2491-c20e-402e-b881-6773d4a744be",
   "status": "OPEN"
-}</code></pre><div class="callout ok"><span class="label">Reopen clears the handler</span><p>Setting OPEN clears <code>handledBy</code> and <code>handledAt</code> (both <code>null</code> again, as for any report nobody has handled). The audit entry <code>report.handle</code> with <code>status: OPEN</code> records who reopened it and when.</p></div><h4>Errors (verified)</h4><pre class="out"><code>HTTP/1.1 400 Bad Request
+}</code></pre><div class="callout ok"><span class="label">Reopen clears the handler</span><p>Setting OPEN clears <code>handledBy</code> and <code>handledAt</code> (both <code>null</code> again, as for any report nobody has handled). The audit entry <code>report.handle</code> with <code>status: OPEN</code> records who reopened it and when.</p></div><h4>With a reason (HTTP 200)</h4>
+<pre><code>curl -sS -X PATCH "$GATEWAY/admin/api/v1/reports/$REPORT_ID" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"status": "REVIEWED", "reason": "Confirmed, app paused"}'</code></pre>
+<pre class="out"><code>HTTP 200 OK
+
+{
+  "appId": "0f4a620e-2f2b-4401-bbec-b14026641e19",
+  "userId": "750b1cfc-bd63-4b50-9df2-041805957123",
+  "reason": "SPAM",
+  "details": null,
+  "createdAt": "2026-10-26T17:38:36.029260Z",
+  "handledAt": "2026-10-26T17:38:36.103176671Z",
+  "handledBy": "2f76518b-ec35-4423-8c94-43769e42b48c",
+  "handlingReason": "Confirmed, app paused",
+  "id": "c690887a-2b59-4b72-a607-80619d895140",
+  "status": "REVIEWED"
+}</code></pre>
+<p>Two different fields: <code>reason</code> in the response is the <em>user's</em> category (SPAM, SCAM, ...); <code>handlingReason</code> is the staff note you sent as <code>reason</code> in the PATCH. It is also returned by <code>GET /admin/api/v1/reports</code>, written to the audit entry (<code>meta.reason</code>) and never shown to users. Each PATCH replaces the stored note (a reopen without a reason clears it); the audit log keeps every earlier one.</p>
+<h4>Errors (verified)</h4><pre class="out"><code>HTTP/1.1 400 Bad Request
 
 {
   "error": "validation_failed",

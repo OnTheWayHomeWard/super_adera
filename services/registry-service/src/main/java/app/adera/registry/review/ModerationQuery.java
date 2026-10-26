@@ -22,7 +22,7 @@ public class ModerationQuery {
 
 	public List<Map<String, Object>> reviews(UUID appId, String status, int page, int size) {
 		return jdbc.sql("""
-				SELECT r.id, r.app_id, a.slug, r.user_id, r.rating, r.comment, r.status, r.created_at, r.updated_at
+				SELECT r.id, r.app_id, a.slug, r.user_id, r.rating, r.comment, r.status, r.moderation_reason, r.created_at, r.updated_at
 				FROM app_review r JOIN mini_app a ON a.id = r.app_id
 				WHERE (CAST(:app AS uuid) IS NULL OR r.app_id = CAST(:app AS uuid))
 				  AND (CAST(:status AS varchar) IS NULL OR r.status = CAST(:status AS varchar))
@@ -38,6 +38,7 @@ public class ModerationQuery {
 				out.put("rating", rs.getInt("rating"));
 				out.put("comment", rs.getString("comment"));
 				out.put("status", rs.getString("status"));
+				out.put("moderationReason", rs.getString("moderation_reason"));
 				out.put("createdAt", instant(rs.getTimestamp("created_at")));
 				out.put("updatedAt", instant(rs.getTimestamp("updated_at")));
 				return out;
@@ -46,7 +47,7 @@ public class ModerationQuery {
 
 	public List<Map<String, Object>> reports(UUID appId, String status, int page, int size) {
 		return jdbc.sql("""
-				SELECT r.id, r.app_id, a.slug, r.user_id, r.reason, r.details, r.status, r.handled_by, r.handled_at, r.created_at
+				SELECT r.id, r.app_id, a.slug, r.user_id, r.reason, r.details, r.status, r.handled_by, r.handled_at, r.handling_reason, r.created_at
 				FROM app_report r JOIN mini_app a ON a.id = r.app_id
 				WHERE (CAST(:app AS uuid) IS NULL OR r.app_id = CAST(:app AS uuid))
 				  AND (CAST(:status AS varchar) IS NULL OR r.status = CAST(:status AS varchar))
@@ -64,6 +65,7 @@ public class ModerationQuery {
 				out.put("status", rs.getString("status"));
 				out.put("handledBy", rs.getObject("handled_by", UUID.class));
 				out.put("handledAt", instant(rs.getTimestamp("handled_at")));
+				out.put("handlingReason", rs.getString("handling_reason"));
 				out.put("createdAt", instant(rs.getTimestamp("created_at")));
 				return out;
 			}).list();

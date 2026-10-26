@@ -51,7 +51,7 @@ public class ReviewAdminController {
 	public AppReview moderate(@RequestHeader("X-Staff-Id") UUID id, @RequestHeader("X-Staff-Role") Role role, @PathVariable UUID reviewId,
 			@RequestBody Map<String, Object> body, HttpServletRequest request) {
 		role.require(Role.ADMIN);
-		return service.moderate(reviewId, String.valueOf(body.get("status")), new Actor(id, role, ClientIp.of(request)));
+		return service.moderate(reviewId, String.valueOf(body.get("status")), body.get("reason"), new Actor(id, role, ClientIp.of(request)));
 	}
 
 	@GetMapping("/reports")
@@ -66,7 +66,7 @@ public class ReviewAdminController {
 	public AppReport handle(@RequestHeader("X-Staff-Id") UUID id, @RequestHeader("X-Staff-Role") Role role, @PathVariable UUID reportId,
 			@RequestBody Map<String, Object> body, HttpServletRequest request) {
 		role.require(Role.ADMIN);
-		return service.handleReport(reportId, String.valueOf(body.get("status")), new Actor(id, role, ClientIp.of(request)));
+		return service.handleReport(reportId, String.valueOf(body.get("status")), body.get("reason"), new Actor(id, role, ClientIp.of(request)));
 	}
 
 }

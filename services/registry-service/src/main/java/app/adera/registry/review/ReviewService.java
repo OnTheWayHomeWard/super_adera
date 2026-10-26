@@ -20,6 +20,8 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class ReviewService {
 
+	static final int MAX_REASON = 500;
+
 	static final Set<String> REASONS = Set.of("SPAM", "SCAM", "INAPPROPRIATE", "BROKEN", "OTHER");
 
 	private final AppReviewRepository reviews;
@@ -101,16 +103,23 @@ public class ReviewService {
 	}
 
 	@Transactional
-	public AppReview moderate(UUID reviewId, String status, Actor actor) {
+	public AppReview moderate(UUID reviewId, String status, Object rawReason, Actor actor) {
 		AppReview review = reviews.findById(reviewId).orElseThrow(() -> new Errors.NotFound("review"));
 		String s = String.valueOf(status).toUpperCase(Locale.ROOT);
 		if (!s.equals("VISIBLE") && !s.equals("HIDDEN")) {
 			throw new Errors.ValidationFailed("status", "must be VISIBLE or HIDDEN");
 		}
-		review.setStatus(s, clock.instant());
+		String reason = reason(rawReason);
+		review.setStatus(s, reason, clock.instant());
 		reviews.flush();
 		apps.refreshRating(review.getAppId());
-		audit.record(actor, "review.moderate", "app_review", reviewId.toString(), Map.of("status", s, "appId", review.getAppId().toString()));
+		Map<String, Object> meta = new java.util.LinkedHashMap<>();
+		meta.put("status", s);
+		meta.put("appId", review.getAppId().toString());
+		if (reason != null) {
+			meta.put("reason", reason);
+		}
+		audit.record(actor, "review.moderate", "app_review", reviewId.toString(), meta);
 		return review;
 	}
 
@@ -145,15 +154,37 @@ public class ReviewService {
 	}
 
 	@Transactional
-	public AppReport handleReport(UUID reportId, String status, Actor actor) {
+	public AppReport handleReport(UUID reportId, String status, Object rawReason, Actor actor) {
 		AppReport report = reports.findById(reportId).orElseThrow(() -> new Errors.NotFound("report"));
 		String s = String.valueOf(status).toUpperCase(Locale.ROOT);
 		if (!Set.of("OPEN", "REVIEWED", "DISMISSED").contains(s)) {
 			throw new Errors.ValidationFailed("status", "must be OPEN, REVIEWED or DISMISSED");
 		}
-		report.handle(s, actor == null ? null : actor.id(), clock.instant());
-		audit.record(actor, "report.handle", "app_report", reportId.toString(), Map.of("status", s, "appId", report.getAppId().toString()));
+		String reason = reason(rawReason);
+		report.handle(s, actor == null ? null : actor.id(), reason, clock.instant());
+		Map<String, Object> meta = new java.util.LinkedHashMap<>();
+		meta.put("status", s);
+		meta.put("appId", report.getAppId().toString());
+		if (reason != null) {
+			meta.put("reason", reason);
+		}
+		audit.record(actor, "report.handle", "app_report", reportId.toString(), meta);
 		return report;
+	}
+
+	/** The optional staff note: a string of at most 500 characters; blank means none. */
+	static String reason(Object raw) {
+		if (raw == null) {
+			return null;
+		}
+		if (!(raw instanceof String text)) {
+			throw new Errors.ValidationFailed("reason", "must be a text");
+		}
+		String t = text.strip();
+		if (t.length() > MAX_REASON) {
+			throw new Errors.ValidationFailed("reason", "max " + MAX_REASON + " characters");
+		}
+		return t.isEmpty() ? null : t;
 	}
 
 	private static int clamp(int size) {

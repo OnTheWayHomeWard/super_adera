@@ -162,6 +162,8 @@ export interface Review {
   rating: number;
   comment: string | null;
   status: "VISIBLE" | "HIDDEN";
+  /** Staff-only note on the last hide/restore. */
+  moderationReason?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -176,6 +178,8 @@ export interface Report {
   status: "OPEN" | "REVIEWED" | "DISMISSED";
   handledBy: string | null;
   handledAt: string | null;
+  /** Staff-only note on the last handling or reopening. */
+  handlingReason?: string | null;
   createdAt: string;
 }
 

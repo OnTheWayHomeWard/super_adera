@@ -29,6 +29,10 @@ public class AppReview {
 	@Column(nullable = false)
 	private String status = "VISIBLE";
 
+	/** Staff-only note on the last hide/restore; never part of a user-facing view. */
+	@Column(name = "moderation_reason")
+	private String moderationReason;
+
 	@Column(name = "created_at", nullable = false)
 	private Instant createdAt;
 
@@ -54,8 +58,9 @@ public class AppReview {
 		this.updatedAt = now;
 	}
 
-	public void setStatus(String status, Instant now) {
+	public void setStatus(String status, String reason, Instant now) {
 		this.status = status;
+		this.moderationReason = reason;
 		this.updatedAt = now;
 	}
 
@@ -70,6 +75,8 @@ public class AppReview {
 	public String getComment() { return comment; }
 
 	public String getStatus() { return status; }
+
+	public String getModerationReason() { return moderationReason; }
 
 	public Instant getCreatedAt() { return createdAt; }
 

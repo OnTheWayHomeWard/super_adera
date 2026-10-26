@@ -36,6 +36,10 @@ public class AppReport {
 	@Column(name = "handled_at")
 	private Instant handledAt;
 
+	/** Staff-only note on the last handling or reopening; never part of a user-facing view. */
+	@Column(name = "handling_reason")
+	private String handlingReason;
+
 	@Column(name = "created_at", nullable = false)
 	private Instant createdAt;
 
@@ -51,8 +55,9 @@ public class AppReport {
 		this.createdAt = now;
 	}
 
-	public void handle(String status, UUID staffId, Instant now) {
+	public void handle(String status, UUID staffId, String reason, Instant now) {
 		this.status = status;
+		this.handlingReason = reason;
 		// Reopening puts the report back in the queue: nobody has handled it any more.
 		boolean open = "OPEN".equals(status);
 		this.handledBy = open ? null : staffId;
@@ -70,6 +75,8 @@ public class AppReport {
 	public String getDetails() { return details; }
 
 	public String getStatus() { return status; }
+
+	public String getHandlingReason() { return handlingReason; }
 
 	public UUID getHandledBy() { return handledBy; }
 

@@ -51,7 +51,7 @@ X-Total-Count: 18
     "updatedAt": "2026-10-26T10:56:44.756473Z"
   }
 ]</code></pre><p>The answer is a plain JSON array. The <strong>total number of matches is in the response header <code>X-Total-Count</code></strong> (the header is not exposed to browsers from other origins by the gateway's CORS settings; the backoffice is served from the same origin). Page count = ceil(total / size). Ordered by creation time, newest first; editing a review does not move it.</p>
-<div class="table-wrap"><table><thead><tr><th>Field</th><th>Meaning</th></tr></thead><tbody><tr><td><code>id</code></td><td>Review id: the key for the PATCH and for the audit filter <code>target</code>.</td></tr><tr><td><code>appId</code>, <code>appSlug</code></td><td>The reviewed mini app (both, so a client need not look the app up).</td></tr><tr><td><code>userId</code></td><td>The author. Open it in Users (<code>q=&lt;userId&gt;</code>) to see their status and to suspend them. Visible to every role; not masked.</td></tr><tr><td><code>rating</code>, <code>comment</code></td><td>1 to 5; comment may be null.</td></tr><tr><td><code>status</code></td><td><code>VISIBLE</code> or <code>HIDDEN</code>.</td></tr><tr><td><code>createdAt</code>, <code>updatedAt</code></td><td>When written, and when last edited or moderated.</td></tr></tbody></table></div><h4>Errors</h4><pre class="out"><code>HTTP/1.1 400 Bad Request
+<div class="table-wrap"><table><thead><tr><th>Field</th><th>Meaning</th></tr></thead><tbody><tr><td><code>id</code></td><td>Review id: the key for the PATCH and for the audit filter <code>target</code>.</td></tr><tr><td><code>appId</code>, <code>appSlug</code></td><td>The reviewed mini app (both, so a client need not look the app up).</td></tr><tr><td><code>userId</code></td><td>The author. Open it in Users (<code>q=&lt;userId&gt;</code>) to see their status and to suspend them. Visible to every role; not masked.</td></tr><tr><td><code>rating</code>, <code>comment</code></td><td>1 to 5; comment may be null.</td></tr><tr><td><code>status</code></td><td><code>VISIBLE</code> or <code>HIDDEN</code>.</td></tr><tr><td><code>createdAt</code>, <code>updatedAt</code></td><td>When written, and when last edited or moderated.</td></tr><tr><td><code>moderationReason</code></td><td>Staff-only note given when the review was last hidden or restored (<code>null</code> when none). Never shown to users.</td></tr></tbody></table></div><h4>Errors</h4><pre class="out"><code>HTTP/1.1 400 Bad Request
 
 {
   "error": "validation_failed",
@@ -82,7 +82,7 @@ X-Total-Count: 18
 </div></details>
 </section>
 <section><h2 id="moderate">Hide or restore a review</h2>
-<details class="endpoint" id="ep-review-moderate"><summary><span class="method m-patch">PATCH</span><span class="path">/admin/api/v1/reviews/{reviewId}</span><span class="sum">Hide (HIDDEN) or restore (VISIBLE) a review</span></summary><div class="body"><dl class="meta"><dt>Why</dt><dd>Remove abusive, spam or off-topic reviews from public view, or put back one that was hidden by mistake.</dd><dt>Auth</dt><dd>Staff aal2 Bearer, role <strong>ADMIN</strong> or SUPER_ADMIN (VIEWER: <code>403 insufficient_role</code>)</dd><dt>Audit action</dt><dd><code>review.moderate</code> (target type <code>app_review</code>, meta <code>{status, appId}</code>)</dd><dt>Reversible</dt><dd>Yes, any number of times</dd><dt>Backoffice</dt><dd>Moderation > Reviews: <em>Hide</em> (asks for confirmation) and <em>Restore</em></dd></dl><h4>Body</h4><div class="table-wrap"><table><thead><tr><th>Field</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why it exists</th></tr></thead><tbody><tr><td><code>status</code></td><td>string</td><td>yes</td><td><code>VISIBLE</code> or <code>HIDDEN</code> (any case)</td><td>The new state.</td></tr></tbody></table></div><div class="callout warn"><span class="label">No reason field</span><p>The endpoint accepts <strong>no reason</strong>: other fields in the body are ignored and nothing but the new status is stored. Write the reason in your ticket and quote the review id; the audit log shows who and when, not why.</p></div><h4>Request: hide</h4><pre><code>curl -sS -X PATCH "$GATEWAY/admin/api/v1/reviews/$REVIEW_ID" \
+<details class="endpoint" id="ep-review-moderate"><summary><span class="method m-patch">PATCH</span><span class="path">/admin/api/v1/reviews/{reviewId}</span><span class="sum">Hide (HIDDEN) or restore (VISIBLE) a review</span></summary><div class="body"><dl class="meta"><dt>Why</dt><dd>Remove abusive, spam or off-topic reviews from public view, or put back one that was hidden by mistake.</dd><dt>Auth</dt><dd>Staff aal2 Bearer, role <strong>ADMIN</strong> or SUPER_ADMIN (VIEWER: <code>403 insufficient_role</code>)</dd><dt>Audit action</dt><dd><code>review.moderate</code> (target type <code>app_review</code>, meta <code>{status, appId, reason?}</code>)</dd><dt>Reversible</dt><dd>Yes, any number of times</dd><dt>Backoffice</dt><dd>Moderation > Reviews: <em>Hide</em> (asks for confirmation) and <em>Restore</em></dd></dl><h4>Body</h4><div class="table-wrap"><table><thead><tr><th>Field</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why it exists</th></tr></thead><tbody><tr><td><code>status</code></td><td>string</td><td>yes</td><td><code>VISIBLE</code> or <code>HIDDEN</code> (any case)</td><td>The new state.</td></tr><tr><td><code>reason</code></td><td>string</td><td>no</td><td>Optional text, max 500 characters</td><td>Why you did it, at most 500 characters (longer: 400 <code>validation_failed</code>, <code>fields.reason</code>). Stored as <code>moderationReason</code>, returned in the admin lists, written to the audit entry as <code>meta.reason</code>; <strong>never shown to users</strong>.</td></tr></tbody></table></div><h4>Request: hide</h4><pre><code>curl -sS -X PATCH "$GATEWAY/admin/api/v1/reviews/$REVIEW_ID" \
   -H "Authorization: Bearer $ADMIN_TOKEN" -H "Content-Type: application/json" \
   -d '{"status":"HIDDEN"}'</code></pre><h4>Response 200</h4><pre class="out"><code>HTTP/1.1 200 OK
 
@@ -109,7 +109,26 @@ X-Total-Count: 18
   "id": "2f7cf84b-d265-43d9-99e5-b451514525fb",
   "status": "VISIBLE",
   "updatedAt": "2026-10-26T10:56:44.756473364Z"
-}</code></pre><h4>Errors (verified)</h4><div class="table-wrap"><table><thead><tr><th>Status / error</th><th>When</th></tr></thead><tbody><tr><td><code>400 validation_failed</code> <code>fields.status</code></td><td>Missing or not VISIBLE/HIDDEN</td></tr><tr><td><code>400 invalid_request</code></td><td>The id is not a UUID, or the body is not JSON</td></tr><tr><td><code>403 insufficient_role</code></td><td>Viewer</td></tr><tr><td><code>404 not_found</code></td><td>No review with that id</td></tr></tbody></table></div><pre class="out"><code>HTTP/1.1 400 Bad Request
+}</code></pre><h4>With a reason (HTTP 200)</h4>
+<pre><code>curl -sS -X PATCH "$GATEWAY/admin/api/v1/reviews/$REVIEW_ID" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"status": "HIDDEN", "reason": "Advertising"}'</code></pre>
+<pre class="out"><code>HTTP 200 OK
+
+{
+  "appId": "0f4a620e-2f2b-4401-bbec-b14026641e19",
+  "userId": "750b1cfc-bd63-4b50-9df2-041805957123",
+  "rating": 1,
+  "comment": "BUY FOLLOWERS",
+  "createdAt": "2026-10-26T17:38:35.972813Z",
+  "id": "3cb9802e-31ac-4dc5-bf17-1f4dc33ecc0e",
+  "moderationReason": "Advertising",
+  "status": "HIDDEN",
+  "updatedAt": "2026-10-26T17:38:36.053383457Z"
+}</code></pre>
+<p>The reason is also returned as <code>moderationReason</code> by <code>GET /admin/api/v1/reviews</code> and <code>GET /admin/api/v1/apps/{id}/reviews</code> and written to the audit entry (<code>meta.reason</code>). It is staff-only: users never see it. Each PATCH replaces the stored note (a restore without a reason clears it); the audit log keeps every earlier one.</p>
+<h4>Errors (verified)</h4><div class="table-wrap"><table><thead><tr><th>Status / error</th><th>When</th></tr></thead><tbody><tr><td><code>400 validation_failed</code> <code>fields.status</code></td><td>Missing or not VISIBLE/HIDDEN; or <code>fields.reason</code>: not text or over 500 characters</td></tr><tr><td><code>400 invalid_request</code></td><td>The id is not a UUID, or the body is not JSON</td></tr><tr><td><code>403 insufficient_role</code></td><td>Viewer</td></tr><tr><td><code>404 not_found</code></td><td>No review with that id</td></tr></tbody></table></div><pre class="out"><code>HTTP/1.1 400 Bad Request
 
 {
   "error": "validation_failed",
@@ -134,7 +153,7 @@ X-Total-Count: 18
 <p>See the table inside each endpoint, and the error codes page.</p>
 </section>
 <section><h2 id="notbuilt">Not built yet</h2>
-<ul><li>No reason or note when hiding, no moderator notes.</li><li>No automatic spam detection and no pre-moderation queue (reviews appear immediately).</li><li>No notification to the author when a review is hidden.</li><li>No way to delete a review from the staff side (users can delete their own).</li></ul>
+<ul><li>No free-form moderator notes beyond the optional reason on each hide or restore.</li><li>No automatic spam detection and no pre-moderation queue (reviews appear immediately).</li><li>No notification to the author when a review is hidden.</li><li>No way to delete a review from the staff side (users can delete their own).</li></ul>
 </section>
 
 <div class="pager"><a class="prev" href="users.html"><small>Previous</small>Registered users</a><a class="next" href="moderation-reports.html"><small>Next</small>Moderation: reports</a></div>

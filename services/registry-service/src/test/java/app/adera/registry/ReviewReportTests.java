@@ -172,4 +172,41 @@ class ReviewReportTests {
 		mvc.perform(asUser(get("/api/v1/apps/{id}/my-review", (String) JsonPath.read(res, "$.id")), UUID.randomUUID())).andExpect(status().isNotFound());
 	}
 
+	@Test
+	void staffCanRecordAReasonWhenHidingAReviewOrHandlingAReport() throws Exception {
+		UUID app = liveApp();
+		UUID author = UUID.randomUUID();
+		String reviewId = JsonPath.read(mvc.perform(asUser(put("/api/v1/apps/{id}/my-review", app), author).contentType(MediaType.APPLICATION_JSON).content("{\"rating\":1,\"comment\":\"x\"}"))
+			.andReturn().getResponse().getContentAsString(), "$.id");
+
+		mvc.perform(as(patch("/admin/api/v1/reviews/{id}", reviewId), Role.ADMIN).contentType(MediaType.APPLICATION_JSON).content("{\"status\":\"HIDDEN\",\"reason\":\"  spam link  \"}"))
+			.andExpect(status().isOk()).andExpect(jsonPath("$.moderationReason").value("spam link"));
+		mvc.perform(as(get("/admin/api/v1/reviews").param("appId", app.toString()), Role.VIEWER)).andExpect(jsonPath("$[0].moderationReason").value("spam link"));
+		mvc.perform(as(get("/admin/api/v1/apps/{id}/reviews", app), Role.VIEWER)).andExpect(jsonPath("$[0].moderationReason").value("spam link"));
+		mvc.perform(as(get("/admin/api/v1/audit").param("target", reviewId), Role.ADMIN)).andExpect(jsonPath("$[0].meta.reason").value("spam link"));
+		// never visible to the user side
+		String mine = mvc.perform(asUser(get("/api/v1/apps/{id}/my-review", app), author)).andReturn().getResponse().getContentAsString();
+		assertThat(mine).doesNotContain("spam link").doesNotContain("moderationReason");
+		assertThat(mvc.perform(asUser(get("/api/v1/apps/{id}/reviews", app), author)).andReturn().getResponse().getContentAsString()).doesNotContain("spam link");
+
+		// a restore without a reason replaces the stored note (the audit log keeps the history)
+		mvc.perform(as(patch("/admin/api/v1/reviews/{id}", reviewId), Role.ADMIN).contentType(MediaType.APPLICATION_JSON).content("{\"status\":\"VISIBLE\"}"))
+			.andExpect(jsonPath("$.moderationReason").doesNotExist());
+
+		mvc.perform(as(patch("/admin/api/v1/reviews/{id}", reviewId), Role.ADMIN).contentType(MediaType.APPLICATION_JSON).content("{\"status\":\"HIDDEN\",\"reason\":\"" + "x".repeat(501) + "\"}"))
+			.andExpect(status().isBadRequest()).andExpect(jsonPath("$.fields.reason").exists());
+		mvc.perform(as(patch("/admin/api/v1/reviews/{id}", reviewId), Role.ADMIN).contentType(MediaType.APPLICATION_JSON).content("{\"status\":\"HIDDEN\",\"reason\":5}"))
+			.andExpect(status().isBadRequest()).andExpect(jsonPath("$.fields.reason").exists());
+		mvc.perform(as(patch("/admin/api/v1/reviews/{id}", reviewId), Role.ADMIN).contentType(MediaType.APPLICATION_JSON).content("{\"status\":\"HIDDEN\",\"reason\":\"" + "x".repeat(500) + "\"}"))
+			.andExpect(status().isOk());
+
+		String reportId = JsonPath.read(report(app, author, "{\"reason\":\"SCAM\"}"), "$.reportId");
+		mvc.perform(as(patch("/admin/api/v1/reports/{id}", reportId), Role.ADMIN).contentType(MediaType.APPLICATION_JSON).content("{\"status\":\"DISMISSED\",\"reason\":\"checked, app is fine\"}"))
+			.andExpect(status().isOk()).andExpect(jsonPath("$.handlingReason").value("checked, app is fine")).andExpect(jsonPath("$.reason").value("SCAM"));
+		mvc.perform(as(get("/admin/api/v1/reports").param("appId", app.toString()), Role.VIEWER)).andExpect(jsonPath("$[0].handlingReason").value("checked, app is fine"));
+		mvc.perform(as(get("/admin/api/v1/audit").param("target", reportId), Role.ADMIN)).andExpect(jsonPath("$[0].meta.reason").value("checked, app is fine"));
+		mvc.perform(as(patch("/admin/api/v1/reports/{id}", reportId), Role.ADMIN).contentType(MediaType.APPLICATION_JSON).content("{\"status\":\"OPEN\",\"reason\":\"" + "y".repeat(501) + "\"}"))
+			.andExpect(status().isBadRequest()).andExpect(jsonPath("$.fields.reason").exists());
+	}
+
 }
