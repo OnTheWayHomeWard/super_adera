@@ -104,10 +104,13 @@ public class AppConfigService {
 				errors.put(k, "unknown field");
 			}
 		}
-		Integer perUser = intField(body, "maxPerUserPerDay", errors);
-		Integer perDay = intField(body, "maxPerDay", errors);
-		Integer distinct = intField(body, "maxDistinctUsersPerDay", errors);
-		Long total = longField(body, "maxTotal", errors);
+		// MERGE: a field that is not in the body keeps its current value (the defaults when the channel has no row yet);
+		// an explicit null means unlimited.
+		AppConfigRepository.LimitRow current = config.limits(appId).stream().filter(l -> l.channel().equals(channel)).findFirst().orElseGet(() -> defaultLimit(channel));
+		Integer perUser = body.containsKey("maxPerUserPerDay") ? intField(body, "maxPerUserPerDay", errors) : current.maxPerUserPerDay();
+		Integer perDay = body.containsKey("maxPerDay") ? intField(body, "maxPerDay", errors) : current.maxPerDay();
+		Integer distinct = body.containsKey("maxDistinctUsersPerDay") ? intField(body, "maxDistinctUsersPerDay", errors) : current.maxDistinctUsersPerDay();
+		Long total = body.containsKey("maxTotal") ? longField(body, "maxTotal", errors) : current.maxTotal();
 		if (!errors.isEmpty()) {
 			throw new Errors.ValidationFailed(errors);
 		}
@@ -160,24 +163,43 @@ public class AppConfigService {
 				errors.put(k, "unknown field");
 			}
 		}
-		List<String> currencies = new ArrayList<>();
-		if (!(body.get("allowedCurrencies") instanceof List<?> list)) {
-			errors.put("allowedCurrencies", "must be a list like [\"ETB\", \"USD\"]");
-		}
-		else {
-			for (Object c : list) {
-				String code = String.valueOf(c).toUpperCase(Locale.ROOT);
-				if (!CURRENCIES.contains(code)) {
-					errors.put("allowedCurrencies", "supported currencies: ETB, USD");
-				}
-				else if (!currencies.contains(code)) {
-					currencies.add(code);
+		// MERGE: an omitted field keeps its current value (empty / off / no limit when there are no settings yet);
+		// an explicit null clears it: allowedCurrencies -> [] (no currency allowed), allowHold -> false, amounts -> no limit.
+		AppConfigRepository.PaymentRow current = config.payment(appId).orElse(new AppConfigRepository.PaymentRow(List.of(), false, null, null));
+		List<String> currencies = new ArrayList<>(current.allowedCurrencies());
+		if (body.containsKey("allowedCurrencies")) {
+			currencies.clear();
+			Object raw = body.get("allowedCurrencies");
+			if (raw != null && !(raw instanceof List<?>)) {
+				errors.put("allowedCurrencies", "must be a list like [\"ETB\", \"USD\"] (or null for none)");
+			}
+			else if (raw instanceof List<?> list) {
+				for (Object c : list) {
+					String code = String.valueOf(c).toUpperCase(Locale.ROOT);
+					if (!CURRENCIES.contains(code)) {
+						errors.put("allowedCurrencies", "supported currencies: ETB, USD");
+					}
+					else if (!currencies.contains(code)) {
+						currencies.add(code);
+					}
 				}
 			}
 		}
-		boolean allowHold = Boolean.TRUE.equals(body.get("allowHold"));
-		Long min = longField(body, "minAmountMinor", errors);
-		Long max = longField(body, "maxAmountMinor", errors);
+		boolean allowHold = current.allowHold();
+		if (body.containsKey("allowHold")) {
+			Object raw = body.get("allowHold");
+			if (raw == null) {
+				allowHold = false;
+			}
+			else if (raw instanceof Boolean flag) {
+				allowHold = flag;
+			}
+			else {
+				errors.put("allowHold", "must be true or false (null = false)");
+			}
+		}
+		Long min = body.containsKey("minAmountMinor") ? longField(body, "minAmountMinor", errors) : current.minAmountMinor();
+		Long max = body.containsKey("maxAmountMinor") ? longField(body, "maxAmountMinor", errors) : current.maxAmountMinor();
 		if (min != null && max != null && min > max) {
 			errors.put("minAmountMinor", "must not be greater than maxAmountMinor");
 		}

@@ -42,8 +42,8 @@
 <h2 id="fields">The four limits</h2>
 <div class="table-wrap"><table><thead><tr><th>Field</th><th>Counts</th><th>Window</th><th>Typical use</th></tr></thead><tbody><tr><td><code>maxPerUserPerDay</code></td><td>Messages to <em>one user</em> from this app on this channel</td><td>Per UTC day</td><td>Stops one user being flooded.</td></tr><tr><td><code>maxPerDay</code></td><td>All messages from this app on this channel</td><td>Per UTC day</td><td>Daily spend or volume ceiling.</td></tr><tr><td><code>maxDistinctUsersPerDay</code></td><td>Different users reached from this app on this channel</td><td>Per UTC day</td><td>Stops mass-blasting the whole user base.</td></tr><tr><td><code>maxTotal</code></td><td>All messages ever sent on this channel (lifetime)</td><td>Forever, until you raise it</td><td>Pilot budget: "1000 SMS and then ask us".</td></tr></tbody></table></div>
 <h4>null versus 0 (important)</h4>
-<div class="table-wrap"><table><thead><tr><th>Value</th><th>Meaning</th></tr></thead><tbody><tr><td><code>null</code> (or the field left out of the request)</td><td><strong>Unlimited</strong> for that limit.</td></tr><tr><td><code>0</code></td><td><strong>None allowed</strong>: the first message already exceeds the limit. Use it to switch a channel off without touching the capability.</td></tr><tr><td>a positive whole number</td><td>That many; the next one is refused.</td></tr></tbody></table></div>
-<div class="callout warn"><span class="label">Watch out</span><p>The PUT <strong>replaces all four limits at once</strong>. A field you leave out becomes <code>null</code> = unlimited, not "unchanged". Always send all four fields, copying the current values from <code>GET /admin/api/v1/apps/{appId}</code> (<code>notificationLimits</code>) and changing only the one you mean to change. In the real example below only <code>maxPerDay</code> was sent for EMAIL: the other three became unlimited.</p></div>
+<div class="table-wrap"><table><thead><tr><th>Value</th><th>Meaning</th></tr></thead><tbody><tr><td><code>null</code> (explicit)</td><td><strong>Unlimited</strong> for that limit. A field you <em>leave out</em> is not null: it keeps its current value (see the merge note).</td></tr><tr><td><code>0</code></td><td><strong>None allowed</strong>: the first message already exceeds the limit. Use it to switch a channel off without touching the capability.</td></tr><tr><td>a positive whole number</td><td>That many; the next one is refused.</td></tr></tbody></table></div>
+<div class="callout ok"><span class="label">Merge since 2026-10-26</span><p>The PUT <strong>merges</strong>: a field you leave out keeps its current value, and an explicit <code>null</code> means unlimited. The first time a channel is configured (no limits row yet), omitted fields take the defaults of that channel (SMS 3 / 100 / 100 / 1000, EMAIL 5 / 500 / 500 / 10000, IN_APP 20 / 10000 / 10000 / unlimited, in the order maxPerUserPerDay, maxPerDay, maxDistinctUsersPerDay, maxTotal). Before this change the PUT replaced all four limits, so a one-field PUT silently made the other three unlimited (the backoffice always sends all four, so it was not affected).</p></div>
 <h4>What is counted</h4>
 <ul><li>Every message the partner API <em>accepts</em> counts once, when it is accepted (status QUEUED), whatever happens to it afterwards (sent, failed, retried). A message that later fails is not given back.</li><li>Not counted: requests refused for any reason (validation, quota, template problems, unknown user), repeats of the same <code>externalId</code> (they replay the first answer), and messages to users who muted the app (they end SUPPRESSED at the door).</li><li>The day is the <strong>UTC</strong> day, so daily limits reset at 00:00 UTC (03:00 in Ethiopia).</li><li>Usage is counted per app, <strong>per environment</strong> and per channel; the limit values are the same in DEV and PROD. The lifetime total therefore starts at zero when you go to PROD.</li><li>Counting is serialised per app and channel, so parallel requests cannot overshoot a limit.</li></ul>
 <h4>Defaults</h4>
@@ -52,9 +52,9 @@
 <p>If a channel has no limits row at all (possible only for an app configured by other means), the notification service applies <strong>no limits</strong> to it; setting the limits row once fixes that.</p>
 <h2 id="endpoint">Endpoint</h2>
 <details class="endpoint" id="ep-limit-set" open><summary><span class="method m-put">PUT</span><span class="path">/admin/api/v1/apps/{appId}/notification-limits/{channel}</span><span class="sum">Set the notification limits of a channel</span></summary><div class="body"><dl class="meta"><dt>Who may call</dt><dd>ADMIN or SUPER_ADMIN</dd><dt>Auth</dt><dd>Staff session Bearer token at assurance level aal2 (<code>Authorization: Bearer $TOKEN</code>)</dd><dt>Rate limit</dt><dd>300 requests per minute per client IP at the gateway (HTTP 429 beyond that)</dd><dt>Backoffice</dt><dd>App &gt; <em>Notification limits</em> (Edit per channel, "Limits for SMS" dialog, button "Save limits"), App &gt; <em>Usage</em> (meters)</dd><dt>Audit name</dt><dd><code>limit.set</code> (meta: channel, new limits)</dd><dt>Reversible</dt><dd>Yes: send the previous values again</dd></dl>
-<p><strong>Purpose.</strong> Sets the four limits of one channel of one app. <strong>When to use it.</strong> To raise a quota for a partner that has outgrown its defaults, to lower it after abuse, to put a hard stop on a channel (0), or to remove a cap (null).</p>
+<p><strong>Purpose.</strong> Sets the limits of one channel of one app (send only the ones you change; the others keep their value). <strong>When to use it.</strong> To raise a quota for a partner that has outgrown its defaults, to lower it after abuse, to put a hard stop on a channel (0), or to remove a cap (null).</p>
 <h4>Path and body</h4>
-<div class="table-wrap"><table><thead><tr><th>Name</th><th>Where</th><th>Type</th><th>Required</th><th>Meaning</th></tr></thead><tbody><tr><td><code>appId</code></td><td>path</td><td>UUID</td><td>yes</td><td>The app.</td></tr><tr><td><code>channel</code></td><td>path</td><td>string</td><td>yes</td><td><code>SMS</code>, <code>EMAIL</code> or <code>IN_APP</code> (any letter case).</td></tr><tr><td><code>maxPerUserPerDay</code></td><td>body</td><td>integer &ge; 0 or null</td><td>no (omitted = null)</td><td>See above.</td></tr><tr><td><code>maxPerDay</code></td><td>body</td><td>integer &ge; 0 or null</td><td>no (omitted = null)</td><td>See above.</td></tr><tr><td><code>maxDistinctUsersPerDay</code></td><td>body</td><td>integer &ge; 0 or null</td><td>no (omitted = null)</td><td>See above.</td></tr><tr><td><code>maxTotal</code></td><td>body</td><td>integer &ge; 0 or null (larger numbers allowed)</td><td>no (omitted = null)</td><td>See above.</td></tr></tbody></table></div>
+<div class="table-wrap"><table><thead><tr><th>Name</th><th>Where</th><th>Type</th><th>Required</th><th>Meaning</th></tr></thead><tbody><tr><td><code>appId</code></td><td>path</td><td>UUID</td><td>yes</td><td>The app.</td></tr><tr><td><code>channel</code></td><td>path</td><td>string</td><td>yes</td><td><code>SMS</code>, <code>EMAIL</code> or <code>IN_APP</code> (any letter case).</td></tr><tr><td><code>maxPerUserPerDay</code></td><td>body</td><td>integer &ge; 0 or null</td><td>no (omitted = unchanged)</td><td>See above.</td></tr><tr><td><code>maxPerDay</code></td><td>body</td><td>integer &ge; 0 or null</td><td>no (omitted = unchanged)</td><td>See above.</td></tr><tr><td><code>maxDistinctUsersPerDay</code></td><td>body</td><td>integer &ge; 0 or null</td><td>no (omitted = unchanged)</td><td>See above.</td></tr><tr><td><code>maxTotal</code></td><td>body</td><td>integer &ge; 0 or null (larger numbers allowed)</td><td>no (omitted = unchanged)</td><td>See above.</td></tr></tbody></table></div>
 <p>Raise the SMS limits of a pilot partner:</p>
 <pre><code>curl -sS -X PUT "$GATEWAY/admin/api/v1/apps/$APP_ID/notification-limits/sms" \
   -H "Authorization: Bearer $TOKEN" \
@@ -76,15 +76,35 @@
   "maxDistinctUsersPerDay": 300,
   "maxTotal": 5000
 }</code></pre>
-<p>Only <code>maxPerDay</code> sent (the three others silently become unlimited):</p>
-<pre class="out"><code>PUT .../notification-limits/EMAIL  {"maxPerDay": 100}
+<p>Merge: only <code>maxPerDay</code> sent for SMS (the other three keep their values) and then an explicit <code>null</code> for <code>maxTotal</code>:</p>
+<pre class="out"><code>PUT .../notification-limits/SMS  {"maxPerDay": 600}
+
+{
+  "channel": "SMS",
+  "maxPerUserPerDay": 5,
+  "maxPerDay": 600,
+  "maxDistinctUsersPerDay": 300,
+  "maxTotal": 5000
+}
+
+PUT .../notification-limits/SMS  {"maxTotal": null}
+
+{
+  "channel": "SMS",
+  "maxPerUserPerDay": 5,
+  "maxPerDay": 600,
+  "maxDistinctUsersPerDay": 300,
+  "maxTotal": null
+}
+
+PUT .../notification-limits/EMAIL  {"maxPerDay": 100}      (EMAIL had no limits yet: omitted fields take the EMAIL defaults)
 
 {
   "channel": "EMAIL",
-  "maxPerUserPerDay": null,
+  "maxPerUserPerDay": 5,
   "maxPerDay": 100,
-  "maxDistinctUsersPerDay": null,
-  "maxTotal": null
+  "maxDistinctUsersPerDay": 500,
+  "maxTotal": 10000
 }</code></pre>
 <h4>Errors</h4>
 <div class="table-wrap"><table><thead><tr><th>Status</th><th><code>error</code></th><th>When it happens</th><th>What to do</th></tr></thead><tbody><tr><td>400</td><td><code>validation_failed</code></td><td>Channel is not SMS, EMAIL or IN_APP; a value is negative, not a whole number or not a number; an unknown field was sent.</td><td>Read <code>fields</code>.</td></tr><tr><td>403</td><td><code>insufficient_role</code></td><td>VIEWER.</td><td>Use an ADMIN.</td></tr><tr><td>404</td><td><code>not_found</code></td><td>No such app.</td><td>Check the id.</td></tr></tbody></table></div>
@@ -109,10 +129,10 @@ HTTP 429  {"error": "quota_exceeded", "limit": "max_per_day", "channel": "IN_APP
 <h4>Effects, audit</h4>
 <ul><li>Audit: <code>limit.set</code>, meta <code>{"channel": "SMS", "maxPerUserPerDay": 2, "maxPerDay": null, "maxDistinctUsersPerDay": null, "maxTotal": 500}</code> (real fields, the new values; <code>null</code> = unlimited. Entries written before 2026-10-26 had one text instead; a migration converted them. The old values are not recorded, so note them before you change).</li><li>The notification service picks up the change within about 15 seconds.</li><li>Lowering a limit below today's usage simply blocks further sends today; nothing already accepted is removed.</li></ul>
 <h4>Scenario</h4>
-<p>A pilot partner used 950 of its 1000 lifetime SMS and asks to continue. You read the usage, agree on 20,000, and send the PUT with all four fields (copying the other three), changing <code>maxTotal</code>. You check the next day's usage meter.</p>
+<p>A pilot partner used 950 of its 1000 lifetime SMS and asks to continue. You read the usage, agree on 20,000, and send <code>{"maxTotal": 20000}</code>; the other three limits keep their values. You check the next day's usage meter.</p>
 </div></details>
 <h2 id="not-built">Not built yet</h2>
-<ul><li>Different limits for DEV and PROD, or per template category (the backoffice hint "PROMOTIONAL may be limited more strictly later" is a plan, not a feature).</li><li>Alerts when an app reaches a limit (use the usage view).</li><li>Per-limit "change one field" calls: the PUT always writes all four.</li></ul>
+<ul><li>Different limits for DEV and PROD, or per template category (the backoffice hint "PROMOTIONAL may be limited more strictly later" is a plan, not a feature).</li><li>Alerts when an app reaches a limit (use the usage view).</li></ul>
 
 <div class="pager"><a class="prev" href="capabilities.html"><small>Previous</small>Capabilities</a><a class="next" href="environments-and-ips.html"><small>Next</small>Environments and IPs</a></div>
 <p class="footer">Admin guide: managing mini apps. Examples were captured from a running dev stack (ADERA_ENV=dev) with a throwaway app and a temporary staff account, both removed afterwards. Ids, timestamps and key ids differ on your system.</p>

@@ -56,7 +56,7 @@ class AuditMetaTests {
 	void limitSetStoresTheChannelAndEveryLimitAsStructuredMetaWithNullForUnlimited() throws Exception {
 		UUID app = createApp();
 		mvc.perform(as(put("/admin/api/v1/apps/{id}/notification-limits/sms", app), Role.ADMIN).contentType(MediaType.APPLICATION_JSON)
-			.content("{\"maxPerUserPerDay\":2,\"maxPerDay\":50,\"maxTotal\":1000}")).andExpect(status().isOk());
+			.content("{\"maxPerUserPerDay\":2,\"maxPerDay\":50,\"maxDistinctUsersPerDay\":null,\"maxTotal\":1000}")).andExpect(status().isOk());
 		mvc.perform(as(get("/admin/api/v1/audit").param("action", "limit.set").param("appId", app.toString()), Role.ADMIN)).andExpect(status().isOk())
 			.andExpect(jsonPath("$[0].meta.channel").value("SMS"))
 			.andExpect(jsonPath("$[0].meta.maxPerUserPerDay").value(2))
