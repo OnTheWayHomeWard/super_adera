@@ -98,15 +98,21 @@ def login(identifier, password):
 def signup_verified(password, phone=None, email=None):
     """Register, verify the first address with the code from the dev endpoint, sign in. Returns (session_token, identity_id)."""
     ident = phone or email
-    mark = last_at(ident)
+    marks = {a: last_at(a) for a in (phone, email) if a}
     st, r = register(password, phone, email)
     if st != 200:
         raise SystemExit(f"registration of {ident} failed ({st}): {json.dumps(r)[:300]}")
     flow = r["continue_with"][0]["flow"]["id"]
-    code, _ = wait_code(ident, mark)
+    # Kratos sends the first verification code to ONE of the addresses (continue_with says which), not to both
+    sent_to = r["continue_with"][0]["flow"].get("verifiable_address", ident)
+    code, _ = wait_code(sent_to, marks.get(sent_to))
     st, v = verify(flow, code)
     if v.get("state") != "passed_challenge":
         raise SystemExit(f"verification of {ident} failed ({st}): {json.dumps(v)[:300]}")
+    # Kratos checks the address you SIGN IN WITH: with a phone and an email, each must be verified before it can be used to sign in.
+    # Signing in with an unverified one is refused and starts a verification flow for exactly that address.
+    for other in (a for a in (phone, email) if a and a != sent_to):
+        login_verified(other, password)
     st, s = login(ident, password)
     if not s.get("session_token"):
         raise SystemExit(f"login of {ident} failed ({st}): {json.dumps(s)[:300]}")
@@ -122,3 +128,20 @@ def reset_start(phone):
 def reset_finish(phone, code, password):
     PACE["reset-finish"].wait()
     return staff.call("POST", G + "/public/v1/password-reset/finish", {"identifier": phone, "code": code, "password": password})
+
+
+def login_verified(identifier, password):
+    """Password login. While Kratos refuses with session_verified_address_required, verify the address it sent a code to (its
+    verification flow names it: with a phone AND an email on the account it picks one, not necessarily the one you typed) and
+    try again. Needed because the address you sign in with must itself be verified."""
+    for _ in range(3):
+        started = time.strftime('%Y-%m-%dT%H:%M:%S', time.gmtime(time.time() - 1))
+        st, r = login(identifier, password)
+        err = r.get("error") if isinstance(r.get("error"), dict) else {}
+        if err.get("id") != "session_verified_address_required":
+            return st, r
+        flow = err["details"]["continue_with"][0]["flow"]
+        sent_to = flow.get("verifiable_address", identifier)
+        code, _ = wait_code(sent_to, started)
+        verify(flow["id"], code)
+    return login(identifier, password)

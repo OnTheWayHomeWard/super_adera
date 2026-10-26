@@ -4,6 +4,7 @@ tempstaff.py, partner requests signed with openssl RSA keys), so every row is va
 
   python3 -I tests/e2e/seed_scenarios.py              create / complete the data (safe to run again: nothing is duplicated)
   python3 -I tests/e2e/seed_scenarios.py --remove     delete everything this script created, and nothing else
+  python3 -I tests/e2e/seed_scenarios.py --wipe-users delete all end users and what hangs on them (apps, keys, staff stay); a normal run then re-creates them
   python3 -I tests/e2e/seed_scenarios.py --check      only run the read-only verification (masking, role limits, counts)
   options: --no-outage   skip the short Mailpit stop that produces RETRYING / EXPIRED email notifications
            --only a,b    run only some stages (users, apps, ...): for debugging
@@ -22,7 +23,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-import staff, tempstaff
+import staff, tempstaff, userauth
 
 G, K, N = staff.G, staff.K, staff.N
 ROOT = os.path.abspath(os.path.join(HERE, "..", ".."))
@@ -208,6 +209,12 @@ KEYED = {  # app slug -> allowed DEV addresses
     "demo-paused": ["203.0.113.77"],  # a documentation address: every request is refused with ip_not_allowed
 }
 
+# DEV-ONLY sign-in passwords of the seeded users (documented in docs/src/13-sample-data.html): the surname in lower case, with
+# digits added where it would be shorter than the 6 characters the platform requires. Never use such passwords outside dev.
+PASSWORDS = {"u01": "kebede", "u02": "tesfaye2", "u03": "tesfaye", "u04": "dawit123", "u05": "alemu123", "u06": "girma123",
+             "u07": "bekele", "u08": "gebru123", "u09": "haile123", "u10": "worku123", "u11": "sam12345", "u12": "dina1234",
+             "u13": "noapps", "u14": "blank1", "u15": "filled"}
+
 TXT_LONG = "Great app. " * 5
 USERS = [
     dict(k="u01", phone="+251900000001", email="demo.abebe@example.com", first="Demo Abebe", last="Kebede", lang="en", gender="male",
@@ -350,50 +357,15 @@ def otp_for(identifier):
 
 
 def signup_user(u):
-    ident = u["phone"] or u["email"]
-    for attempt in range(3):
-        gate.wait(2)
-        staff.call("DELETE", N + "/dev/messages")
-        _, f = staff.call("GET", K + "/self-service/registration/api")
-        body = {"method": "code"}
-        if u["phone"]:
-            body["traits.phone_number"] = u["phone"]
-        if u["email"]:
-            body["traits.email"] = u["email"]
-        st, _ = staff.call("POST", f"{K}/self-service/registration?flow={f['id']}", body)
-        if st == 429:
-            time.sleep(61)
-            continue
-        code = otp_for(ident)
-        st, r = staff.call("POST", f"{K}/self-service/registration?flow={f['id']}", {**body, "code": code})
-        if st == 429:
-            time.sleep(61)
-            continue
-        if not r.get("session_token"):
-            raise SystemExit(f"sign-up of {u['k']} failed ({st}): {json.dumps(r)[:300]}")
-        return r["session_token"], r["identity"]["id"]
-    raise SystemExit("rate limited too long")
+    """Password sign-up, the verification code read from the dev endpoint, password login. Returns (session token, identity id)."""
+    return userauth.signup_verified(PASSWORDS[u["k"]], phone=u["phone"], email=u["email"])
 
 
 def login_user(u):
-    ident = u["phone"] or u["email"]
-    for attempt in range(3):
-        gate.wait(2)
-        staff.call("DELETE", N + "/dev/messages")
-        _, f = staff.call("GET", K + "/self-service/login/api")
-        st, _ = staff.call("POST", f"{K}/self-service/login?flow={f['id']}", {"method": "code", "identifier": ident})
-        if st == 429:
-            time.sleep(61)
-            continue
-        code = otp_for(ident)
-        st, r = staff.call("POST", f"{K}/self-service/login?flow={f['id']}", {"method": "code", "identifier": ident, "code": code})
-        if st == 429:
-            time.sleep(61)
-            continue
-        if not r.get("session_token"):
-            raise SystemExit(f"login of {u['k']} failed ({st}): {json.dumps(r)[:300]}")
-        return r["session_token"]
-    raise SystemExit("rate limited too long")
+    st, r = userauth.login_verified(u["phone"] or u["email"], PASSWORDS[u["k"]])
+    if not r.get("session_token"):
+        raise SystemExit(f"login of {u['k']} failed ({st}): {json.dumps(r)[:300]}")
+    return r["session_token"]
 
 
 def ensure_user(u):
@@ -718,7 +690,7 @@ def stage_moderation():
     st, openrows = adm("ADMIN:mod", "GET", "/reports?status=OPEN&size=1")
     if st == 200 and openrows:
         st, r = adm("ADMIN:mod", "PATCH", f"/reports/{openrows[0]['id']}", {"status": "RESOLVED"})
-        ok("report status 'RESOLVED' is refused: the API word for resolved is REVIEWED", st == 400 and "status" in r.get("fields", {}), f"{st} {json.dumps(r)[:120]}")
+        ok("report status 'RESOLVED' is accepted as another word for REVIEWED", st == 200 and r.get("status") == "REVIEWED", f"{st} {json.dumps(r)[:120]}")
     st, rows = adm("ADMIN:mod", "GET", "/reports?status=OPEN&size=100")
     st2, total = call("GET", f"{G}/admin/api/v1/reports?status=OPEN&size=1", None, {"Authorization": "Bearer " + staff_token("ADMIN")})
     reopened = [r for r in rows if r["handledBy"] and r["status"] == "OPEN"]
@@ -1042,7 +1014,7 @@ def stage_partner():
     out(" -- callbacks: delivered, retrying, failed")
     send(F, "seed-food-cb-500", "u02", "seed-order-confirmed", {"name": "ሰላም", "orderNo": "C-1"}, final="SENT", callbackUrl=hb + "/hook-500")
     send(F, "seed-food-cb-refused", "u07", "seed-order-update", {"name": "Yonas", "eta": "9 min"}, final="SENT", callbackUrl=f"http://{host_ip()}:9/hook")
-    send(F, "seed-food-cb-invalid", "u07", "seed-order-update", {"name": "Yonas", "eta": "7 min"}, final="SENT", callbackUrl=f"http://user@{host_ip()}:9/hook")
+    send(F, "seed-food-cb-invalid", "u07", "seed-order-update", {"name": "Yonas", "eta": "7 min"}, expect=(400, "validation_failed"), callbackUrl=f"http://user@{host_ip()}:9/hook")  # refused when the request arrives
     note("the partner API accepts a callbackUrl with credentials (http://user@host/): the callback is created and then fails at once with last_error invalid_url, a refusal that could have been 400 at the door")
 
     out(" -- ride: SMS, IN_APP, capability, wrong environment, bad signature")
@@ -1473,6 +1445,74 @@ def stage_remove():
     out("  done. The five apps from seed_demo.py are untouched (their rating, allowed addresses and any template/key of ours were reset).")
 
 
+def stage_wipe_users():
+    """Removes every END-USER (all Kratos identities that are not staff, all app_user rows) and what hangs on them: devices,
+    aliases, preferences, inbox, notifications addressed to them, usage rows, reviews, reports, audit rows about them, avatars.
+    Apps, partner keys, templates, staff and the synthetic u_p_test_* users stay. Clears the state of the user-dependent stages
+    so the next run re-creates them (as real password accounts)."""
+    out("== wiping end users (staff, apps, keys, templates stay)")
+    staff_ids = set(psql("registry", "SELECT identity_id FROM staff").splitlines())
+    st, idents = staff.call("GET", KRATOS_ADMIN + "/admin/identities?per_page=250")
+    ids = {i["id"] for i in idents if i["id"] not in staff_ids}
+    ids |= set(psql("users", "SELECT id FROM app_user").splitlines())
+    ids -= staff_ids
+    ids = sorted(ids)
+    out(f"  {len(ids)} users")
+    if not ids:
+        return
+    addresses = []
+    for i in idents:
+        if i["id"] in ids:
+            addresses += [v for v in (i["traits"].get("phone_number"), i["traits"].get("email")) if v]
+    addresses += [x for x in psql("users", "SELECT coalesce(phone_e164,'') FROM app_user").splitlines() + psql("users", "SELECT coalesce(email,'') FROM app_user").splitlines() if x]
+    L = in_list(ids)
+    nids = psql("notification", f"SELECT id FROM notification WHERE user_id IN ({L})").splitlines()
+    apps_hit = psql("notification", f"SELECT DISTINCT app_id FROM notification WHERE user_id IN ({L})").splitlines()
+    if nids:
+        for t in ("callback", "notification_attempt", "inbox_item"):
+            psql("notification", f"DELETE FROM {t} WHERE notification_id IN ({in_list(nids)})")
+        psql("notification", f"DELETE FROM notification WHERE id IN ({in_list(nids)})")
+    psql("notification", f"DELETE FROM inbox_item WHERE user_id IN ({L})")
+    psql("notification", f"DELETE FROM usage_daily WHERE user_id IN ({L})")
+    for a in apps_hit:  # lifetime counters of an app whose notifications are all gone start from zero again
+        if psql("notification", f"SELECT count(*) FROM notification WHERE app_id = {sqlq(a)}") == "0":
+            psql("notification", f"DELETE FROM usage_total WHERE app_id = {sqlq(a)}")
+    touched = psql("registry", f"SELECT DISTINCT app_id FROM app_review WHERE user_id IN ({L})").splitlines()
+    psql("registry", f"DELETE FROM app_review WHERE user_id IN ({L})")
+    psql("registry", f"DELETE FROM app_report WHERE user_id IN ({L})")
+    for a in touched:
+        psql("registry", f"""UPDATE mini_app SET
+          rating_avg = COALESCE((SELECT ROUND(AVG(rating)::numeric, 2) FROM app_review WHERE app_id = {sqlq(a)} AND status = 'VISIBLE'), 0),
+          rating_count = (SELECT COUNT(*) FROM app_review WHERE app_id = {sqlq(a)} AND status = 'VISIBLE') WHERE id = {sqlq(a)}""")
+    psql("registry", f"DELETE FROM audit_event WHERE target_id IN ({L})")
+    try:
+        for line in open(os.path.join(ROOT, ".env")):
+            if line.startswith("RUSTFS_ACCESS_KEY=") or line.startswith("RUSTFS_SECRET_KEY="):
+                os.environ[line.split("=", 1)[0]] = line.split("=", 1)[1].strip()
+        import s3tool
+        gone = 0
+        for i in ids:
+            for key in s3tool.keys(f"avatars/{i}/"):
+                s3tool.call("DELETE", "/" + s3tool.BUCKET + "/" + key)
+                gone += 1
+        out(f"  deleted {gone} stored avatar(s)")
+    except Exception as e:
+        out(f"  object storage cleanup skipped: {e}")
+    for i in ids:
+        staff.call("DELETE", f"{KRATOS_ADMIN}/admin/identities/{i}")
+    for t in ("device", "app_user_alias", "app_notification_preference"):
+        psql("users", f"DELETE FROM {t} WHERE user_id IN ({L})")
+    psql("users", f"DELETE FROM app_user WHERE id IN ({L})")
+    if addresses:
+        hashes = [hashlib.sha256(x.strip().lower().encode()).hexdigest() for x in set(addresses)]
+        psql("notification", f"DELETE FROM send_log WHERE recipient_hash IN ({in_list(hashes)})")
+        psql("notification", f"DELETE FROM code_request WHERE recipient_hash IN ({in_list(hashes)})")
+    S["users"], S["aliases"], S["avatars"] = {}, {}, []
+    S["done"] = [f for f in S["done"] if not re.match(r"(user:|send:|handle|hide|negatives|inbox|suspended-login)", f)]
+    save_state()
+    out(f"  left: kratos identities={len(staff.call('GET', KRATOS_ADMIN + '/admin/identities?per_page=250')[1])} (staff), app_user={psql('users', 'SELECT count(*) FROM app_user')}")
+
+
 # ----------------------------------------------------------------------------------------------------------------- main
 def main(argv):
     only = None
@@ -1481,6 +1521,9 @@ def main(argv):
     def want(stage):
         return only is None or stage in only
     require_dev()
+    if "--wipe-users" in argv:
+        stage_wipe_users()
+        return 0
     if "--remove" in argv:
         stage_remove()
         return 0
