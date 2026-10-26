@@ -3,7 +3,7 @@
 Needs DEV mode. Run from the repo root:  python3 -I tests/e2e/admin_users.py   (creates and removes a temporary staff account)"""
 import json, os, subprocess, sys, time, urllib.parse
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import staff, tempstaff
+import staff, tempstaff, userauth
 
 G = staff.G; K = staff.K; N = staff.N
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
@@ -27,12 +27,7 @@ def psql(db, sql):
 
 
 def signup(phone):
-    staff.call("DELETE", N + "/dev/messages")
-    _, f = staff.call("GET", K + "/self-service/registration/api")
-    staff.call("POST", f"{K}/self-service/registration?flow={f['id']}", {"method": "code", "traits.phone_number": phone})
-    code = staff.otp_from_dev_endpoint(phone)
-    _, r = staff.call("POST", f"{K}/self-service/registration?flow={f['id']}", {"method": "code", "traits.phone_number": phone, "code": code})
-    return r["session_token"], r["identity"]["id"]
+    return userauth.signup_verified("tadesse", phone=phone)
 
 
 phone = "+2519" + str(int(time.time()))[-8:]
@@ -57,11 +52,7 @@ try:
     st, r = staff.call("GET", G + "/api/v1/me", headers=U)
     ok("suspending also revokes the user's sessions: old token -> 401", st == 401, st)
     # signing in again works at Kratos (it does not know our status), but the gateway check refuses the new session
-    staff.call("DELETE", N + "/dev/messages")
-    _, f = staff.call("GET", K + "/self-service/login/api")
-    staff.call("POST", f"{K}/self-service/login?flow={f['id']}", {"method": "code", "identifier": phone})
-    code = staff.otp_from_dev_endpoint(phone)
-    _, r = staff.call("POST", f"{K}/self-service/login?flow={f['id']}", {"method": "code", "identifier": phone, "code": code})
+    _, r = userauth.login(phone, "tadesse")
     U2 = {"Authorization": "Bearer " + r["session_token"]}
     st, r = staff.call("GET", G + "/api/v1/me", headers=U2)
     ok("signed in again, still refused by the gateway: 403 account_suspended", st == 403 and r.get("error") == "account_suspended", f"{st} {r}")

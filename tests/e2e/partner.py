@@ -8,7 +8,7 @@ import base64, hashlib, json, os, re, struct, subprocess, sys, tempfile, threadi
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import staff, tempstaff
+import staff, tempstaff, userauth
 
 G = staff.G; K = staff.K; N = staff.N
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
@@ -53,17 +53,8 @@ def raw(method, url, data=None, headers=None):
 
 
 def user_signup(phone):
-    staff.call("DELETE", N + "/dev/messages")
-    _, f = staff.call("GET", K + "/self-service/registration/api")
-    staff.call("POST", f"{K}/self-service/registration?flow={f['id']}", {"method": "code", "traits.phone_number": phone})
-    code = None
-    for _ in range(15):
-        _, m = staff.call("GET", f"{N}/dev/messages?to={urllib.parse.quote(phone)}")
-        if isinstance(m, list) and m:
-            code = re.search(r"\b(\d{6})\b", m[0]["body"]).group(1); break
-        time.sleep(1)
-    _, r = staff.call("POST", f"{K}/self-service/registration?flow={f['id']}", {"method": "code", "traits.phone_number": phone, "code": code})
-    return r["session_token"], r["identity"]["id"]
+    """An app user: password sign-up, verification code from the dev endpoint, password login."""
+    return userauth.signup_verified("tadesse", phone=phone)
 
 
 # ---- partner side: an RSA key pair made with openssl; only the public half is ever given to us -----------------------

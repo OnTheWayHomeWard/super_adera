@@ -31,13 +31,15 @@ class Pace:
             self.stamps.append(time.time())
 
 
-# login submits and registration/verification/recovery/settings submits have their own gateway limits (see apisix.yaml)
-PACE = {"login": Pace(8), "other": Pace(8)}
+# every step has its own gateway route and limit per IP (infra/apisix/apisix.yaml): login 10/min, registration 5, recovery 5,
+# verification 10, settings 10, password reset by phone start 5 / finish 10. Stay one under.
+PACE = {"login": Pace(9), "registration": Pace(4), "recovery": Pace(4), "verification": Pace(9), "settings": Pace(9),
+        "reset-start": Pace(4), "reset-finish": Pace(9)}
 
 
 def submit(kind, flow_id, body, headers=None):
     """POST one step of a native flow. kind: login | registration | verification | recovery | settings."""
-    PACE["login" if kind == "login" else "other"].wait()
+    PACE[kind].wait()
     for _ in range(3):
         st, r = staff.call("POST", f"{K}/self-service/{kind}?flow={flow_id}", body, headers)
         if st != 429:
@@ -109,3 +111,14 @@ def signup_verified(password, phone=None, email=None):
     if not s.get("session_token"):
         raise SystemExit(f"login of {ident} failed ({st}): {json.dumps(s)[:300]}")
     return s["session_token"], r["identity"]["id"]
+
+
+def reset_start(phone):
+    """Forgot password by PHONE: our endpoint sends the SMS code (Kratos' recovery flow only takes an email)."""
+    PACE["reset-start"].wait()
+    return staff.call("POST", G + "/public/v1/password-reset/start", {"identifier": phone})
+
+
+def reset_finish(phone, code, password):
+    PACE["reset-finish"].wait()
+    return staff.call("POST", G + "/public/v1/password-reset/finish", {"identifier": phone, "code": code, "password": password})
