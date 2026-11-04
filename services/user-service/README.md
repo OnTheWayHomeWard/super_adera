@@ -36,7 +36,7 @@ Tests use `adera.user.storage.type=memory` (an in-memory fake) instead of RustFS
 
 ## Build, test, run
 ```bash
-JAVA_HOME=/usr/lib/jvm/java-21-openjdk mvn test           # 47 tests; needs Docker (Testcontainers Postgres)
+JAVA_HOME=/usr/lib/jvm/java-21-openjdk mvn test           # 130 tests; needs Docker (Testcontainers Postgres)
 docker compose build user-service && docker compose up -d user-service     # from the repo root
 python3 -I tests/e2e/journey.py                           # full journey through the gateway (dev mode)
 ```

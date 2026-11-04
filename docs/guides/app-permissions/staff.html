@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>What staff configure | Mini-app permissions and the bridge</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+<button id="menu-btn" type="button" aria-label="Toggle menu">Menu</button>
+<a class="brand" href="index.html">Mini-app permissions and the bridge</a>
+<span class="spacer"></span>
+<button id="theme-btn" type="button" aria-label="Toggle light or dark theme">Theme</button>
+</header>
+<div class="layout">
+<nav class="sidebar" aria-label="Pages in this guide">
+<h4>This guide</h4>
+<ul><li><a href="index.html">Overview and contents</a></li><li><a href="concepts.html">How it works</a></li><li><a href="super-app-api.html">Super app: the user API</a></li><li><a href="bridge-spec.html">Super app: the bridge specification</a></li><li><a href="mini-app.html">Mini app developers</a></li><li><a href="scenario.html">Worked example: Demo Ride</a></li><li><a href="staff.html" class="current">What staff configure</a></li><li><a href="errors.html">Error codes</a></li><li><a href="known-issues.html">Known issues and not built yet</a></li></ul>
+</nav>
+<main>
+<h1>What staff configure</h1>
+<p class="lead">The purpose sentence, the per-capability counts, the callback address and what staff can do about a misbehaving app.</p>
+
+<h2 id="overview">Overview</h2>
+<p>For Adera staff (ADMIN and above change things; every role can read). Staff configure the first gate; the users decide the second. This page is short on purpose: the backoffice manual has the screens.</p>
+<h2 id="purpose">The purpose sentence</h2>
+<p>When you grant a capability to an app (backoffice: app page, Capabilities tab) you also approve <strong>one sentence per language</strong> that users read in the permission dialog, for example "Find a driver near you." For the sensitive capabilities an English sentence of at least 10 characters is required; it must be at most 160 characters, one line, and contain no link. For the others (<code>user.basic</code>, <code>notify.*</code>) a grant without a sentence is allowed and the dialog then shows the capability's default sentence, so no dialog is ever empty. The mini app cannot change the text. Every change of a sentence is on the audit tab with the old and the new text.</p>
+<div class="table-wrap"><table><thead><tr><th>Capability</th><th>Dialog headline (label)</th><th>Default sentence</th><th>Sentence required to grant</th></tr></thead><tbody><tr><td><code>user.basic</code></td><td>Your Adera id</td><td>Recognise you in the app without learning who you are.</td><td>no</td></tr><tr><td><code>user.full_name</code></td><td>Your name</td><td>Greet you by name.</td><td>yes</td></tr><tr><td><code>user.contact</code></td><td>Your phone number and email</td><td>Contact you about your use of the app.</td><td>yes</td></tr><tr><td><code>user.address</code></td><td>Your saved address</td><td>Fill in your address for you.</td><td>yes</td></tr><tr><td><code>location.coarse</code></td><td>Your approximate location</td><td>Show results near you.</td><td>yes</td></tr><tr><td><code>location.fine</code></td><td>Your precise location</td><td>Use your exact position while the app is open.</td><td>yes</td></tr><tr><td><code>pay.request</code></td><td>Payments</td><td>Ask you to confirm a payment.</td><td>yes</td></tr><tr><td><code>notify.inapp</code></td><td>Notifications in Adera</td><td>Send you messages inside Adera.</td><td>no</td></tr><tr><td><code>notify.sms</code></td><td>Text messages (SMS)</td><td>Send you text messages.</td><td>no</td></tr><tr><td><code>notify.email</code></td><td>Email</td><td>Send you emails.</td><td>no</td></tr></tbody></table></div>
+<h2 id="counts">The counts</h2>
+<p>The Capabilities tab has a <em>Users</em> column: for every granted capability how many users granted, denied or were blocked. Numbers only, never names; deleted users are not counted. For <code>user.basic</code> (no dialog) "granted" is the number of users who opened the app and did not disconnect. The same numbers come from <code>GET /admin/api/v1/apps/{id}/permissions</code> (any staff role). Real answer for Demo Ride:</p>
+<pre class="out"><code>GET /admin/api/v1/apps/&lt;demo-ride id&gt;/permissions
+
+HTTP 200
+{
+  "appId": "4e831b72-a33b-4d93-a7ba-65e19b9dbd0a",
+  "slug": "demo-ride",
+  "capabilities": [
+    {
+      "capability": "location.fine",
+      "label": "Your precise location",
+      "granted": 2,
+      "denied": 2,
+      "blocked": 1
+    },
+    {
+      "capability": "notify.inapp",
+      "label": "Notifications in Adera",
+      "granted": 5,
+      "denied": 1,
+      "blocked": 0
+    },
+    {
+      "capability": "notify.sms",
+      "label": "Text messages (SMS)",
+      "granted": 6,
+      "denied": 1,
+      "blocked": 0
+    },
+    {
+      "capability": "pay.request",
+      "label": "Payments",
+      "granted": 2,
+      "denied": 0,
+      "blocked": 0
+    },
+    {
+      "capability": "user.basic",
+      "label": "Your Adera id",
+      "granted": 8,
+      "denied": 0,
+      "blocked": 0
+    },
+    {
+      "capability": "user.full_name",
+      "label": "Your name",
+      "granted": 3,
+      "denied": 1,
+      "blocked": 0
+    }
+  ]
+}</code></pre>
+<h2 id="callback">The callback address</h2>
+<p>Environments tab, per environment (DEV, PROD): an optional field "Callback address" where Adera tells the partner's server that a user changed a permission or disconnected. https only (http is accepted on a DEV deployment), no user name or password in the URL, at most 300 characters. Empty means no callbacks. Saving it never changes the allowed server addresses and the other way round. Set it when a partner keeps the user's name or contact and must delete it when the user disconnects. Same signing and 24-hour retry as the delivery callbacks. Real exchange (the receiver address is replaced):</p>
+<pre class="out"><code>PUT /admin/api/v1/apps/&lt;demo-ride id&gt;/environments/DEV
+{"callbackUrl": "https://partner.example.com/adera/events"}
+
+HTTP 200
+{"environment": "DEV", "allowedCidrs": ["127.0.0.1/32", "172.16.0.0/12", "192.168.0.0/16", "10.0.0.0/8"], "callbackUrl": "http://&lt;test receiver&gt;/adera/events"}
+
+PUT /admin/api/v1/apps/&lt;demo-ride id&gt;/environments/DEV
+{"callbackUrl": "https://user:pw@partner.example.com/e"}
+
+HTTP 400
+{"error": "validation_failed", "fields": {"callbackUrl": "must be an https:// URL of at most 300 characters with a host and no user name or password (http:// is accepted on a DEV deployment)"}}</code></pre>
+<h2 id="actions">What staff can do about a misbehaving app</h2>
+<ul><li><strong>Remove or suspend a capability</strong> (Capabilities tab): takes effect at once; users' earlier answers are kept but inert, and apply again if you grant it again.</li><li><strong>Pause or kill the app</strong> (status): every permission call answers <code>app_not_live</code>; users can still disconnect.</li><li>Staff cannot see which user answered what: only counts.</li></ul>
+
+<div class="pager"><a class="prev" href="scenario.html"><small>Previous</small>Worked example: Demo Ride</a><a class="next" href="errors.html"><small>Next</small>Error codes</a></div>
+<p class="footer">Adera guides &middot; mini-app permissions and the bridge &middot; samples captured against the running dev stack on 2026-11-04 and 2026-11-05</p>
+</main>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

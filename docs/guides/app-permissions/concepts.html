@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>How it works | Mini-app permissions and the bridge</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+<button id="menu-btn" type="button" aria-label="Toggle menu">Menu</button>
+<a class="brand" href="index.html">Mini-app permissions and the bridge</a>
+<span class="spacer"></span>
+<button id="theme-btn" type="button" aria-label="Toggle light or dark theme">Theme</button>
+</header>
+<div class="layout">
+<nav class="sidebar" aria-label="Pages in this guide">
+<h4>This guide</h4>
+<ul><li><a href="index.html">Overview and contents</a></li><li><a href="concepts.html" class="current">How it works</a></li><li><a href="super-app-api.html">Super app: the user API</a></li><li><a href="bridge-spec.html">Super app: the bridge specification</a></li><li><a href="mini-app.html">Mini app developers</a></li><li><a href="scenario.html">Worked example: Demo Ride</a></li><li><a href="staff.html">What staff configure</a></li><li><a href="errors.html">Error codes</a></li><li><a href="known-issues.html">Known issues and not built yet</a></li></ul>
+</nav>
+<main>
+<h1>How it works</h1>
+<p class="lead">The three gates, the four permission states and their rules, the two data paths, location, notifications as consent, revocation and what is and is not protected.</p>
+
+<h2 id="overview">Overview</h2>
+<p>Staff decide what an app <em>may ever ask for</em> (its granted capabilities). The user decides what it <em>actually gets</em>, capability by capability. This page explains the rules; the next ones show the calls.</p>
+<h2 id="gates">The three gates</h2>
+<div class="table-wrap"><table><thead><tr><th>Gate</th><th>Question</th><th>Fails with</th></tr></thead><tbody>
+<tr><td>1. Granted</td><td>Is the capability granted to the app, and is the app LIVE (not DRAFT, PAUSED or KILLED)?</td><td>403 <code>capability_not_granted</code> or 403 <code>app_not_live</code></td></tr>
+<tr><td>2. Consented</td><td>Did this user say yes to this capability for this app, and is it still yes? Is the user ACTIVE?</td><td>403 <code>consent_required</code> (the body says the state)</td></tr>
+<tr><td>3. In scope</td><td>Is what is asked for exactly what the capability covers? (<code>location.coarse</code> gives a city, never coordinates; <code>user.contact</code> never gives the address.)</td><td>the data endpoint itself</td></tr>
+</tbody></table></div>
+<p>Gate 1 is read on every call, so pausing an app or removing a capability in the backoffice bites at once.</p>
+<h2 id="states">The four states</h2>
+<div class="table-wrap"><table><thead><tr><th>State</th><th>Meaning</th><th>A request from the mini app</th></tr></thead><tbody>
+<tr><td><code>NOT_ASKED</code></td><td>Never asked (also: no row)</td><td>A dialog is allowed.</td></tr>
+<tr><td><code>GRANTED</code></td><td>The user said yes</td><td>Answered at once, no dialog.</td></tr>
+<tr><td><code>DENIED</code></td><td>The user said no once</td><td>A dialog is allowed one more time (the mini app should explain why first).</td></tr>
+<tr><td><code>BLOCKED</code></td><td>The user said no twice in a row</td><td>Answered at once, <strong>never a dialog</strong>. Only the menu switch changes it.</td></tr>
+</tbody></table></div>
+<p>A capability staff did not grant to the app is <code>NOT_AVAILABLE</code> (a request) or refused with <code>capability_not_granted</code> (answer, menu). Rules: a yes sets <code>GRANTED</code> and the denial count to 0. The first no sets <code>DENIED</code> (count 1); the second no in a row sets <code>BLOCKED</code> (count 2). A switch in the menu always works: on sets <code>GRANTED</code>, count 0; off sets <code>DENIED</code>, count 0, so the mini app may ask again later. There is no timer that unblocks; only the menu does. Consent does not expire.</p>
+<div class="callout why"><span class="label">The server enforces it, not the bridge</span><p>A dialog is only allowed after the server issued a one-time <strong>prompt</strong> (valid 5 minutes, single use, tied to one user, one app and one capability). An answer without a valid prompt is refused unless it comes from the menu. A bridge that tries to answer "yes" on its own, replays an old prompt, or answers for another app is refused.</p></div>
+<h2 id="basic"><code>user.basic</code>: the pseudonymous id</h2>
+<p><code>user.basic</code> is the user's id for the mini app (not personal data; the app needs it to identify the user at all). It needs <strong>no dialog</strong>: it is reported <code>GRANTED</code> as soon as staff granted it to the app, until the user disconnects (then <code>DENIED</code>). Opening the app again reconnects it. The menu cannot switch it off alone (<code>409 use_disconnect</code>): leaving is the Disconnect action.</p>
+<h2 id="paths">Two kinds of data, two paths</h2>
+<div class="table-wrap"><table><thead><tr><th>Kind</th><th>Examples</th><th>Held by</th><th>How the mini app gets it</th></tr></thead><tbody>
+<tr><td>Server-held</td><td><code>user.basic</code>, <code>user.full_name</code>, <code>user.contact</code>, <code>user.address</code></td><td>Adera (user service)</td><td><strong>Path B (recommended):</strong> the mini app's backend calls <code>GET /v1/users/{alias}/profile</code> with a signed request. The data never travels through the browser, each read is logged on our side, and the partner's keys, address list and environment checks apply. Path A (through the bridge, for <code>user.basic</code> and device data only) exists for low-risk fields; anything in the page can be copied by the partner's scripts or by a bad library it loaded.</td></tr>
+<tr><td>Device-held</td><td><code>location.coarse</code>, <code>location.fine</code></td><td>The phone</td><td>The bridge asks the phone; Adera records consent only and never stores a position. If the mini app's backend needs the position, its frontend sends it.</td></tr>
+<tr><td>Action, no data</td><td><code>notify.sms</code>, <code>notify.email</code>, <code>notify.inapp</code>, <code>pay.request</code></td><td>Adera services</td><td>The mini app's backend calls the partner API; the gate is applied there.</td></tr>
+</tbody></table></div>
+<h2 id="location">Location is different</h2>
+<p>The live position is read from the phone, so it needs the phone's own permission as well as ours. Our consent is a separate yes. The bridge returns a reading only if both are yes and otherwise says <code>denied</code> or <code>blocked</code> without telling which of the two refused.</p>
+<h2 id="notify">Notifications are consent too</h2>
+<p>The permissions <code>notify.inapp</code>, <code>notify.sms</code> and <code>notify.email</code> are the user's consent to be messaged by the app on that channel. The old "mute" switches are the same data (muted means <code>DENIED</code>). A partner message is sent only while the answer is <code>GRANTED</code>; otherwise the partner's request is refused with <code>403 consent_required</code> (capability and state in the body) and nothing is sent. The answer is checked again right before delivery, so a user who switches it off after a message was accepted still stops it.</p>
+<h2 id="revocation">Revocation and telling the partner</h2>
+<ul>
+<li>Revocation is immediate: the gate reads the consent row on every call, there is no cached "allowed".</li>
+<li>When consent changes the partner gets a signed callback (<code>user.consent_changed</code> with alias, capability and the new state; <code>user.disconnected</code> on Disconnect) if staff set a callback address. A partner that kept the user's name is expected to delete it on <code>user.disconnected</code>; Adera cannot enforce that once the data has left.</li>
+<li>A suspended or deleted user fails gate 2 for everything.</li>
+</ul>
+<h2 id="threats">What this does and does not protect</h2>
+<div class="table-wrap"><table><thead><tr><th>Threat</th><th>Handled by</th></tr></thead><tbody>
+<tr><td>A mini app calls the bridge for data it was not granted</td><td>Gate 1 in the backend; the bridge's own check is only a courtesy</td></tr>
+<tr><td>A mini app asks for data the user said no to</td><td>Gate 2, on every call</td></tr>
+<tr><td>A mini app asks for more than a capability covers</td><td>Gate 3: each capability has a fixed set of fields</td></tr>
+<tr><td>The mini app page loads a different site and the bridge talks to it</td><td>The bridge is injected only for the registered origin and checks the origin on every message</td></tr>
+<tr><td>A stolen launch token</td><td>Five-minute life, one app, one pseudonymous id; data calls need the partner's private key as well</td></tr>
+<tr><td>A partner keeps data after the user withdrew consent</td><td>Not preventable by Adera: callbacks, terms and audit only</td></tr>
+<tr><td>A partner shares data with a third party</td><td>Not preventable by Adera: same</td></tr>
+</tbody></table></div>
+
+<div class="pager"><a class="prev" href="index.html"><small>Previous</small>Overview and contents</a><a class="next" href="super-app-api.html"><small>Next</small>Super app: the user API</a></div>
+<p class="footer">Adera guides &middot; mini-app permissions and the bridge &middot; samples captured against the running dev stack on 2026-11-04 and 2026-11-05</p>
+</main>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

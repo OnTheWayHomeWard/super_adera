@@ -44,8 +44,8 @@
 </li>
 <li><a href="13-sample-data.html">13. Sample data (test scenarios)</a>
 </li>
-<li><a href="14-bridge-consent.html" class=current>14. Mini app bridge and consent (agreed design)</a>
-<ul><li><a href="#short">1. Short answer</a></li><li><a href="#gates">2. Three gates</a></li><li><a href="#data">3. Data paths</a></li><li><a href="#launch">4. Launch token</a></li><li><a href="#consent">5. Consent</a></li><li><a href="#endpoints">6. Endpoints</a></li><li><a href="#scenario">7. Scenario</a></li><li><a href="#notify">8. Revocation</a></li><li><a href="#threats">9. Threats</a></li><li><a href="#build">10. Build order</a></li><li><a href="#decisions">11. Decisions</a></li><li><a href="#built-decisions">12. Built: decisions</a></li></ul>
+<li><a href="14-bridge-consent.html" class=current>14. Mini app bridge and consent</a>
+<ul><li><a href="#short">1. Short answer</a></li><li><a href="#gates">2. Three gates</a></li><li><a href="#data">3. Data paths</a></li><li><a href="#launch">4. Launch token</a></li><li><a href="#consent">5. Consent</a></li><li><a href="#endpoints">6. Endpoints</a></li><li><a href="#scenario">7. Scenario</a></li><li><a href="#notify">8. Revocation</a></li><li><a href="#threats">9. Threats</a></li><li><a href="#build">10. Build order</a></li><li><a href="#decisions">11. Decisions</a></li><li><a href="#built-decisions">12. Built: decisions</a></li><li><a href="#bridge-spec">13. Bridge specification</a></li></ul>
 </li>
 </ul>
 <h4>Endpoints</h4><ul>
@@ -64,10 +64,10 @@
 </ul>
 </nav>
 <main>
-<h1>14. Mini app bridge and user consent (agreed design)</h1>
-<p class="lead">How a mini app gets data about a user and from the device, how the user decides what it may have, and how we stop it from taking more. Permissions are asked <strong>at the moment of need, one at a time, like Android</strong>, not all at launch. Design agreed on 2026-11-04; implementation starts from this page. Every endpoint and sample below is the intended shape; once a step is built, its real requests and responses replace the illustrations (marked as such on each step).</p>
+<h1>14. Mini app bridge and user consent</h1>
+<p class="lead">How a mini app gets data about a user and from the device, how the user decides what it may have, and how we stop it from taking more. Permissions are asked <strong>at the moment of need, one at a time, like Android</strong>, not all at launch. Design agreed on 2026-11-04 and built in the order of section 10 (steps 1 to 6 on 2026-11-04 and 2026-11-05); section 13 is the bridge specification for the super app team. Every request and response in sections 4 to 6 and 12 was captured from the running stack; the messages of the bridge itself (section 13) are protocol examples because the bridge is the super app team's to build.</p>
 
-<div class="callout warn"><span class="label">Status</span><p>Agreed, build in progress (section 10 lists the steps and which are built). Decisions taken are in section 11. Built so far: step 1 (purpose per capability), step 2 (the consent endpoints in user-service) and step 3 (counts per capability in the backoffice) and step 4 (notify gate, mute as consent) step 5 (launch token, partner profile) and step 6 (partner callbacks).</p></div>
+<div class="callout warn"><span class="label">Status</span><p>Backend built (steps 1 to 6); the bridge itself is specified in section 13 and not built (it lives in the super app). Built so far: step 1 (purpose per capability), step 2 (the consent endpoints in user-service), step 3 (counts per capability in the backoffice), step 4 (notify gate, mute as consent), step 5 (launch token, partner profile), step 6 (partner callbacks) and step 7 (this specification and the shareable guide <code>docs/guides/app-permissions/</code>). The whole scenario of section 7 is run end to end by <code>tests/e2e/permissions.py</code>. Decisions taken are in sections 11 and 12.</p></div>
 
 <section><h2 id="short">1. The short answer</h2>
 <ul>
@@ -266,14 +266,7 @@ HTTP 200 OK   capabilities:
 </tbody></table></div>
 
 <h3>The bridge, for mini app developers</h3>
-<div class="table-wrap"><table>
-<thead><tr><th>Call</th><th>Result</th></tr></thead>
-<tbody>
-<tr><td><code>adera.requestPermission("location.fine")</code></td><td>Promise of <code>granted</code>, <code>denied</code>, <code>blocked</code> or <code>not_available</code>. One permission per call; there is no batch call</td></tr>
-<tr><td><code>adera.getPermission("location.fine")</code></td><td>The same four values (plus <code>not_asked</code>), without ever showing a dialog</td></tr>
-<tr><td><code>adera.openPermissionSettings()</code></td><td>Opens the app's permission sheet in the super app menu; resolves when the user closes it</td></tr>
-<tr><td><code>adera.getLocation()</code></td><td>The reading, or <code>denied</code> / <code>blocked</code> if not allowed. It never shows a dialog by itself</td></tr>
-</tbody></table></div>
+<p>Four calls: <code>adera.requestPermission(capability)</code>, <code>adera.getPermission(capability)</code>, <code>adera.openPermissionSettings()</code> and <code>adera.getLocation()</code>. The full specification (message format, origin rule, rules, error codes) is section 13.</p>
 
 <h3>Asking at the moment of need <span class="badge built">real, step 2 built</span></h3>
 <p>Captured on 2026-11-04 on the dev stack through the gateway with the seeded user Demo Hana and the seeded app <code>demo-ride</code> (ids trimmed). The test data was removed afterwards. The step-by-step text of the page's own scenario (section 7) was run as the end-to-end journey <code>tests/e2e/permissions.py</code> once the later steps were built. <code>demo-ride</code> has <code>notify.sms</code> granted, so the "not granted by staff" example uses <code>user.contact</code> (which staff denied for this app).</p>
@@ -664,6 +657,7 @@ GET /v1/users/{alias}/profile?fields=user.contact      (demo-ride was never gran
 </section>
 
 <section><h2 id="scenario">7. Scenario: Demo Ride, start to finish</h2>
+<p><strong>Run for real:</strong> <code>python3 -I tests/e2e/permissions.py</code> plays this scenario through the gateway with a seeded user, the seeded partner key of Demo Ride and a temporary staff account (55 checks), and puts everything back. The captured requests, answers and callbacks of the whole journey are in the shareable guide <code>docs/guides/app-permissions/</code>, page "Worked example: Demo Ride". (The seeded user with a phone is Demo Kidist; the text below says Hana.)</p>
 <ol>
 <li><strong>Admin</strong> grants Demo Ride <code>user.basic</code>, <code>user.full_name</code>, <code>location.fine</code> and <code>notify.sms</code>, approves a purpose sentence for each, and the app goes LIVE.</li>
 <li><strong>Hana</strong> taps Demo Ride. No dialog appears. The super app calls <code>POST /launch</code> and opens the mini app with the launch token.</li>
@@ -847,7 +841,7 @@ PUT ...  {"callbackUrl": "https://user:pw@partner.example.com/e"}
 <li><strong>Built 2026-11-04.</strong> notify.* gate in the notification path, and mute converted to consent.</li>
 <li><strong>Built 2026-11-04.</strong> Launch token and the partner <code>/profile</code> endpoint.</li>
 <li><strong>Built 2026-11-05.</strong> Callbacks <code>user.consent_changed</code> and <code>user.disconnected</code>.</li>
-<li>The bridge specification for the super app team: method list, message format, origin rule, error codes. Written last, because it is a thin layer over steps 1 to 6.</li>
+<li><strong>Built 2026-11-05.</strong> The bridge specification for the super app team: method list, message format, origin rule, error codes (section 13), and the shareable guide <code>docs/guides/app-permissions/</code>. Written last, because it is a thin layer over steps 1 to 6.</li>
 </ol>
 <p>Each step is a separate commit with tests and its documentation, as with the bug fixes. When a step is built, its sample requests and responses on this page are replaced by real ones captured from the running stack.</p></section>
 
@@ -885,7 +879,65 @@ PUT ...  {"callbackUrl": "https://user:pw@partner.example.com/e"}
 <li><strong>Step 6, where the callback URL lives.</strong> The page says "only to apps with a callback URL configured", but the platform only knew a callback URL <em>per notification request</em>. A new optional <code>callbackUrl</code> per app and environment (registry <code>app_environment.callback_url</code>, V8) is set by staff next to the allowed server addresses (same endpoint, own field, backoffice Environments tab); DEV and PROD can differ. The notification-service reads the one of its own environment from the registry context (cached 15 s). No URL, no callback.</li>
 <li><strong>Step 6, what is sent.</strong> <code>user.consent_changed</code> for every real change (dialog answer, menu switch, mute switch, <code>user.basic</code> reconnecting on launch), carrying <code>alias</code>, <code>capability</code>, <code>state</code>, <code>at</code>, <code>environment</code>; not for an unchanged state or a changed refusal count. <code>user.disconnected</code> once per disconnect (not one <code>consent_changed</code> per permission) with <code>capabilities</code> taken back. Only users the app knows (it has an alias from a launch) are reported. No real user id anywhere. The migration of old mutes sends nothing.</li>
 <li><strong>Step 6, reliability.</strong> At least once and unordered after failures: the event is written in the same transaction as the change (outbox), handed over by a worker with retries and dropped after 24 hours, then delivered by the existing callback worker (signed, 24-hour retry). The partner de-duplicates on <code>Idempotency-Key</code> and orders by <code>at</code>.</li>
+<li><strong>Step 7, the specification.</strong> Where the page named only the four methods, the specification fixes: the message envelope (<code>{"adera": 1, "id", "method", "params"}</code> answered by <code>ok</code> with <code>result</code> or <code>error</code>), bridge values as the lower-case API states (<code>not_asked</code> only from <code>getPermission</code>), <code>openPermissionSettings</code> resolving with the states at the moment the sheet closes, <code>getLocation({precision})</code> with a coarse result of only country, region and city, a dismissed dialog rejecting with <code>dialog_dismissed</code> (nothing answered, the prompt expires), one dialog at a time (<code>busy</code>), a 30-per-minute call limit, and the error codes. The transport (JavaScript channel <code>AderaBridge</code> in a WebView, <code>postMessage</code> in a web host) is a proposal for the super app team to accept or change.</li>
 </ul></section>
+
+<section><h2 id="bridge-spec">13. The bridge specification (for the super app team)</h2>
+
+<h3 id="bridge-what">What the bridge is</h3>
+<p>The bridge is a thin layer in the super app (the Adera app, a Flutter WebView host) that lets the mini app's page ask for permissions and a location reading. It adds <strong>no authority of its own</strong>: a mini app is third-party code, so the backend decides everything (the three gates), and the bridge only drives the dialog and carries answers. Every bridge method ends in one of the user endpoints (section 6); a mini app that bypasses the bridge and calls them directly has no session of the user, and a mini app's <em>backend</em> can never trigger a dialog. This is a specification for the super app team: nothing in the Adera backend implements the page side.</p>
+<h3 id="bridge-methods">The four methods</h3>
+<p>The super app injects <code>window.adera</code> into the mini app's page (only for the registered origin, see the origin rule). Every method returns a Promise.</p>
+<div class="table-wrap"><table><thead><tr><th>Call</th><th>Resolves with</th><th>What the super app does</th></tr></thead><tbody>
+<tr><td><code>adera.requestPermission(capability)</code></td><td><code>"granted"</code>, <code>"denied"</code>, <code>"blocked"</code> or <code>"not_available"</code></td><td>One permission per call; there is no batch call. Calls <code>POST /api/v1/me/apps/{app}/permissions/{capability}/request</code>. If the answer has a <code>prompt</code>, shows the dialog with <code>prompt.label</code> and <code>prompt.purpose</code> <strong>verbatim</strong> and Allow / Deny, then calls <code>PUT .../answer</code> with the <code>promptId</code> and resolves with the new state. If the state is <code>GRANTED</code>, <code>BLOCKED</code> or <code>NOT_AVAILABLE</code> there is no dialog and it resolves at once. A dialog dismissed without Allow or Deny (back button) answers nothing: the Promise rejects with <code>dialog_dismissed</code> and the prompt expires by itself.</td></tr>
+<tr><td><code>adera.getPermission(capability)</code></td><td>The same four values plus <code>"not_asked"</code></td><td>Never shows a dialog. Calls <code>GET .../permissions</code> and picks the capability (a capability that is not in the list resolves <code>"not_available"</code>). Use it to decide whether to explain first or to show a different screen.</td></tr>
+<tr><td><code>adera.openPermissionSettings()</code></td><td><code>{"permissions": {"location.fine": "granted", ...}}</code> when the user closes the sheet</td><td>Opens the app's permission sheet from the super app menu (one switch per permission, <code>GET .../permissions</code>, switches call <code>PUT .../permissions/{capability}</code>, the only way out of <code>blocked</code>) and resolves with the states at the moment the sheet closes.</td></tr>
+<tr><td><code>adera.getLocation(options?)</code></td><td>Success: <code>{"state": "granted", "location": {"latitude": 9.0054, "longitude": 38.7636, "accuracyMeters": 12, "at": "2026-11-04T09:12:44Z"}}</code>. Not allowed: <code>{"state": "denied"}</code>, <code>"blocked"</code>, <code>"not_asked"</code> or <code>"not_available"</code></td><td>Never shows a dialog by itself. With <code>{"precision": "fine"}</code> (default) it needs the permission <code>location.fine</code>; with <code>{"precision": "coarse"}</code> it needs <code>location.coarse</code> and returns only <code>{"place": {"countryCode": "ET", "region": "Addis Ababa", "city": "Addis Ababa"}}</code>, never coordinates. It returns a reading only if <strong>both</strong> our consent and the phone's own location permission are yes, and otherwise says <code>denied</code> or <code>blocked</code> <strong>without telling which of the two refused</strong> (so the mini app cannot probe the phone). The reading comes from the phone; Adera never stores a position. The phone's own dialog is the system's and comes after ours (the first time).</td></tr>
+</tbody></table></div>
+<p>State names on the bridge are the lower-case form of the API's states: <code>NOT_ASKED</code> becomes <code>not_asked</code>, and so on; <code>NOT_AVAILABLE</code> (staff did not grant the capability to the app) becomes <code>not_available</code>.</p>
+<h3 id="bridge-format">Message format</h3>
+<p>All messages are JSON objects with the marker <code>"adera": 1</code> (the protocol version). A request has a unique <code>id</code> chosen by the mini app (a string of at most 64 characters), a <code>method</code> and <code>params</code>. The answer repeats the <code>id</code> and has <code>ok</code> true with a <code>result</code>, or <code>ok</code> false with an <code>error</code> object (<code>code</code>, <code>message</code>). A message that is not an object, has no <code>"adera": 1</code>, has an unknown <code>method</code> or a <code>params</code> over 1 KB is answered with an error and nothing else happens.</p>
+<pre><code>// mini app -&gt; super app
+{"adera": 1, "id": "m_17", "method": "requestPermission", "params": {"capability": "location.fine"}}
+
+// super app -&gt; mini app, success
+{"adera": 1, "id": "m_17", "ok": true, "result": {"state": "granted"}}
+
+// super app -&gt; mini app, failure
+{"adera": 1, "id": "m_17", "ok": false, "error": {"code": "busy", "message": "A permission dialog is already open."}}</code></pre>
+<p><strong>Transport.</strong> In a native WebView (the Flutter app) the page posts the JSON string to a JavaScript channel named <code>AderaBridge</code> and the super app answers by calling <code>window.adera._receive(json)</code>; <code>window.adera</code> wraps this in the four Promise methods so mini app code never touches the channel. In a web-hosted super app the page uses <code>window.parent.postMessage(message, superAppOrigin)</code> and the super app answers with <code>event.source.postMessage(answer, miniAppOrigin)</code>, never with <code>"*"</code>.</p>
+<h3 id="bridge-origin">The origin rule</h3>
+<ul>
+<li>The bridge is injected <strong>only</strong> for pages whose origin (scheme, host and port) is the origin of the mini app's registered URL (<code>entryUrl</code>) or one of its <code>allowedOrigins</code>, both set by staff in the backoffice. Navigating to any other origin removes the bridge before the page loads; a page of another origin never sees <code>window.adera</code>.</li>
+<li>Every message is checked again: in a WebView the host compares the origin of the frame that sent it, and a message from a frame whose origin is not in the list (for example an embedded advertisement) is ignored with no answer. Answers go only to the registered origin.</li>
+<li>The super app sends the user's session to the backend itself. The mini app never receives the session token, the user's id or the launch scopes through the bridge.</li>
+</ul>
+<h3 id="bridge-rules">Rules the super app must keep</h3>
+<ul>
+<li><strong>One dialog at a time.</strong> A second <code>requestPermission</code> while a dialog is open is rejected with <code>busy</code>; there is no queue and no batch.</li>
+<li><strong>The text is ours.</strong> The dialog shows only <code>label</code> and <code>purpose</code> from the server, as plain text. The mini app cannot change it, add to it or style it.</li>
+<li><strong>The server decides.</strong> Never answer from a cached state: <code>requestPermission</code> always calls the server first (the state may have changed in the menu or been blocked), and <code>getLocation</code> checks the consent on the server before it reads the phone.</li>
+<li>Show no dialog at launch. A mini app opening is <code>POST .../launch</code> only.</li>
+<li>Limit calls: at most 30 <code>requestPermission</code> per minute per mini app (the gateway also limits that endpoint to 30 per minute per address). Beyond it the bridge rejects with <code>too_many_requests</code>.</li>
+</ul>
+<h3 id="bridge-errors">Bridge error codes</h3>
+<div class="table-wrap"><table><thead><tr><th><code>error.code</code></th><th>When</th><th>Caused by (API answer)</th></tr></thead><tbody>
+<tr><td><code>invalid_message</code></td><td>Not a JSON object, no <code>"adera": 1</code>, missing or too long <code>id</code>, params over 1 KB</td><td>(the bridge)</td></tr>
+<tr><td><code>unknown_method</code></td><td>A method other than the four</td><td>(the bridge)</td></tr>
+<tr><td><code>invalid_params</code></td><td>The capability is not a key like <code>location.fine</code></td><td>400 <code>validation_failed</code></td></tr>
+<tr><td><code>busy</code></td><td>A permission dialog is already open</td><td>(the bridge)</td></tr>
+<tr><td><code>dialog_dismissed</code></td><td>The user closed the dialog without Allow or Deny</td><td>(the bridge; nothing was answered)</td></tr>
+<tr><td><code>prompt_expired</code></td><td>The user answered after more than 5 minutes</td><td>409 <code>prompt_expired</code>; the mini app may call <code>requestPermission</code> again</td></tr>
+<tr><td><code>app_not_live</code></td><td>The mini app was paused or killed while open</td><td>403 <code>app_not_live</code></td></tr>
+<tr><td><code>session_expired</code></td><td>The user's session is no longer valid</td><td>401; the super app signs the user in again, then the mini app may retry</td></tr>
+<tr><td><code>account_not_active</code></td><td>The account was suspended or deleted</td><td>403 <code>account_suspended</code> / <code>account_deleted</code></td></tr>
+<tr><td><code>too_many_requests</code></td><td>Over the call limit</td><td>(the bridge) or 429 from the gateway</td></tr>
+<tr><td><code>service_unavailable</code></td><td>The backend could not be reached</td><td>503 or no network; retry later</td></tr>
+<tr><td><code>internal_error</code></td><td>Anything else; never carries details of the user or the phone</td><td>5xx / unexpected</td></tr>
+</tbody></table></div>
+<p>Not errors, because they are answers: <code>denied</code>, <code>blocked</code>, <code>not_asked</code> and <code>not_available</code>. The API's own error bodies are listed in section 14.6 and the error table in 8a.</p>
+<div class="callout warn"><span class="label">Status</span><p>This specification is written, but the bridge is not built (the super app is a separate project). Everything behind it exists and is captured against the running stack: the endpoints it calls, the launch token and the backend profile call. The samples in this specification (the messages above) are protocol examples, not captures.</p></div>
+</section>
 
 <div class="pager"><a class="prev" href="13-sample-data.html"><small>Previous</small>13. Sample data</a><a class="next" href="../index.html"><small>Back to</small>Home / contents</a></div>
 <p class="footer">Adera backend documentation &middot; proposal written 2026-11-04 &middot; <a href="../index.html">contents</a></p>

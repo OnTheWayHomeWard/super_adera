@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mini app developers | Mini-app permissions and the bridge</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+<button id="menu-btn" type="button" aria-label="Toggle menu">Menu</button>
+<a class="brand" href="index.html">Mini-app permissions and the bridge</a>
+<span class="spacer"></span>
+<button id="theme-btn" type="button" aria-label="Toggle light or dark theme">Theme</button>
+</header>
+<div class="layout">
+<nav class="sidebar" aria-label="Pages in this guide">
+<h4>This guide</h4>
+<ul><li><a href="index.html">Overview and contents</a></li><li><a href="concepts.html">How it works</a></li><li><a href="super-app-api.html">Super app: the user API</a></li><li><a href="bridge-spec.html">Super app: the bridge specification</a></li><li><a href="mini-app.html" class="current">Mini app developers</a></li><li><a href="scenario.html">Worked example: Demo Ride</a></li><li><a href="staff.html">What staff configure</a></li><li><a href="errors.html">Error codes</a></li><li><a href="known-issues.html">Known issues and not built yet</a></li></ul>
+</nav>
+<main>
+<h1>Mini app developers</h1>
+<p class="lead">Asking for a permission from the page, verifying the launch token, reading what the user allowed, sending notifications and handling the callbacks.</p>
+
+<h2 id="overview">Overview</h2>
+<p>For mini-app developers (the partner's frontend and backend). When a user opens your mini app the Adera app loads your registered URL with a <strong>launch token</strong>. Your page asks for permissions through <code>window.adera</code> (the bridge), at the moment it needs them. Your <strong>backend</strong> verifies the token and then reads what the user allowed with a signed request. The backend can never open a dialog.</p>
+<h2 id="frontend">In the page: asking at the moment of need</h2>
+<p>Opening your mini app shows no dialog. Ask when the user does the thing that needs the permission, one permission per call.</p>
+<pre><code>// "Find a ride" was tapped
+const state = await adera.getPermission("location.fine");      // no dialog ever
+if (state === "blocked") {
+  showText("Location is switched off for this app.");
+  button("Open settings", () => adera.openPermissionSettings());   // the only way out of blocked
+} else {
+  if (state === "denied") await explainWhyYouNeedLocation();       // you get ONE more dialog: explain first
+  const answer = await adera.requestPermission("location.fine");   // "granted" | "denied" | "blocked" | "not_available"
+  if (answer === "granted") {
+    const r = await adera.getLocation();                           // never shows a dialog by itself
+    if (r.state === "granted") findDriversNear(r.location);
+  } else {
+    showText("We cannot find a driver without your location.");
+    button("Allow", () => adera.requestPermission("location.fine"));   // asks again only while the state is "denied"
+  }
+}</code></pre>
+<p class="masked">Specification example: the bridge is not built yet, so this snippet is not captured or run; the endpoints behind it are real (next page).</p>
+<h3 id="answers">What to do with each answer</h3>
+<div class="table-wrap"><table><thead><tr><th>Value</th><th>Meaning</th><th>What your page does</th></tr></thead><tbody>
+<tr><td><code>granted</code></td><td>The user allowed it</td><td>Use it. It can be switched off later in the menu: check again before each use.</td></tr>
+<tr><td><code>denied</code></td><td>The user said no once</td><td>You may ask once more. Explain why first (a screen of your own), then <code>requestPermission</code>.</td></tr>
+<tr><td><code>blocked</code></td><td>The user said no twice</td><td>Do not ask again (you would get <code>blocked</code> with no dialog). Show what the user can still do, and a button calling <code>openPermissionSettings()</code>.</td></tr>
+<tr><td><code>not_asked</code> (<code>getPermission</code> only)</td><td>Never asked</td><td>Show your own explanation, then ask.</td></tr>
+<tr><td><code>not_available</code></td><td>Adera staff did not grant your app this capability</td><td>It will never work: contact Adera, do not show a feature that depends on it.</td></tr>
+</tbody></table></div>
+<p>You decide what a refusal means for your product ("we cannot continue without your location"); the server does not know which permissions your app cannot live without, and there is no "required" flag.</p>
+<h2 id="launch">In the backend: the launch token</h2>
+<p>The URL your page is loaded with ends in <code>?launch=&lt;token&gt;</code>. Send it to your backend and <strong>verify it</strong> before you trust anything. It is an RS256 JWT signed with Adera's key; the public key is at <code>/.well-known/jwks.json</code> (the <code>kid</code> in the token header names the key). Decoded claims of a real token from the dev stack:</p>
+<pre class="out"><code>header  {"alg": "RS256", "typ": "JWT", "kid": "adera-sig-202610"}
+claims
+{
+  "iss": "adera",
+  "aud": "4e831b72-a33b-4d93-a7ba-65e19b9dbd0a",
+  "sub": "u_p_d1efd341d635c27f071db27f347e5062",
+  "env": "dev",
+  "scopes": [
+    "user.basic"
+  ],
+  "iat": 1793827924,
+  "exp": 1793828224,
+  "jti": "b9eee4f0-74c6-40ed-9ae6-d984a20635b1"
+}</code></pre>
+<div class="table-wrap"><table><thead><tr><th>Claim</th><th>What to check</th></tr></thead><tbody>
+<tr><td><code>iss</code></td><td>Always <code>adera</code>.</td></tr>
+<tr><td><code>aud</code></td><td>Your app's id. Reject a token for another app.</td></tr>
+<tr><td><code>sub</code></td><td>The user's pseudonymous id for your app: use it in the profile call and in notification requests. Never the real user id.</td></tr>
+<tr><td><code>env</code></td><td><code>dev</code> or <code>prod</code>: the environment that issued it.</td></tr>
+<tr><td><code>scopes</code></td><td>What the user allowed when the app opened. A hint only: consent is re-checked on every data call.</td></tr>
+<tr><td><code>iat</code>, <code>exp</code></td><td>Five minutes. Reject an expired token; ask for a new launch instead of keeping tokens.</td></tr>
+<tr><td><code>jti</code></td><td>A random id (you may refuse a replay).</td></tr>
+</tbody></table></div>
+<p>Two runnable examples are in the <code>examples/</code> folder next to these pages (Python needs <code>pip install cryptography</code>; Node.js 18 or newer needs nothing). They fetch the JWKS, check <code>alg</code> is <code>RS256</code> (never accept <code>none</code>), verify the signature, then check <code>iss</code>, <code>aud</code>, <code>exp</code> and <code>env</code>:</p>
+<pre><code>ADERA_BASE=https://api.example ADERA_APP_ID=&lt;your app id&gt; python examples/verify_launch_token.py "$LAUNCH_TOKEN"
+ADERA_BASE=https://api.example ADERA_APP_ID=&lt;your app id&gt; node examples/verify-launch-token.js "$LAUNCH_TOKEN"</code></pre>
+<p>Files: <a href="examples/verify_launch_token.py"><code>examples/verify_launch_token.py</code></a>, <a href="examples/verify-launch-token.js"><code>examples/verify-launch-token.js</code></a>. Real runs against the dev stack:</p>
+<pre class="out"><code>$ python examples/verify_launch_token.py "$LAUNCH_TOKEN"
+{
+  "iss": "adera",
+  "aud": "4e831b72-a33b-4d93-a7ba-65e19b9dbd0a",
+  "sub": "u_p_5496f0de1378750142d148c9ea19b2c9",
+  "env": "dev",
+  "scopes": [
+    "notify.inapp",
+    "notify.sms",
+    "user.basic"
+  ],
+  "iat": 1793824403,
+  "exp": 1793824703,
+  "jti": "d63f1747-6ff5-46be-b4b4-e6e5f1cd24ee"
+}
+
+$ python examples/verify_launch_token.py "$TAMPERED_TOKEN"      (the last characters of the signature changed)
+cryptography.exceptions.InvalidSignature
+
+$ ADERA_APP_ID=00000000-0000-0000-0000-000000000000 python examples/verify_launch_token.py "$LAUNCH_TOKEN"
+ValueError: this token is for another app
+
+$ node examples/verify-launch-token.js "$TAMPERED_TOKEN"
+INVALID: bad signature</code></pre>
+<h2 id="profile">In the backend: reading what the user allowed</h2>
+<p><code>GET /v1/users/{alias}/profile</code> with a request signed with your private key (ADERA-SIG-1; the signature covers the path <em>with</em> its query string; the partner guide has the signing clients). It returns the pseudonymous id, <code>granted</code> (the permissions the user allowed) and <strong>only</strong> the fields of those permissions: <code>fullName</code> (<code>user.full_name</code>), <code>phone</code> and <code>email</code> (<code>user.contact</code>, each only if the user has one), <code>address</code> (<code>user.address</code>: <code>countryCode</code>, <code>region</code>, <code>city</code>, never coordinates). Fields the user did not allow are <strong>absent, never null</strong>. The optional query <code>?fields=user.full_name,...</code> says what you <em>need</em>: if one of them is not allowed you get <code>403 consent_required</code> naming it, so you know to send the user back to your page to ask. Real answers (seeded user, app demo-ride):</p>
+<pre class="out"><code>GET /v1/users/u_p_d1ef...e5062/profile
+
+HTTP 200
+{
+  "alias": "u_p_d1efd341d635c27f071db27f347e5062",
+  "granted": [
+    "user.basic"
+  ]
+}
+
+(the user allowed the name in the dialog)
+
+HTTP 200
+{
+  "alias": "u_p_d1efd341d635c27f071db27f347e5062",
+  "granted": [
+    "user.basic",
+    "user.full_name"
+  ],
+  "fullName": "Demo Kidist Worku"
+}
+
+(the user switched it off; the backend needs it)
+GET /v1/users/u_p_d1ef...e5062/profile?fields=user.full_name
+
+HTTP 403
+{
+  "error": "consent_required",
+  "capability": "user.full_name",
+  "state": "DENIED"
+}
+
+(the user pressed Disconnect)
+
+HTTP 403
+{
+  "error": "consent_required",
+  "capability": "user.basic",
+  "state": "DENIED"
+}</code></pre>
+<div class="table-wrap"><table><thead><tr><th>Answer</th><th>What your backend does</th></tr></thead><tbody>
+<tr><td><code>200</code> with <code>granted</code> and fields</td><td>Use only those fields; keep only what you need; never log the values. An absent field is not allowed (or the user has none): not an error.</td></tr>
+<tr><td><code>403 consent_required</code>, state <code>NOT_ASKED</code></td><td>The user was never asked: tell your page to call <code>requestPermission</code>, then retry.</td></tr>
+<tr><td><code>403 consent_required</code>, state <code>DENIED</code></td><td>The user said no once: your page may explain and ask once more.</td></tr>
+<tr><td><code>403 consent_required</code>, state <code>BLOCKED</code></td><td>Do not ask again; offer a way on without it or a button to the permission settings.</td></tr>
+<tr><td><code>403 consent_required</code> for <code>user.basic</code></td><td>The user disconnected. Delete what you hold about them as agreed in your terms.</td></tr>
+<tr><td><code>403 capability_not_granted</code></td><td>Adera staff did not grant that capability to your app: ask Adera.</td></tr>
+<tr><td><code>422 user_unreachable</code></td><td>Unknown id (or one of another app), deleted or suspended user. Do not retry.</td></tr>
+<tr><td><code>403 wrong_environment</code></td><td>Your key belongs to the other environment than the deployment you called.</td></tr>
+</tbody></table></div>
+<p>In DEV the synthetic user <code>u_p_test_ok</code> answers the profile with fake data, and <code>u_p_test_noconsent</code>, <code>u_p_test_denied</code>, <code>u_p_test_blocked</code> show the three refusal states; <code>u_p_test_unreachable</code> answers 422. In PROD they are refused.</p>
+<h2 id="notify">Sending notifications</h2>
+<p>A notification goes out only while the user's consent for the channel (<code>notify.sms</code>, <code>notify.email</code> or <code>notify.inapp</code>) is <code>GRANTED</code>. Otherwise your request is refused and nothing is sent. Real answers:</p>
+<pre class="out"><code>POST /v1/notifications     (the user refused SMS once)
+
+HTTP 403
+{
+  "error": "consent_required",
+  "capability": "notify.sms",
+  "state": "DENIED"
+}
+
+POST /v1/notifications     (after the user switched SMS on in the menu)
+
+HTTP 202
+{
+  "notificationId": "96f9f099-99e4-4846-b30b-afbc561a61ee",
+  "externalId": "e2e-perm-8de17d-sms-3",
+  "status": "QUEUED",
+  "channel": "SMS",
+  "environment": "DEV",
+  "createdAt": "2026-11-04T21:32:05.450406Z",
+  "expiresAt": "2026-11-05T21:32:05.439496Z"
+}</code></pre>
+<p>Do not retry in a loop: it answers the same until the user changes the permission. The channel is the one Adera picks from your template and the user's contact data; there is no fallback to another channel the user allowed. A user who switches the channel off after you were accepted but before delivery makes the message end <code>SUPPRESSED</code> (reason <code>recipient_opted_out</code>).</p>
+<h2 id="callbacks">Callbacks: the user changed a permission or disconnected</h2>
+<p>If Adera staff set a callback address for your app and environment, Adera POSTs a signed callback when the user changes a permission or disconnects. They use the same headers and signature as notification status callbacks (<code>X-Adera-Event</code>, <code>X-Adera-Key-Id</code>, <code>X-Adera-Timestamp</code>, <code>X-Adera-Signature</code>, <code>Idempotency-Key</code>): verify the signature with Adera's public key over <code>ADERA-SIG-1</code>, the timestamp, <code>POST</code>, the path and query of your URL and the body hash joined with newlines. Answer any <code>2xx</code> within 8 seconds; failures are retried for 24 hours.</p>
+<div class="table-wrap"><table><thead><tr><th><code>X-Adera-Event</code></th><th>Body fields</th></tr></thead><tbody>
+<tr><td><code>user.consent_changed</code></td><td><code>event</code>, <code>alias</code>, <code>capability</code>, <code>state</code>, <code>at</code>, <code>environment</code></td></tr>
+<tr><td><code>user.disconnected</code></td><td><code>event</code>, <code>alias</code>, <code>capabilities</code> (everything taken back), <code>at</code>, <code>environment</code></td></tr>
+</tbody></table></div>
+<p><strong>If you kept the user's name, contact or address, delete it when you get <code>user.disconnected</code>.</strong> Delivery is at least once and a late event can arrive after a newer one: de-duplicate on <code>Idempotency-Key</code> and order by <code>at</code>. Real callbacks received by a test receiver (signatures verified against the JWKS; the signature header is shortened):</p>
+<pre class="out"><code>POST /adera/events HTTP/1.1
+X-Adera-Event: user.consent_changed
+X-Adera-Key-Id: adera-sig-202610
+X-Adera-Timestamp: 1793827924
+X-Adera-Signature: g59Et1aFQReZWHGCC4gsSnTS... (base64)
+Idempotency-Key: c3f58ada-fbb5-4c82-a267-2d77f080df41
+
+{
+  "at": "2026-11-04T21:32:04.549439272Z",
+  "alias": "u_p_d1efd341d635c27f071db27f347e5062",
+  "event": "user.consent_changed",
+  "state": "GRANTED",
+  "capability": "location.fine",
+  "environment": "DEV"
+}
+
+POST /adera/events HTTP/1.1
+X-Adera-Event: user.disconnected
+X-Adera-Key-Id: adera-sig-202610
+X-Adera-Timestamp: 1793827928
+X-Adera-Signature: FEhbeTEHHrP/z+qvDVgq4S0Y... (base64)
+Idempotency-Key: a8c4b843-386e-4df4-a29c-00bbe74bb33f
+
+{
+  "at": "2026-11-04T21:32:06.983630831Z",
+  "alias": "u_p_d1efd341d635c27f071db27f347e5062",
+  "event": "user.disconnected",
+  "environment": "DEV",
+  "capabilities": [
+    "notify.sms",
+    "notify.inapp",
+    "user.basic"
+  ]
+}</code></pre>
+<h2 id="limits">Limits and good manners</h2>
+<ul><li>Ask only for what the feature needs, at the moment it needs it, with a screen of your own that explains why before the second ask.</li><li>Never loop on a refusal (<code>denied</code>, <code>blocked</code>, <code>403 consent_required</code>).</li><li>Treat everything from the profile as personal data: keep the minimum, delete on <code>user.disconnected</code>, never log values.</li><li>The dialog request is limited to 30 per minute per address; the profile call shares the partner API limit (600 per minute).</li></ul>
+
+<div class="pager"><a class="prev" href="bridge-spec.html"><small>Previous</small>Super app: the bridge specification</a><a class="next" href="scenario.html"><small>Next</small>Worked example: Demo Ride</a></div>
+<p class="footer">Adera guides &middot; mini-app permissions and the bridge &middot; samples captured against the running dev stack on 2026-11-04 and 2026-11-05</p>
+</main>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

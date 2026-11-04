@@ -1,0 +1,289 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Worked example: Demo Ride | Mini-app permissions and the bridge</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+<button id="menu-btn" type="button" aria-label="Toggle menu">Menu</button>
+<a class="brand" href="index.html">Mini-app permissions and the bridge</a>
+<span class="spacer"></span>
+<button id="theme-btn" type="button" aria-label="Toggle light or dark theme">Theme</button>
+</header>
+<div class="layout">
+<nav class="sidebar" aria-label="Pages in this guide">
+<h4>This guide</h4>
+<ul><li><a href="index.html">Overview and contents</a></li><li><a href="concepts.html">How it works</a></li><li><a href="super-app-api.html">Super app: the user API</a></li><li><a href="bridge-spec.html">Super app: the bridge specification</a></li><li><a href="mini-app.html">Mini app developers</a></li><li><a href="scenario.html" class="current">Worked example: Demo Ride</a></li><li><a href="staff.html">What staff configure</a></li><li><a href="errors.html">Error codes</a></li><li><a href="known-issues.html">Known issues and not built yet</a></li></ul>
+</nav>
+<main>
+<h1>Worked example: Demo Ride</h1>
+<p class="lead">A user's whole journey with a ride-hailing mini app: launch, permissions one at a time, a blocked permission unblocked in the menu, Disconnect, and the callbacks the partner received.</p>
+
+<h2 id="overview">Overview</h2>
+<p>The whole journey of a user with the seeded mini app Demo Ride (a ride-hailing app). Everything below was captured by the end-to-end test <code>tests/e2e/permissions.py</code> against the running dev stack, through the gateway, with a real seeded user (Demo Kidist, who has a phone), the real partner key of Demo Ride, and a temporary staff account. Ids are shortened where marked. Nothing real was sent: dev mode uses a console SMS, a local mail catcher and a fake push.</p>
+<ol>
+<li>Staff granted Demo Ride <code>user.basic</code>, <code>user.full_name</code>, <code>location.fine</code> and <code>notify.sms</code>, approved a purpose sentence for each, and the app is LIVE.</li>
+<li>The user taps Demo Ride. No dialog appears. The super app calls launch.</li>
+<li>She taps "Find a ride". The mini app asks for <code>location.fine</code>; she allows it.</li>
+<li>The mini app's backend verifies the token and reads the profile: only the alias and <code>granted: ["user.basic"]</code>, because the name was never requested.</li>
+<li>At the end of the trip the mini app wants to text the driver's code. She denies; the partner's SMS is refused. It asks again later with an explanation; she denies again: <code>BLOCKED</code>.</li>
+<li>Next day the mini app asks once more and gets <code>blocked</code> with no dialog; it points her to the settings, where she switches SMS on; the next SMS goes through.</li>
+<li>She turns location off in the menu; the mini app asks again with an Allow button.</li>
+<li>She taps Disconnect: everything becomes DENIED, the partner gets a <code>user.disconnected</code> callback and the next profile call is refused.</li>
+</ol>
+<h2 id="launch">1. Opening the app</h2>
+<pre class="out"><code>POST /api/v1/me/apps/demo-ride/launch
+
+HTTP 200
+{
+  "launchToken": "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6ImFk...",
+  "expiresInSeconds": 300,
+  "url": "https://www.zayride.com?launch=eyJhbGciOiJSUzI1NiIs...",
+  "consents": [
+    {
+      "capability": "location.fine",
+      "state": "NOT_ASKED"
+    },
+    {
+      "capability": "notify.inapp",
+      "state": "NOT_ASKED"
+    },
+    {
+      "capability": "notify.sms",
+      "state": "NOT_ASKED"
+    },
+    {
+      "capability": "pay.request",
+      "state": "NOT_ASKED"
+    },
+    {
+      "capability": "user.basic",
+      "state": "GRANTED"
+    },
+    {
+      "capability": "user.full_name",
+      "state": "NOT_ASKED"
+    }
+  ]
+}</code></pre>
+<p>The mini app's backend verifies the token (see "Mini app developers") and reads the profile:</p>
+<pre class="out"><code>GET /v1/users/u_p_d1ef...e5062/profile
+
+HTTP 200
+{
+  "alias": "u_p_d1efd341d635c27f071db27f347e5062",
+  "granted": [
+    "user.basic"
+  ]
+}</code></pre>
+<h2 id="ask">2. Asking for the location at the moment of need</h2>
+<pre class="out"><code>POST /api/v1/me/apps/demo-ride/permissions/location.fine/request
+
+HTTP 200
+{
+  "capability": "location.fine",
+  "state": "NOT_ASKED",
+  "prompt": {
+    "promptId": "pr_79d5b4f958728bafcf934ee4",
+    "expiresInSeconds": 300,
+    "label": "Your precise location",
+    "purpose": "To find the closest driver to you"
+  }
+}
+
+PUT /api/v1/me/apps/demo-ride/permissions/location.fine/answer   (Allow)
+
+HTTP 200
+{
+  "capability": "location.fine",
+  "state": "GRANTED",
+  "denialCount": 0,
+  "canAskAgain": false
+}</code></pre>
+<h2 id="sms">3. The text-message permission: denied, blocked, switched on in the menu</h2>
+<pre class="out"><code>POST .../permissions/notify.sms/request
+
+HTTP 200
+{
+  "capability": "notify.sms",
+  "state": "NOT_ASKED",
+  "prompt": {
+    "promptId": "pr_27ed003b661a00bffdabc337",
+    "expiresInSeconds": 300,
+    "label": "Text messages (SMS)",
+    "purpose": "Text you the driver's code."
+  }
+}
+
+PUT .../permissions/notify.sms/answer   (Deny)
+
+HTTP 200
+{
+  "capability": "notify.sms",
+  "state": "DENIED",
+  "denialCount": 1,
+  "canAskAgain": true
+}
+
+POST /v1/notifications  (the partner texts anyway)
+
+HTTP 403
+{
+  "error": "consent_required",
+  "capability": "notify.sms",
+  "state": "DENIED"
+}
+
+(the mini app explains and asks again; she denies again)
+
+HTTP 200
+{
+  "capability": "notify.sms",
+  "state": "BLOCKED",
+  "denialCount": 2,
+  "canAskAgain": false
+}
+
+POST .../permissions/notify.sms/request   (next day)
+
+HTTP 200
+{
+  "capability": "notify.sms",
+  "state": "BLOCKED",
+  "prompt": null
+}
+
+PUT .../permissions/notify.sms   {"state": "GRANTED"}   (she switches it on in the menu)
+
+HTTP 200
+{
+  "capability": "notify.sms",
+  "state": "GRANTED",
+  "denialCount": 0,
+  "decidedAt": "2026-11-04T21:32:05.421730222Z"
+}
+
+POST /v1/notifications  (the next SMS)
+
+HTTP 202
+{
+  "notificationId": "96f9f099-99e4-4846-b30b-afbc561a61ee",
+  "externalId": "e2e-perm-8de17d-sms-3",
+  "status": "QUEUED",
+  "channel": "SMS",
+  "environment": "DEV",
+  "createdAt": "2026-11-04T21:32:05.450406Z",
+  "expiresAt": "2026-11-05T21:32:05.439496Z"
+}</code></pre>
+<h2 id="menu">4. Turning location off, and what the backend sees</h2>
+<pre class="out"><code>PUT .../permissions/location.fine   {"state": "DENIED"}
+
+HTTP 200
+{
+  "capability": "location.fine",
+  "state": "DENIED",
+  "denialCount": 0,
+  "decidedAt": "2026-11-04T21:32:06.896570255Z"
+}
+
+GET /v1/users/u_p_d1ef...e5062/profile   (she allowed the name earlier)
+
+HTTP 200
+{
+  "alias": "u_p_d1efd341d635c27f071db27f347e5062",
+  "granted": [
+    "user.basic",
+    "user.full_name"
+  ],
+  "fullName": "Demo Kidist Worku"
+}
+
+GET .../profile?fields=user.full_name   (she switched the name off)
+
+HTTP 403
+{
+  "error": "consent_required",
+  "capability": "user.full_name",
+  "state": "DENIED"
+}</code></pre>
+<h2 id="counts">5. What staff see</h2>
+<p>The backoffice shows, per granted capability, how many users granted, denied or were blocked (counts only, no names). Before and after this journey, for Demo Ride:</p>
+<pre class="out"><code>before: {"capability": "location.fine", "label": "Your precise location", "granted": 2, "denied": 1, "blocked": 1}
+after:  {"capability": "location.fine", "label": "Your precise location", "granted": 2, "denied": 2, "blocked": 1}</code></pre>
+<h2 id="disconnect">6. Disconnect</h2>
+<pre class="out"><code>DELETE /api/v1/me/apps/demo-ride/permissions
+
+HTTP 200
+{
+  "disconnected": true,
+  "changed": [
+    {
+      "capability": "notify.sms",
+      "from": "GRANTED",
+      "to": "DENIED"
+    },
+    {
+      "capability": "notify.inapp",
+      "from": "GRANTED",
+      "to": "DENIED"
+    },
+    {
+      "capability": "user.basic",
+      "from": "GRANTED",
+      "to": "DENIED"
+    }
+  ]
+}
+
+GET /v1/users/u_p_d1ef...e5062/profile
+
+HTTP 403
+{
+  "error": "consent_required",
+  "capability": "user.basic",
+  "state": "DENIED"
+}</code></pre>
+<h2 id="callbacks">7. What the partner's server was told</h2>
+<p>With a callback address set for Demo Ride's DEV environment, the partner's receiver got these events in order (all signatures verified against the Adera key):</p>
+<pre class="out"><code>user.consent_changed   location.fine  GRANTED
+user.consent_changed   notify.sms     DENIED
+user.consent_changed   notify.sms     BLOCKED
+user.consent_changed   notify.sms     GRANTED
+user.consent_changed   notify.inapp   GRANTED
+user.consent_changed   notify.inapp   DENIED
+user.consent_changed   notify.inapp   GRANTED
+user.consent_changed   user.full_name GRANTED
+user.consent_changed   user.full_name DENIED
+user.consent_changed   location.fine  DENIED
+user.disconnected      (notify.sms, notify.inapp, user.basic) 
+user.consent_changed   user.basic     GRANTED</code></pre>
+<p>Each event is a signed POST; the last is the Disconnect:</p>
+<pre class="out"><code>POST /adera/events HTTP/1.1
+X-Adera-Event: user.disconnected
+X-Adera-Key-Id: adera-sig-202610
+X-Adera-Timestamp: 1793827928
+X-Adera-Signature: FEhbeTEHHrP/z+qvDVgq4S0Y... (base64)
+Idempotency-Key: a8c4b843-386e-4df4-a29c-00bbe74bb33f
+
+{
+  "at": "2026-11-04T21:32:06.983630831Z",
+  "alias": "u_p_d1efd341d635c27f071db27f347e5062",
+  "event": "user.disconnected",
+  "environment": "DEV",
+  "capabilities": [
+    "notify.sms",
+    "notify.inapp",
+    "user.basic"
+  ]
+}</code></pre>
+
+<div class="pager"><a class="prev" href="mini-app.html"><small>Previous</small>Mini app developers</a><a class="next" href="staff.html"><small>Next</small>What staff configure</a></div>
+<p class="footer">Adera guides &middot; mini-app permissions and the bridge &middot; samples captured against the running dev stack on 2026-11-04 and 2026-11-05</p>
+</main>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

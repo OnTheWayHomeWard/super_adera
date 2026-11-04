@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mini-app permissions and the bridge | Mini-app permissions and the bridge</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+<button id="menu-btn" type="button" aria-label="Toggle menu">Menu</button>
+<a class="brand" href="index.html">Mini-app permissions and the bridge</a>
+<span class="spacer"></span>
+<button id="theme-btn" type="button" aria-label="Toggle light or dark theme">Theme</button>
+</header>
+<div class="layout">
+<nav class="sidebar" aria-label="Pages in this guide">
+<h4>This guide</h4>
+<ul><li><a href="index.html" class="current">Overview and contents</a></li><li><a href="concepts.html">How it works</a></li><li><a href="super-app-api.html">Super app: the user API</a></li><li><a href="bridge-spec.html">Super app: the bridge specification</a></li><li><a href="mini-app.html">Mini app developers</a></li><li><a href="scenario.html">Worked example: Demo Ride</a></li><li><a href="staff.html">What staff configure</a></li><li><a href="errors.html">Error codes</a></li><li><a href="known-issues.html">Known issues and not built yet</a></li></ul>
+</nav>
+<main>
+<h1>Mini-app permissions and the bridge</h1>
+<p class="lead">How a mini app gets data about a user and from the device, how the user decides what it may have, and how Adera stops it from taking more: for super-app and mini-app developers.</p>
+
+<div class="callout"><span class="label">Audience</span><p>Two groups. <strong>Super-app developers</strong> (the Adera app team and backend colleagues) who build the permission dialog, the menu sheet, the settings screen and the bridge. <strong>Mini-app developers</strong> (partners) who need to know how their page asks for a permission and how their backend reads what the user allowed. Staff configuration is covered in one short page. Nothing here links outside this folder: it can be zipped and shared on its own.</p></div>
+<h2 id="overview">Overview</h2>
+<p>A mini app is third-party code running inside the Adera app. It must not be able to describe its own powers or take data the user did not allow. So there are <strong>three gates</strong>, all enforced by the Adera backend, in this order: (1) did Adera staff grant the capability to the mini app, and is the app live; (2) did this user say yes to this capability for this app, and is it still yes; (3) is the request for exactly what that capability covers. The user answers <strong>one permission at a time, at the moment of need</strong> (like Android), never all at launch, and a second refusal in a row blocks the permission until the user switches it on in the menu.</p>
+<div class="callout why"><span class="label">Why it is built this way</span><p>The user must be able to say no to one thing and yes to another, change their mind, and leave an app completely, without the app being able to nag, to fake an answer, or to read data through a script that a bad advertisement injected. So the server decides, the page only asks, and personal data goes to the mini app's <em>backend</em> with a signed request, not through the browser.</p></div>
+<h2 id="status">What exists</h2>
+<div class="table-wrap"><table><thead><tr><th>Part</th><th>State</th></tr></thead><tbody>
+<tr><td>Staff approve a purpose sentence per capability; backoffice counts per capability</td><td><span class="badge built">built</span></td></tr>
+<tr><td>The user API: list, request, answer, menu switch, disconnect, settings overview, launch</td><td><span class="badge built">built</span></td></tr>
+<tr><td>Notification consent (the old mute switches are the same data) and the notify gate</td><td><span class="badge built">built</span></td></tr>
+<tr><td>The launch token and the backend profile call; the callbacks <code>user.consent_changed</code> and <code>user.disconnected</code></td><td><span class="badge built">built</span></td></tr>
+<tr><td>The bridge in the super app (<code>requestPermission</code>, <code>getPermission</code>, <code>openPermissionSettings</code>, <code>getLocation</code>)</td><td><span class="badge notyet">specified here, not built</span></td></tr>
+</tbody></table></div>
+<h2 id="conventions">Conventions</h2>
+<ul>
+<li><strong>Base URL.</strong> Everything goes through the gateway: <code>$GATEWAY</code> is <code>http://127.0.0.1:9080</code> on the dev stack, the public API host later. Paths below are exactly what a client calls.</li>
+<li><strong>Authentication.</strong> User endpoints: <code>Authorization: Bearer $TOKEN</code> (the user's session token from sign-in). Staff endpoints: a staff session at assurance level aal2. The mini app's backend: signed requests (ADERA-SIG-1, with its private key) and Adera's public key from <code>/.well-known/jwks.json</code> to verify the launch token and callbacks.</li>
+<li><strong>Errors</strong> have the shape <code>{"error": "&lt;code&gt;", ...details}</code>; validation errors add <code>fields</code> (<code>{"error": "validation_failed", "fields": {"state": "..."}}</code>). Errors produced by the gateway itself (an empty 401, a 429 page) do not. See "Error codes".</li>
+<li><strong>Ids and timestamps.</strong> The mini app is <code>{app}</code>: its UUID or its slug. A capability is a key such as <code>location.fine</code>. Timestamps are ISO-8601 UTC. The user is known to a mini app only by a pseudonymous id <code>u_p_...</code> (different in every app), never by the real user id.</li>
+<li><strong>Languages.</strong> The purpose sentence is shown in the user's language (<code>en</code>, <code>am</code>, <code>om</code>), falling back to English and then to the capability's default sentence.</li>
+</ul>
+<h2 id="glossary">Glossary</h2>
+<div class="table-wrap"><table><thead><tr><th>Term</th><th>Meaning</th></tr></thead><tbody>
+<tr><td>Super app</td><td>The Adera app that hosts mini apps.</td></tr>
+<tr><td>Mini app</td><td>A partner's service listed in the super app: a web page in a WebView plus the partner's own backend.</td></tr>
+<tr><td>Capability</td><td>One thing a mini app can be allowed to ask for: <code>user.basic</code>, <code>user.full_name</code>, <code>user.contact</code>, <code>user.address</code>, <code>location.coarse</code>, <code>location.fine</code>, <code>pay.request</code>, <code>notify.inapp</code>, <code>notify.sms</code>, <code>notify.email</code>.</td></tr>
+<tr><td>Grant</td><td>Staff's decision that an app may ask for a capability (gate 1). Does not give the app anything by itself.</td></tr>
+<tr><td>Consent / permission</td><td>The user's answer for one capability of one app (gate 2): <code>NOT_ASKED</code>, <code>GRANTED</code>, <code>DENIED</code>, <code>BLOCKED</code>.</td></tr>
+<tr><td>Purpose</td><td>One sentence staff approved per granted capability, shown to the user in the dialog ("Find a driver near you.").</td></tr>
+<tr><td>Prompt</td><td>The one-time ticket the server issues when a dialog is allowed; an answer needs it.</td></tr>
+<tr><td>Launch token</td><td>A five-minute signed token the super app gives a mini app when the user opens it.</td></tr>
+<tr><td>Alias</td><td>The user's pseudonymous id for one mini app (<code>u_p_...</code>).</td></tr>
+<tr><td>Bridge</td><td>The JavaScript the super app injects into the mini app's page to ask for permissions and a location reading.</td></tr>
+</tbody></table></div>
+<h2 id="contents">Contents</h2>
+<div class="table-wrap"><table><thead><tr><th>Page</th><th>What it covers</th></tr></thead><tbody>
+<tr><td><a href="concepts.html">How it works</a></td><td>The three gates, the four states and their rules, the two data paths, location, notifications as consent, revocation.</td></tr>
+<tr><td><a href="super-app-api.html">Super app: the user API</a></td><td>Seven endpoints with real requests and answers: list, request, answer, menu, disconnect, overview, launch.</td></tr>
+<tr><td><a href="bridge-spec.html">Super app: the bridge specification</a></td><td>The four methods, the message format, the origin rule, the rules and the error codes.</td></tr>
+<tr><td><a href="mini-app.html">Mini app developers</a></td><td>Asking from the page, what to do with each answer, verifying the launch token, reading the profile, the callbacks; runnable verify examples.</td></tr>
+<tr><td><a href="scenario.html">Worked example: Demo Ride</a></td><td>The whole journey with real captured requests, answers and callbacks.</td></tr>
+<tr><td><a href="staff.html">What staff configure</a></td><td>The purpose sentence, the counts, the callback address, the audit trail.</td></tr>
+<tr><td><a href="errors.html">Error codes</a></td><td>Every code of the user API and the backend API, with what to do.</td></tr>
+<tr><td><a href="known-issues.html">Known issues and not built yet</a></td><td>What is missing, and decisions that were taken where the design was silent.</td></tr>
+</tbody></table></div>
+
+<div class="pager"><span class="placeholder"></span><a class="next" href="concepts.html"><small>Next</small>How it works</a></div>
+<p class="footer">Adera guides &middot; mini-app permissions and the bridge &middot; samples captured against the running dev stack on 2026-11-04 and 2026-11-05</p>
+</main>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

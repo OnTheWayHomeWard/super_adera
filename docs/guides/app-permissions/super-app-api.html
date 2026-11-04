@@ -1,0 +1,294 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Super app: the user API | Mini-app permissions and the bridge</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+<button id="menu-btn" type="button" aria-label="Toggle menu">Menu</button>
+<a class="brand" href="index.html">Mini-app permissions and the bridge</a>
+<span class="spacer"></span>
+<button id="theme-btn" type="button" aria-label="Toggle light or dark theme">Theme</button>
+</header>
+<div class="layout">
+<nav class="sidebar" aria-label="Pages in this guide">
+<h4>This guide</h4>
+<ul><li><a href="index.html">Overview and contents</a></li><li><a href="concepts.html">How it works</a></li><li><a href="super-app-api.html" class="current">Super app: the user API</a></li><li><a href="bridge-spec.html">Super app: the bridge specification</a></li><li><a href="mini-app.html">Mini app developers</a></li><li><a href="scenario.html">Worked example: Demo Ride</a></li><li><a href="staff.html">What staff configure</a></li><li><a href="errors.html">Error codes</a></li><li><a href="known-issues.html">Known issues and not built yet</a></li></ul>
+</nav>
+<main>
+<h1>Super app: the user API</h1>
+<p class="lead">The seven endpoints the Adera app calls for permissions and for opening a mini app, with real requests and answers.</p>
+
+<h2 id="overview">Overview</h2>
+<p>These are the seven endpoints the Adera app calls. All are served through the gateway for a signed-in user. They live under <code>/me/apps/{app}</code>, so they do not collide with the public catalog's <code>/apps/{app}/permissions</code> (what an app is allowed to use, visible to anyone). The mini app's page never calls them: it asks the bridge, and the super app calls them on its behalf with the user's session.</p>
+<div class="table-wrap"><table><thead><tr><th>Endpoint</th><th>Called when</th><th>Limit</th></tr></thead><tbody>
+<tr><td><a href="#ep-launch"><code>POST /api/v1/me/apps/{app}/launch</code></a></td><td>The user opens a mini app</td><td>60 / minute</td></tr>
+<tr><td><a href="#ep-request"><code>POST .../permissions/{capability}/request</code></a></td><td><code>requestPermission</code></td><td><strong>30 / minute</strong></td></tr>
+<tr><td><a href="#ep-answer"><code>PUT .../permissions/{capability}/answer</code></a></td><td>The user taps Allow or Deny</td><td>300 / minute</td></tr>
+<tr><td><a href="#ep-list"><code>GET .../permissions</code></a></td><td>The menu sheet, <code>getPermission</code></td><td>300 / minute</td></tr>
+<tr><td><a href="#ep-menu"><code>PUT .../permissions/{capability}</code></a></td><td>A switch in the menu sheet</td><td>300 / minute</td></tr>
+<tr><td><a href="#ep-disconnect"><code>DELETE .../permissions</code></a></td><td>The Disconnect button</td><td>300 / minute</td></tr>
+<tr><td><a href="#ep-overview"><code>GET /api/v1/me/permissions</code></a></td><td>The settings screen</td><td>300 / minute</td></tr>
+</tbody></table></div>
+<h2 id="sequence">The dialog sequence</h2>
+<ol><li>The mini app calls <code>adera.requestPermission("location.fine")</code>.</li><li>The super app calls <strong>request</strong>. If the answer has no <code>prompt</code>, it resolves the Promise with the state and stops.</li><li>Otherwise it shows the dialog (<code>label</code> and <code>purpose</code> verbatim; Allow / Deny).</li><li>It calls <strong>answer</strong> with the <code>promptId</code> and the choice, and resolves the Promise with the new state.</li><li>For location, the phone's own dialog follows (the first time); Adera only records the user's consent.</li></ol>
+<h2 id="endpoints">Endpoints</h2>
+<details class="endpoint" id="ep-list" open><summary><span class="method m-get">GET</span><span class="path">/api/v1/me/apps/{app}/permissions</span><span class="sum">List a mini app's permissions with my state</span></summary><div class="body">
+<dl class="meta"><dt>Who may call</dt><dd>The signed-in user</dd><dt>Auth</dt><dd><code>Authorization: Bearer $TOKEN</code> (the user's session token)</dd><dt>Rate limit</dt><dd>300 per minute per client address</dd></dl>
+<p><strong>Purpose.</strong> The menu sheet and <code>getPermission</code>: every capability staff granted the app with the dialog headline (<code>label</code>), the approved one-sentence <code>purpose</code> in the user's language, and this user's state. Never shows a dialog.</p>
+<div class="table-wrap"><table><thead><tr><th>Name</th><th>Where</th><th>Type</th><th>Required</th><th>Meaning</th></tr></thead><tbody><tr><td><</td><td>t</td><td>r</td><td>></td><td><</td><td>t</td><td>d</td><td>></td><td><</td><td>c</td><td>o</td><td>d</td><td>e</td><td>></td><td>a</td><td>p</td><td>p</td><td><</td><td>/</td><td>c</td><td>o</td><td>d</td><td>e</td><td>></td><td><</td><td>/</td><td>t</td><td>d</td><td>></td><td><</td><td>t</td><td>d</td><td>></td><td>p</td><td>a</td><td>t</td><td>h</td><td><</td><td>/</td><td>t</td><td>d</td><td>></td><td><</td><td>t</td><td>d</td><td>></td><td>s</td><td>t</td><td>r</td><td>i</td><td>n</td><td>g</td><td><</td><td>/</td><td>t</td><td>d</td><td>></td><td><</td><td>t</td><td>d</td><td>></td><td>y</td><td>e</td><td>s</td><td><</td><td>/</td><td>t</td><td>d</td><td>></td><td><</td><td>t</td><td>d</td><td>></td><td>T</td><td>h</td><td>e</td><td> </td><td>m</td><td>i</td><td>n</td><td>i</td><td> </td><td>a</td><td>p</td><td>p</td><td>'</td><td>s</td><td> </td><td>i</td><td>d</td><td> </td><td>(</td><td>U</td><td>U</td><td>I</td><td>D</td><td>)</td><td> </td><td>o</td><td>r</td><td> </td><td>i</td><td>t</td><td>s</td><td> </td><td>s</td><td>l</td><td>u</td><td>g</td><td> </td><td>(</td><td>f</td><td>o</td><td>r</td><td> </td><td>e</td><td>x</td><td>a</td><td>m</td><td>p</td><td>l</td><td>e</td><td> </td><td><</td><td>c</td><td>o</td><td>d</td><td>e</td><td>></td><td>d</td><td>e</td><td>m</td><td>o</td><td>-</td><td>r</td><td>i</td><td>d</td><td>e</td><td><</td><td>/</td><td>c</td><td>o</td><td>d</td><td>e</td><td>></td><td>)</td><td>.</td><td> </td><td>T</td><td>h</td><td>e</td><td> </td><td>a</td><td>p</td><td>p</td><td> </td><td>m</td><td>u</td><td>s</td><td>t</td><td> </td><td>b</td><td>e</td><td> </td><td>L</td><td>I</td><td>V</td><td>E</td><td>.</td><td><</td><td>/</td><td>t</td><td>d</td><td>></td><td><</td><td>/</td><td>t</td><td>r</td><td>></td></tr></tbody></table></div>
+<h4>Real answer (a user who answered nothing yet)</h4><pre><code>GET $GATEWAY/api/v1/me/apps/demo-ride/permissions</code></pre><pre class="out"><code>HTTP 200
+[
+  {
+    "capability": "location.fine",
+    "label": "Your precise location",
+    "purpose": "To find the closest driver to you",
+    "state": "NOT_ASKED",
+    "denialCount": 0,
+    "canAskAgain": true,
+    "decidedAt": null
+  },
+  {
+    "capability": "notify.inapp",
+    "label": "Notifications in Adera",
+    "purpose": "Send you messages inside Adera.",
+    "state": "NOT_ASKED",
+    "denialCount": 0,
+    "canAskAgain": true,
+    "decidedAt": null
+  },
+  {
+    "capability": "notify.sms",
+    "label": "Text messages (SMS)",
+    "purpose": "Text you the driver's code.",
+    "state": "NOT_ASKED",
+    "denialCount": 0,
+    "canAskAgain": true,
+    "decidedAt": null
+  },
+  {
+    "capability": "pay.request",
+    "label": "Payments",
+    "purpose": "To ask you to pay for your order",
+    "state": "NOT_ASKED",
+    "denialCount": 0,
+    "canAskAgain": true,
+    "decidedAt": null
+  },
+  {
+    "capability": "user.basic",
+    "label": "Your Adera id",
+    "purpose": "Recognise you in the app without learning who you are.",
+    "state": "GRANTED",
+    "denialCount": 0,
+    "canAskAgain": false,
+    "decidedAt": null
+  },
+  {
+    "capability": "user.full_name",
+    "label": "Your name",
+    "purpose": "To address you by name",
+    "state": "NOT_ASKED",
+    "denialCount": 0,
+    "canAskAgain": true,
+    "decidedAt": null
+  }
+]</code></pre>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th><code>error</code></th><th>When</th><th>What to do</th></tr></thead><tbody><tr><td>404</td><td><code>not_found</code></td><td>No such app, or it is a draft.</td><td>Drop the app from the list.</td></tr><tr><td>403</td><td><code>app_not_live</code></td><td>The app is paused or killed.</td><td>Show that the app is unavailable.</td></tr><tr><td>403</td><td><code>account_suspended</code> / <code>account_deleted</code></td><td>The user's account is not active.</td><td>Sign the user out.</td></tr><tr><td>401</td><td>(empty body, from the gateway)</td><td>No session, or an expired one.</td><td>Sign the user in again.</td></tr></tbody></table></div>
+<h4>How to use it</h4><ul><li><code>canAskAgain</code> is true when a dialog would be shown on the next request (<code>NOT_ASKED</code> or <code>DENIED</code>).</li><li>Capabilities staff removed are not listed; the user's earlier answer is kept but inert, and applies again if staff grant the capability again.</li><li>Read on every opening of the sheet: pausing the app or removing a grant takes effect at once.</li></ul>
+</div></details>
+<details class="endpoint" id="ep-request" open><summary><span class="method m-post">POST</span><span class="path">/api/v1/me/apps/{app}/permissions/{capability}/request</span><span class="sum">The mini app needs a permission now</span></summary><div class="body">
+<dl class="meta"><dt>Who may call</dt><dd>The signed-in user (the super app, from <code>requestPermission</code>)</dd><dt>Auth</dt><dd><code>Authorization: Bearer $TOKEN</code> (the user's session token)</dd><dt>Rate limit</dt><dd><strong>30 per minute</strong> per client address (stricter than the rest: each call can open a dialog)</dd></dl>
+<p><strong>Purpose.</strong> Returns the state and, <strong>only when a dialog is allowed</strong> (<code>NOT_ASKED</code> or <code>DENIED</code>), a one-time <code>prompt</code> with the approved text. <code>GRANTED</code> and <code>BLOCKED</code> return <code>prompt: null</code>; a capability staff did not grant returns <code>NOT_AVAILABLE</code> at once. A new request replaces an older open prompt.</p>
+<div class="table-wrap"><table><thead><tr><th>Name</th><th>Where</th><th>Type</th><th>Required</th><th>Meaning</th></tr></thead><tbody><tr><td><</td><td>t</td><td>r</td><td>></td><td><</td><td>t</td><td>d</td><td>></td><td><</td><td>c</td><td>o</td><td>d</td><td>e</td><td>></td><td>a</td><td>p</td><td>p</td><td><</td><td>/</td><td>c</td><td>o</td><td>d</td><td>e</td><td>></td><td><</td><td>/</td><td>t</td><td>d</td><td>></td><td><</td><td>t</td><td>d</td><td>></td><td>p</td><td>a</td><td>t</td><td>h</td><td><</td><td>/</td><td>t</td><td>d</td><td>></td><td><</td><td>t</td><td>d</td><td>></td><td>s</td><td>t</td><td>r</td><td>i</td><td>n</td><td>g</td><td><</td><td>/</td><td>t</td><td>d</td><td>></td><td><</td><td>t</td><td>d</td><td>></td><td>y</td><td>e</td><td>s</td><td><</td><td>/</td><td>t</td><td>d</td><td>></td><td><</td><td>t</td><td>d</td><td>></td><td>T</td><td>h</td><td>e</td><td> </td><td>m</td><td>i</td><td>n</td><td>i</td><td> </td><td>a</td><td>p</td><td>p</td><td>'</td><td>s</td><td> </td><td>i</td><td>d</td><td> </td><td>(</td><td>U</td><td>U</td><td>I</td><td>D</td><td>)</td><td> </td><td>o</td><td>r</td><td> </td><td>i</td><td>t</td><td>s</td><td> </td><td>s</td><td>l</td><td>u</td><td>g</td><td> </td><td>(</td><td>f</td><td>o</td><td>r</td><td> </td><td>e</td><td>x</td><td>a</td><td>m</td><td>p</td><td>l</td><td>e</td><td> </td><td><</td><td>c</td><td>o</td><td>d</td><td>e</td><td>></td><td>d</td><td>e</td><td>m</td><td>o</td><td>-</td><td>r</td><td>i</td><td>d</td><td>e</td><td><</td><td>/</td><td>c</td><td>o</td><td>d</td><td>e</td><td>></td><td>)</td><td>.</td><td> </td><td>T</td><td>h</td><td>e</td><td> </td><td>a</td><td>p</td><td>p</td><td> </td><td>m</td><td>u</td><td>s</td><td>t</td><td> </td><td>b</td><td>e</td><td> </td><td>L</td><td>I</td><td>V</td><td>E</td><td>.</td><td><</td><td>/</td><td>t</td><td>d</td><td>></td><td><</td><td>/</td><td>t</td><td>r</td><td>></td></tr><tr><td><</td><td>t</td><td>r</td><td>></td><td><</td><td>t</td><td>d</td><td>></td><td><</td><td>c</td><td>o</td><td>d</td><td>e</td><td>></td><td>c</td><td>a</td><td>p</td><td>a</td><td>b</td><td>i</td><td>l</td><td>i</td><td>t</td><td>y</td><td><</td><td>/</td><td>c</td><td>o</td><td>d</td><td>e</td><td>></td><td><</td><td>/</td><td>t</td><td>d</td><td>></td><td><</td><td>t</td><td>d</td><td>></td><td>p</td><td>a</td><td>t</td><td>h</td><td><</td><td>/</td><td>t</td><td>d</td><td>></td><td><</td><td>t</td><td>d</td><td>></td><td>s</td><td>t</td><td>r</td><td>i</td><td>n</td><td>g</td><td><</td><td>/</td><td>t</td><td>d</td><td>></td><td><</td><td>t</td><td>d</td><td>></td><td>y</td><td>e</td><td>s</td><td><</td><td>/</td><td>t</td><td>d</td><td>></td><td><</td><td>t</td><td>d</td><td>></td><td>A</td><td> </td><td>c</td><td>a</td><td>p</td><td>a</td><td>b</td><td>i</td><td>l</td><td>i</td><td>t</td><td>y</td><td> </td><td>k</td><td>e</td><td>y</td><td> </td><td>s</td><td>u</td><td>c</td><td>h</td><td> </td><td>a</td><td>s</td><td> </td><td><</td><td>c</td><td>o</td><td>d</td><td>e</td><td>></td><td>l</td><td>o</td><td>c</td><td>a</td><td>t</td><td>i</td><td>o</td><td>n</td><td>.</td><td>f</td><td>i</td><td>n</td><td>e</td><td><</td><td>/</td><td>c</td><td>o</td><td>d</td><td>e</td><td>></td><td> </td><td>(</td><td>l</td><td>o</td><td>w</td><td>e</td><td>r</td><td>-</td><td>c</td><td>a</td><td>s</td><td>e</td><td> </td><td>l</td><td>e</td><td>t</td><td>t</td><td>e</td><td>r</td><td>s</td><td>,</td><td> </td><td>d</td><td>i</td><td>g</td><td>i</td><td>t</td><td>s</td><td>,</td><td> </td><td><</td><td>c</td><td>o</td><td>d</td><td>e</td><td>></td><td>_</td><td><</td><td>/</td><td>c</td><td>o</td><td>d</td><td>e</td><td>></td><td> </td><td>a</td><td>n</td><td>d</td><td> </td><td><</td><td>c</td><td>o</td><td>d</td><td>e</td><td>></td><td>.</td><td><</td><td>/</td><td>c</td><td>o</td><td>d</td><td>e</td><td>></td><td>)</td><td>.</td><td> </td><td>T</td><td>h</td><td>e</td><td> </td><td>s</td><td>t</td><td>a</td><td>f</td><td>f</td><td> </td><td>m</td><td>u</td><td>s</td><td>t</td><td> </td><td>h</td><td>a</td><td>v</td><td>e</td><td> </td><td>g</td><td>r</td><td>a</td><td>n</td><td>t</td><td>e</td><td>d</td><td> </td><td>i</td><td>t</td><td> </td><td>t</td><td>o</td><td> </td><td>t</td><td>h</td><td>e</td><td> </td><td>a</td><td>p</td><td>p</td><td>.</td><td><</td><td>/</td><td>t</td><td>d</td><td>></td><td><</td><td>/</td><td>t</td><td>r</td><td>></td></tr></tbody></table></div>
+<h4>First request: a dialog is allowed (real)</h4><pre><code>POST $GATEWAY/api/v1/me/apps/demo-ride/permissions/location.fine/request</code></pre><pre class="out"><code>HTTP 200
+{
+  "capability": "location.fine",
+  "state": "NOT_ASKED",
+  "prompt": {
+    "promptId": "pr_79d5b4f958728bafcf934ee4",
+    "expiresInSeconds": 300,
+    "label": "Your precise location",
+    "purpose": "To find the closest driver to you"
+  }
+}</code></pre>
+<h4>Blocked: never a dialog (real)</h4><pre><code>POST $GATEWAY/api/v1/me/apps/demo-ride/permissions/notify.sms/request</code></pre><pre class="out"><code>HTTP 200
+{
+  "capability": "notify.sms",
+  "state": "BLOCKED",
+  "prompt": null
+}</code></pre>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th><code>error</code></th><th>When</th><th>What to do</th></tr></thead><tbody><tr><td>404</td><td><code>not_found</code></td><td>No such app, or it is a draft.</td><td>Drop the app from the list.</td></tr><tr><td>403</td><td><code>app_not_live</code></td><td>The app is paused or killed.</td><td>Show that the app is unavailable.</td></tr><tr><td>403</td><td><code>account_suspended</code> / <code>account_deleted</code></td><td>The user's account is not active.</td><td>Sign the user out.</td></tr><tr><td>401</td><td>(empty body, from the gateway)</td><td>No session, or an expired one.</td><td>Sign the user in again.</td></tr><tr><td>400</td><td><code>validation_failed</code></td><td><code>fields.capability</code>: not a capability key.</td><td>Fix the call.</td></tr><tr><td>429</td><td>(gateway)</td><td>More than 30 requests per minute from one address.</td><td>Wait.</td></tr></tbody></table></div>
+<h4>How to use it</h4><ul><li>Show the dialog only if <code>prompt</code> is not null, with <code>label</code> and <code>purpose</code> verbatim, then send the answer with the <code>promptId</code>.</li><li>The prompt lives 5 minutes (<code>expiresInSeconds</code>) and works once.</li><li>The mini app should explain itself before asking a second time (state <code>DENIED</code>): a second refusal blocks.</li></ul>
+</div></details>
+<details class="endpoint" id="ep-answer" open><summary><span class="method m-put">PUT</span><span class="path">/api/v1/me/apps/{app}/permissions/{capability}/answer</span><span class="sum">The user's answer in the dialog</span></summary><div class="body">
+<dl class="meta"><dt>Who may call</dt><dd>The signed-in user (the super app)</dd><dt>Auth</dt><dd><code>Authorization: Bearer $TOKEN</code> (the user's session token)</dd><dt>Rate limit</dt><dd>300 per minute per client address</dd></dl>
+<p><strong>Purpose.</strong> Records the dialog's answer. Accepted only with the one-time <code>promptId</code> from the request call for this user, app and capability, within 5 minutes, once. Allow sets <code>GRANTED</code> (denial count 0). The first Deny sets <code>DENIED</code> (count 1), the second in a row <code>BLOCKED</code> (count 2).</p>
+<div class="table-wrap"><table><thead><tr><th>Name</th><th>Where</th><th>Type</th><th>Required</th><th>Meaning</th></tr></thead><tbody><tr><td><</td><td>t</td><td>r</td><td>></td><td><</td><td>t</td><td>d</td><td>></td><td><</td><td>c</td><td>o</td><td>d</td><td>e</td><td>></td><td>a</td><td>p</td><td>p</td><td><</td><td>/</td><td>c</td><td>o</td><td>d</td><td>e</td><td>></td><td><</td><td>/</td><td>t</td><td>d</td><td>></td><td><</td><td>t</td><td>d</td><td>></td><td>p</td><td>a</td><td>t</td><td>h</td><td><</td><td>/</td><td>t</td><td>d</td><td>></td><td><</td><td>t</td><td>d</td><td>></td><td>s</td><td>t</td><td>r</td><td>i</td><td>n</td><td>g</td><td><</td><td>/</td><td>t</td><td>d</td><td>></td><td><</td><td>t</td><td>d</td><td>></td><td>y</td><td>e</td><td>s</td><td><</td><td>/</td><td>t</td><td>d</td><td>></td><td><</td><td>t</td><td>d</td><td>></td><td>T</td><td>h</td><td>e</td><td> </td><td>m</td><td>i</td><td>n</td><td>i</td><td> </td><td>a</td><td>p</td><td>p</td><td>'</td><td>s</td><td> </td><td>i</td><td>d</td><td> </td><td>(</td><td>U</td><td>U</td><td>I</td><td>D</td><td>)</td><td> </td><td>o</td><td>r</td><td> </td><td>i</td><td>t</td><td>s</td><td> </td><td>s</td><td>l</td><td>u</td><td>g</td><td> </td><td>(</td><td>f</td><td>o</td><td>r</td><td> </td><td>e</td><td>x</td><td>a</td><td>m</td><td>p</td><td>l</td><td>e</td><td> </td><td><</td><td>c</td><td>o</td><td>d</td><td>e</td><td>></td><td>d</td><td>e</td><td>m</td><td>o</td><td>-</td><td>r</td><td>i</td><td>d</td><td>e</td><td><</td><td>/</td><td>c</td><td>o</td><td>d</td><td>e</td><td>></td><td>)</td><td>.</td><td> </td><td>T</td><td>h</td><td>e</td><td> </td><td>a</td><td>p</td><td>p</td><td> </td><td>m</td><td>u</td><td>s</td><td>t</td><td> </td><td>b</td><td>e</td><td> </td><td>L</td><td>I</td><td>V</td><td>E</td><td>.</td><td><</td><td>/</td><td>t</td><td>d</td><td>></td><td><</td><td>/</td><td>t</td><td>r</td><td>></td></tr><tr><td><</td><td>t</td><td>r</td><td>></td><td><</td><td>t</td><td>d</td><td>></td><td><</td><td>c</td><td>o</td><td>d</td><td>e</td><td>></td><td>c</td><td>a</td><td>p</td><td>a</td><td>b</td><td>i</td><td>l</td><td>i</td><td>t</td><td>y</td><td><</td><td>/</td><td>c</td><td>o</td><td>d</td><td>e</td><td>></td><td><</td><td>/</td><td>t</td><td>d</td><td>></td><td><</td><td>t</td><td>d</td><td>></td><td>p</td><td>a</td><td>t</td><td>h</td><td><</td><td>/</td><td>t</td><td>d</td><td>></td><td><</td><td>t</td><td>d</td><td>></td><td>s</td><td>t</td><td>r</td><td>i</td><td>n</td><td>g</td><td><</td><td>/</td><td>t</td><td>d</td><td>></td><td><</td><td>t</td><td>d</td><td>></td><td>y</td><td>e</td><td>s</td><td><</td><td>/</td><td>t</td><td>d</td><td>></td><td><</td><td>t</td><td>d</td><td>></td><td>A</td><td> </td><td>c</td><td>a</td><td>p</td><td>a</td><td>b</td><td>i</td><td>l</td><td>i</td><td>t</td><td>y</td><td> </td><td>k</td><td>e</td><td>y</td><td> </td><td>s</td><td>u</td><td>c</td><td>h</td><td> </td><td>a</td><td>s</td><td> </td><td><</td><td>c</td><td>o</td><td>d</td><td>e</td><td>></td><td>l</td><td>o</td><td>c</td><td>a</td><td>t</td><td>i</td><td>o</td><td>n</td><td>.</td><td>f</td><td>i</td><td>n</td><td>e</td><td><</td><td>/</td><td>c</td><td>o</td><td>d</td><td>e</td><td>></td><td> </td><td>(</td><td>l</td><td>o</td><td>w</td><td>e</td><td>r</td><td>-</td><td>c</td><td>a</td><td>s</td><td>e</td><td> </td><td>l</td><td>e</td><td>t</td><td>t</td><td>e</td><td>r</td><td>s</td><td>,</td><td> </td><td>d</td><td>i</td><td>g</td><td>i</td><td>t</td><td>s</td><td>,</td><td> </td><td><</td><td>c</td><td>o</td><td>d</td><td>e</td><td>></td><td>_</td><td><</td><td>/</td><td>c</td><td>o</td><td>d</td><td>e</td><td>></td><td> </td><td>a</td><td>n</td><td>d</td><td> </td><td><</td><td>c</td><td>o</td><td>d</td><td>e</td><td>></td><td>.</td><td><</td><td>/</td><td>c</td><td>o</td><td>d</td><td>e</td><td>></td><td>)</td><td>.</td><td> </td><td>T</td><td>h</td><td>e</td><td> </td><td>s</td><td>t</td><td>a</td><td>f</td><td>f</td><td> </td><td>m</td><td>u</td><td>s</td><td>t</td><td> </td><td>h</td><td>a</td><td>v</td><td>e</td><td> </td><td>g</td><td>r</td><td>a</td><td>n</td><td>t</td><td>e</td><td>d</td><td> </td><td>i</td><td>t</td><td> </td><td>t</td><td>o</td><td> </td><td>t</td><td>h</td><td>e</td><td> </td><td>a</td><td>p</td><td>p</td><td>.</td><td><</td><td>/</td><td>t</td><td>d</td><td>></td><td><</td><td>/</td><td>t</td><td>r</td><td>></td></tr><tr><td><</td><td>t</td><td>r</td><td>></td><td><</td><td>t</td><td>d</td><td>></td><td><</td><td>c</td><td>o</td><td>d</td><td>e</td><td>></td><td>p</td><td>r</td><td>o</td><td>m</td><td>p</td><td>t</td><td>I</td><td>d</td><td><</td><td>/</td><td>c</td><td>o</td><td>d</td><td>e</td><td>></td><td><</td><td>/</td><td>t</td><td>d</td><td>></td><td><</td><td>t</td><td>d</td><td>></td><td>b</td><td>o</td><td>d</td><td>y</td><td><</td><td>/</td><td>t</td><td>d</td><td>></td><td><</td><td>t</td><td>d</td><td>></td><td>s</td><td>t</td><td>r</td><td>i</td><td>n</td><td>g</td><td><</td><td>/</td><td>t</td><td>d</td><td>></td><td><</td><td>t</td><td>d</td><td>></td><td>y</td><td>e</td><td>s</td><td><</td><td>/</td><td>t</td><td>d</td><td>></td><td><</td><td>t</td><td>d</td><td>></td><td>T</td><td>h</td><td>e</td><td> </td><td>i</td><td>d</td><td> </td><td>f</td><td>r</td><td>o</td><td>m</td><td> </td><td>t</td><td>h</td><td>e</td><td> </td><td>r</td><td>e</td><td>q</td><td>u</td><td>e</td><td>s</td><td>t</td><td> </td><td>c</td><td>a</td><td>l</td><td>l</td><td>.</td><td> </td><td>T</td><td>h</td><td>e</td><td> </td><td>s</td><td>e</td><td>r</td><td>v</td><td>e</td><td>r</td><td> </td><td>i</td><td>s</td><td>s</td><td>u</td><td>e</td><td>s</td><td> </td><td>i</td><td>t</td><td>,</td><td> </td><td>s</td><td>o</td><td> </td><td>a</td><td> </td><td>b</td><td>r</td><td>i</td><td>d</td><td>g</td><td>e</td><td> </td><td>c</td><td>a</td><td>n</td><td>n</td><td>o</td><td>t</td><td> </td><td>i</td><td>n</td><td>v</td><td>e</td><td>n</td><td>t</td><td> </td><td>a</td><td>n</td><td> </td><td>a</td><td>n</td><td>s</td><td>w</td><td>e</td><td>r</td><td>.</td><td><</td><td>/</td><td>t</td><td>d</td><td>></td><td><</td><td>/</td><td>t</td><td>r</td><td>></td></tr><tr><td><</td><td>t</td><td>r</td><td>></td><td><</td><td>t</td><td>d</td><td>></td><td><</td><td>c</td><td>o</td><td>d</td><td>e</td><td>></td><td>a</td><td>n</td><td>s</td><td>w</td><td>e</td><td>r</td><td><</td><td>/</td><td>c</td><td>o</td><td>d</td><td>e</td><td>></td><td><</td><td>/</td><td>t</td><td>d</td><td>></td><td><</td><td>t</td><td>d</td><td>></td><td>b</td><td>o</td><td>d</td><td>y</td><td><</td><td>/</td><td>t</td><td>d</td><td>></td><td><</td><td>t</td><td>d</td><td>></td><td>s</td><td>t</td><td>r</td><td>i</td><td>n</td><td>g</td><td><</td><td>/</td><td>t</td><td>d</td><td>></td><td><</td><td>t</td><td>d</td><td>></td><td>y</td><td>e</td><td>s</td><td><</td><td>/</td><td>t</td><td>d</td><td>></td><td><</td><td>t</td><td>d</td><td>></td><td><</td><td>c</td><td>o</td><td>d</td><td>e</td><td>></td><td>G</td><td>R</td><td>A</td><td>N</td><td>T</td><td>E</td><td>D</td><td><</td><td>/</td><td>c</td><td>o</td><td>d</td><td>e</td><td>></td><td> </td><td>o</td><td>r</td><td> </td><td><</td><td>c</td><td>o</td><td>d</td><td>e</td><td>></td><td>D</td><td>E</td><td>N</td><td>I</td><td>E</td><td>D</td><td><</td><td>/</td><td>c</td><td>o</td><td>d</td><td>e</td><td>></td><td>.</td><td><</td><td>/</td><td>t</td><td>d</td><td>></td><td><</td><td>/</td><td>t</td><td>r</td><td>></td></tr></tbody></table></div>
+<h4>Allow (real)</h4><pre><code>PUT .../permissions/location.fine/answer
+{"promptId": "pr_79d5...", "answer": "GRANTED"}</code></pre><pre class="out"><code>HTTP 200
+{
+  "capability": "location.fine",
+  "state": "GRANTED",
+  "denialCount": 0,
+  "canAskAgain": false
+}</code></pre>
+<h4>The first Deny (real)</h4><pre><code>PUT .../permissions/notify.sms/answer
+{"promptId": "pr_27ed...", "answer": "DENIED"}</code></pre><pre class="out"><code>HTTP 200
+{
+  "capability": "notify.sms",
+  "state": "DENIED",
+  "denialCount": 1,
+  "canAskAgain": true
+}</code></pre>
+<h4>The second Deny (real)</h4><pre><code>PUT .../permissions/notify.sms/answer
+{"promptId": "pr_...", "answer": "DENIED"}</code></pre><pre class="out"><code>HTTP 200
+{
+  "capability": "notify.sms",
+  "state": "BLOCKED",
+  "denialCount": 2,
+  "canAskAgain": false
+}</code></pre>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th><code>error</code></th><th>When</th><th>What to do</th></tr></thead><tbody><tr><td>404</td><td><code>not_found</code></td><td>No such app, or it is a draft.</td><td>Drop the app from the list.</td></tr><tr><td>403</td><td><code>app_not_live</code></td><td>The app is paused or killed.</td><td>Show that the app is unavailable.</td></tr><tr><td>403</td><td><code>account_suspended</code> / <code>account_deleted</code></td><td>The user's account is not active.</td><td>Sign the user out.</td></tr><tr><td>401</td><td>(empty body, from the gateway)</td><td>No session, or an expired one.</td><td>Sign the user in again.</td></tr><tr><td>409</td><td><code>prompt_invalid</code></td><td>No open prompt, another one, already used, or for another user, app or capability.</td><td>Call request again.</td></tr><tr><td>409</td><td><code>prompt_expired</code></td><td>Older than 5 minutes.</td><td>Call request again.</td></tr><tr><td>403</td><td><code>capability_not_granted</code></td><td>Staff did not grant it (or removed it).</td><td>Stop.</td></tr><tr><td>400</td><td><code>validation_failed</code></td><td>Missing <code>promptId</code>, bad <code>answer</code>, unknown field.</td><td>Fix the call.</td></tr></tbody></table></div>
+<h4>How to use it</h4><ul><li>Every answer appends a row to the append-only proof table (<code>consent_event</code>): who, which capability, from and to which state, when, and how (dialog or menu).</li><li><code>canAskAgain</code> is true only for <code>DENIED</code>.</li></ul>
+</div></details>
+<details class="endpoint" id="ep-menu" open><summary><span class="method m-put">PUT</span><span class="path">/api/v1/me/apps/{app}/permissions/{capability}</span><span class="sum">Menu switch: allow or deny, also unblocks</span></summary><div class="body">
+<dl class="meta"><dt>Who may call</dt><dd>The signed-in user (the menu sheet)</dd><dt>Auth</dt><dd><code>Authorization: Bearer $TOKEN</code> (the user's session token)</dd><dt>Rate limit</dt><dd>300 per minute per client address</dd></dl>
+<p><strong>Purpose.</strong> The switch in the mini app's top menu. It always works, needs no prompt, resets the denial count and is the <strong>only</strong> way out of <code>BLOCKED</code>. On sets <code>GRANTED</code>; off sets <code>DENIED</code> with count 0 (the mini app may ask again later). Any open prompt is closed.</p>
+<div class="table-wrap"><table><thead><tr><th>Name</th><th>Where</th><th>Type</th><th>Required</th><th>Meaning</th></tr></thead><tbody><tr><td><</td><td>t</td><td>r</td><td>></td><td><</td><td>t</td><td>d</td><td>></td><td><</td><td>c</td><td>o</td><td>d</td><td>e</td><td>></td><td>a</td><td>p</td><td>p</td><td><</td><td>/</td><td>c</td><td>o</td><td>d</td><td>e</td><td>></td><td><</td><td>/</td><td>t</td><td>d</td><td>></td><td><</td><td>t</td><td>d</td><td>></td><td>p</td><td>a</td><td>t</td><td>h</td><td><</td><td>/</td><td>t</td><td>d</td><td>></td><td><</td><td>t</td><td>d</td><td>></td><td>s</td><td>t</td><td>r</td><td>i</td><td>n</td><td>g</td><td><</td><td>/</td><td>t</td><td>d</td><td>></td><td><</td><td>t</td><td>d</td><td>></td><td>y</td><td>e</td><td>s</td><td><</td><td>/</td><td>t</td><td>d</td><td>></td><td><</td><td>t</td><td>d</td><td>></td><td>T</td><td>h</td><td>e</td><td> </td><td>m</td><td>i</td><td>n</td><td>i</td><td> </td><td>a</td><td>p</td><td>p</td><td>'</td><td>s</td><td> </td><td>i</td><td>d</td><td> </td><td>(</td><td>U</td><td>U</td><td>I</td><td>D</td><td>)</td><td> </td><td>o</td><td>r</td><td> </td><td>i</td><td>t</td><td>s</td><td> </td><td>s</td><td>l</td><td>u</td><td>g</td><td> </td><td>(</td><td>f</td><td>o</td><td>r</td><td> </td><td>e</td><td>x</td><td>a</td><td>m</td><td>p</td><td>l</td><td>e</td><td> </td><td><</td><td>c</td><td>o</td><td>d</td><td>e</td><td>></td><td>d</td><td>e</td><td>m</td><td>o</td><td>-</td><td>r</td><td>i</td><td>d</td><td>e</td><td><</td><td>/</td><td>c</td><td>o</td><td>d</td><td>e</td><td>></td><td>)</td><td>.</td><td> </td><td>T</td><td>h</td><td>e</td><td> </td><td>a</td><td>p</td><td>p</td><td> </td><td>m</td><td>u</td><td>s</td><td>t</td><td> </td><td>b</td><td>e</td><td> </td><td>L</td><td>I</td><td>V</td><td>E</td><td>.</td><td><</td><td>/</td><td>t</td><td>d</td><td>></td><td><</td><td>/</td><td>t</td><td>r</td><td>></td></tr><tr><td><</td><td>t</td><td>r</td><td>></td><td><</td><td>t</td><td>d</td><td>></td><td><</td><td>c</td><td>o</td><td>d</td><td>e</td><td>></td><td>c</td><td>a</td><td>p</td><td>a</td><td>b</td><td>i</td><td>l</td><td>i</td><td>t</td><td>y</td><td><</td><td>/</td><td>c</td><td>o</td><td>d</td><td>e</td><td>></td><td><</td><td>/</td><td>t</td><td>d</td><td>></td><td><</td><td>t</td><td>d</td><td>></td><td>p</td><td>a</td><td>t</td><td>h</td><td><</td><td>/</td><td>t</td><td>d</td><td>></td><td><</td><td>t</td><td>d</td><td>></td><td>s</td><td>t</td><td>r</td><td>i</td><td>n</td><td>g</td><td><</td><td>/</td><td>t</td><td>d</td><td>></td><td><</td><td>t</td><td>d</td><td>></td><td>y</td><td>e</td><td>s</td><td><</td><td>/</td><td>t</td><td>d</td><td>></td><td><</td><td>t</td><td>d</td><td>></td><td>A</td><td> </td><td>c</td><td>a</td><td>p</td><td>a</td><td>b</td><td>i</td><td>l</td><td>i</td><td>t</td><td>y</td><td> </td><td>k</td><td>e</td><td>y</td><td> </td><td>s</td><td>u</td><td>c</td><td>h</td><td> </td><td>a</td><td>s</td><td> </td><td><</td><td>c</td><td>o</td><td>d</td><td>e</td><td>></td><td>l</td><td>o</td><td>c</td><td>a</td><td>t</td><td>i</td><td>o</td><td>n</td><td>.</td><td>f</td><td>i</td><td>n</td><td>e</td><td><</td><td>/</td><td>c</td><td>o</td><td>d</td><td>e</td><td>></td><td> </td><td>(</td><td>l</td><td>o</td><td>w</td><td>e</td><td>r</td><td>-</td><td>c</td><td>a</td><td>s</td><td>e</td><td> </td><td>l</td><td>e</td><td>t</td><td>t</td><td>e</td><td>r</td><td>s</td><td>,</td><td> </td><td>d</td><td>i</td><td>g</td><td>i</td><td>t</td><td>s</td><td>,</td><td> </td><td><</td><td>c</td><td>o</td><td>d</td><td>e</td><td>></td><td>_</td><td><</td><td>/</td><td>c</td><td>o</td><td>d</td><td>e</td><td>></td><td> </td><td>a</td><td>n</td><td>d</td><td> </td><td><</td><td>c</td><td>o</td><td>d</td><td>e</td><td>></td><td>.</td><td><</td><td>/</td><td>c</td><td>o</td><td>d</td><td>e</td><td>></td><td>)</td><td>.</td><td> </td><td>T</td><td>h</td><td>e</td><td> </td><td>s</td><td>t</td><td>a</td><td>f</td><td>f</td><td> </td><td>m</td><td>u</td><td>s</td><td>t</td><td> </td><td>h</td><td>a</td><td>v</td><td>e</td><td> </td><td>g</td><td>r</td><td>a</td><td>n</td><td>t</td><td>e</td><td>d</td><td> </td><td>i</td><td>t</td><td> </td><td>t</td><td>o</td><td> </td><td>t</td><td>h</td><td>e</td><td> </td><td>a</td><td>p</td><td>p</td><td>.</td><td><</td><td>/</td><td>t</td><td>d</td><td>></td><td><</td><td>/</td><td>t</td><td>r</td><td>></td></tr><tr><td><</td><td>t</td><td>r</td><td>></td><td><</td><td>t</td><td>d</td><td>></td><td><</td><td>c</td><td>o</td><td>d</td><td>e</td><td>></td><td>s</td><td>t</td><td>a</td><td>t</td><td>e</td><td><</td><td>/</td><td>c</td><td>o</td><td>d</td><td>e</td><td>></td><td><</td><td>/</td><td>t</td><td>d</td><td>></td><td><</td><td>t</td><td>d</td><td>></td><td>b</td><td>o</td><td>d</td><td>y</td><td><</td><td>/</td><td>t</td><td>d</td><td>></td><td><</td><td>t</td><td>d</td><td>></td><td>s</td><td>t</td><td>r</td><td>i</td><td>n</td><td>g</td><td><</td><td>/</td><td>t</td><td>d</td><td>></td><td><</td><td>t</td><td>d</td><td>></td><td>y</td><td>e</td><td>s</td><td><</td><td>/</td><td>t</td><td>d</td><td>></td><td><</td><td>t</td><td>d</td><td>></td><td><</td><td>c</td><td>o</td><td>d</td><td>e</td><td>></td><td>G</td><td>R</td><td>A</td><td>N</td><td>T</td><td>E</td><td>D</td><td><</td><td>/</td><td>c</td><td>o</td><td>d</td><td>e</td><td>></td><td> </td><td>o</td><td>r</td><td> </td><td><</td><td>c</td><td>o</td><td>d</td><td>e</td><td>></td><td>D</td><td>E</td><td>N</td><td>I</td><td>E</td><td>D</td><td><</td><td>/</td><td>c</td><td>o</td><td>d</td><td>e</td><td>></td><td>.</td><td><</td><td>/</td><td>t</td><td>d</td><td>></td><td><</td><td>/</td><td>t</td><td>r</td><td>></td></tr></tbody></table></div>
+<h4>Switch SMS on after it was blocked (real)</h4><pre><code>PUT .../permissions/notify.sms
+{"state": "GRANTED"}</code></pre><pre class="out"><code>HTTP 200
+{
+  "capability": "notify.sms",
+  "state": "GRANTED",
+  "denialCount": 0,
+  "decidedAt": "2026-11-04T21:32:05.421730222Z"
+}</code></pre>
+<h4>Switch location off (real)</h4><pre><code>PUT .../permissions/location.fine
+{"state": "DENIED"}</code></pre><pre class="out"><code>HTTP 200
+{
+  "capability": "location.fine",
+  "state": "DENIED",
+  "denialCount": 0,
+  "decidedAt": "2026-11-04T21:32:06.896570255Z"
+}</code></pre>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th><code>error</code></th><th>When</th><th>What to do</th></tr></thead><tbody><tr><td>404</td><td><code>not_found</code></td><td>No such app, or it is a draft.</td><td>Drop the app from the list.</td></tr><tr><td>403</td><td><code>app_not_live</code></td><td>The app is paused or killed.</td><td>Show that the app is unavailable.</td></tr><tr><td>403</td><td><code>account_suspended</code> / <code>account_deleted</code></td><td>The user's account is not active.</td><td>Sign the user out.</td></tr><tr><td>401</td><td>(empty body, from the gateway)</td><td>No session, or an expired one.</td><td>Sign the user in again.</td></tr><tr><td>403</td><td><code>capability_not_granted</code></td><td>Not granted to the app.</td><td>Do not show a switch for it.</td></tr><tr><td>409</td><td><code>use_disconnect</code></td><td><code>user.basic</code> cannot be denied on its own.</td><td>Offer Disconnect.</td></tr><tr><td>400</td><td><code>validation_failed</code></td><td>Bad <code>state</code> (BLOCKED and NOT_ASKED cannot be set).</td><td>Fix the call.</td></tr></tbody></table></div>
+<h4>How to use it</h4><ul><li>Build the sheet from the list endpoint: one switch per row, on when <code>GRANTED</code>.</li><li>Switching <code>user.basic</code> on after a disconnect reconnects the app.</li></ul>
+</div></details>
+<details class="endpoint" id="ep-disconnect" open><summary><span class="method m-delete">DELETE</span><span class="path">/api/v1/me/apps/{app}/permissions</span><span class="sum">Disconnect: take everything back</span></summary><div class="body">
+<dl class="meta"><dt>Who may call</dt><dd>The signed-in user (the Disconnect button)</dd><dt>Auth</dt><dd><code>Authorization: Bearer $TOKEN</code> (the user's session token)</dd><dt>Rate limit</dt><dd>300 per minute per client address</dd></dl>
+<p><strong>Purpose.</strong> Everything the user allowed the app becomes <code>DENIED</code> with count 0 (a <code>BLOCKED</code> one too), <code>user.basic</code> included, and any open prompt is closed. Never-asked permissions stay <code>NOT_ASKED</code>. Repeatable (nothing left to change gives an empty <code>changed</code>). Works on paused and killed apps too: the user can always leave. The partner receives a <code>user.disconnected</code> callback if staff set a callback address.</p>
+<div class="table-wrap"><table><thead><tr><th>Name</th><th>Where</th><th>Type</th><th>Required</th><th>Meaning</th></tr></thead><tbody><tr><td><</td><td>t</td><td>r</td><td>></td><td><</td><td>t</td><td>d</td><td>></td><td><</td><td>c</td><td>o</td><td>d</td><td>e</td><td>></td><td>a</td><td>p</td><td>p</td><td><</td><td>/</td><td>c</td><td>o</td><td>d</td><td>e</td><td>></td><td><</td><td>/</td><td>t</td><td>d</td><td>></td><td><</td><td>t</td><td>d</td><td>></td><td>p</td><td>a</td><td>t</td><td>h</td><td><</td><td>/</td><td>t</td><td>d</td><td>></td><td><</td><td>t</td><td>d</td><td>></td><td>s</td><td>t</td><td>r</td><td>i</td><td>n</td><td>g</td><td><</td><td>/</td><td>t</td><td>d</td><td>></td><td><</td><td>t</td><td>d</td><td>></td><td>y</td><td>e</td><td>s</td><td><</td><td>/</td><td>t</td><td>d</td><td>></td><td><</td><td>t</td><td>d</td><td>></td><td>T</td><td>h</td><td>e</td><td> </td><td>m</td><td>i</td><td>n</td><td>i</td><td> </td><td>a</td><td>p</td><td>p</td><td>'</td><td>s</td><td> </td><td>i</td><td>d</td><td> </td><td>(</td><td>U</td><td>U</td><td>I</td><td>D</td><td>)</td><td> </td><td>o</td><td>r</td><td> </td><td>i</td><td>t</td><td>s</td><td> </td><td>s</td><td>l</td><td>u</td><td>g</td><td> </td><td>(</td><td>f</td><td>o</td><td>r</td><td> </td><td>e</td><td>x</td><td>a</td><td>m</td><td>p</td><td>l</td><td>e</td><td> </td><td><</td><td>c</td><td>o</td><td>d</td><td>e</td><td>></td><td>d</td><td>e</td><td>m</td><td>o</td><td>-</td><td>r</td><td>i</td><td>d</td><td>e</td><td><</td><td>/</td><td>c</td><td>o</td><td>d</td><td>e</td><td>></td><td>)</td><td>.</td><td> </td><td>T</td><td>h</td><td>e</td><td> </td><td>a</td><td>p</td><td>p</td><td> </td><td>m</td><td>u</td><td>s</td><td>t</td><td> </td><td>b</td><td>e</td><td> </td><td>L</td><td>I</td><td>V</td><td>E</td><td>.</td><td><</td><td>/</td><td>t</td><td>d</td><td>></td><td><</td><td>/</td><td>t</td><td>r</td><td>></td></tr></tbody></table></div>
+<h4>Real answer</h4><pre><code>DELETE $GATEWAY/api/v1/me/apps/demo-ride/permissions</code></pre><pre class="out"><code>HTTP 200
+{
+  "disconnected": true,
+  "changed": [
+    {
+      "capability": "notify.sms",
+      "from": "GRANTED",
+      "to": "DENIED"
+    },
+    {
+      "capability": "notify.inapp",
+      "from": "GRANTED",
+      "to": "DENIED"
+    },
+    {
+      "capability": "user.basic",
+      "from": "GRANTED",
+      "to": "DENIED"
+    }
+  ]
+}</code></pre>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th><code>error</code></th><th>When</th><th>What to do</th></tr></thead><tbody><tr><td>404</td><td><code>not_found</code></td><td>No such app, or a draft.</td><td>Drop it.</td></tr><tr><td>403</td><td><code>account_suspended</code> / <code>account_deleted</code></td><td>The account is not active.</td><td>Sign out.</td></tr></tbody></table></div>
+<h4>How to use it</h4><ul><li>Opening the app again (launch) reconnects <code>user.basic</code>; the other permissions must be answered again.</li></ul>
+</div></details>
+<details class="endpoint" id="ep-overview" open><summary><span class="method m-get">GET</span><span class="path">/api/v1/me/permissions</span><span class="sum">Settings screen: which apps can see what</span></summary><div class="body">
+<dl class="meta"><dt>Who may call</dt><dd>The signed-in user</dd><dt>Auth</dt><dd><code>Authorization: Bearer $TOKEN</code> (the user's session token)</dd><dt>Rate limit</dt><dd>300 per minute per client address</dd></dl>
+<p><strong>Purpose.</strong> Every app where the user currently allows something (at least one <code>GRANTED</code> permission), with only the permissions still granted to the app by staff that the user allowed. An app the user fully disconnected from, or where they only refused, is not listed.</p>
+<h4>Shape</h4><pre><code>GET $GATEWAY/api/v1/me/permissions</code></pre><pre class="out"><code>[
+  {
+    "appId": "4e831b72-...",
+    "slug": "demo-ride",
+    "name": {
+      "am": "የመኪና ጥሪ",
+      "en": "Ride Hailing"
+    },
+    "status": "LIVE",
+    "permissions": [
+      {
+        "capability": "user.basic",
+        "label": "Your Adera id",
+        "purpose": "Recognise you in the app without learning who you are.",
+        "state": "GRANTED",
+        "denialCount": 0,
+        "canAskAgain": false,
+        "decidedAt": null
+      },
+      {
+        "capability": "location.fine",
+        "label": "Your precise location",
+        "purpose": "To find the closest driver to you",
+        "state": "GRANTED",
+        "denialCount": 0,
+        "canAskAgain": false,
+        "decidedAt": "2026-11-04T18:51:54.347095Z"
+      }
+    ]
+  }
+]</code></pre>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th><code>error</code></th><th>When</th><th>What to do</th></tr></thead><tbody><tr><td>403</td><td><code>account_suspended</code> / <code>account_deleted</code></td><td>The account is not active.</td><td>Sign out.</td></tr></tbody></table></div>
+<h4>How to use it</h4><ul><li>Tapping an app opens its menu sheet; Disconnect is there too.</li></ul>
+</div></details>
+<details class="endpoint" id="ep-launch" open><summary><span class="method m-post">POST</span><span class="path">/api/v1/me/apps/{app}/launch</span><span class="sum">Open a mini app: launch token, URL and states</span></summary><div class="body">
+<dl class="meta"><dt>Who may call</dt><dd>The signed-in user (the super app, when the user opens a mini app)</dd><dt>Auth</dt><dd><code>Authorization: Bearer $TOKEN</code> (the user's session token)</dd><dt>Rate limit</dt><dd><strong>60 per minute</strong> per client address</dd></dl>
+<p><strong>Purpose.</strong> Opening a mini app. <strong>No dialog.</strong> Mints the user's pseudonymous id for this app (first time), reconnects it if the user had disconnected, and returns a five-minute RS256 launch token (signed with the Adera key), the URL to load (the registered URL with <code>?launch=&lt;token&gt;</code>) and the user's current state per permission.</p>
+<div class="table-wrap"><table><thead><tr><th>Name</th><th>Where</th><th>Type</th><th>Required</th><th>Meaning</th></tr></thead><tbody><tr><td><</td><td>t</td><td>r</td><td>></td><td><</td><td>t</td><td>d</td><td>></td><td><</td><td>c</td><td>o</td><td>d</td><td>e</td><td>></td><td>a</td><td>p</td><td>p</td><td><</td><td>/</td><td>c</td><td>o</td><td>d</td><td>e</td><td>></td><td><</td><td>/</td><td>t</td><td>d</td><td>></td><td><</td><td>t</td><td>d</td><td>></td><td>p</td><td>a</td><td>t</td><td>h</td><td><</td><td>/</td><td>t</td><td>d</td><td>></td><td><</td><td>t</td><td>d</td><td>></td><td>s</td><td>t</td><td>r</td><td>i</td><td>n</td><td>g</td><td><</td><td>/</td><td>t</td><td>d</td><td>></td><td><</td><td>t</td><td>d</td><td>></td><td>y</td><td>e</td><td>s</td><td><</td><td>/</td><td>t</td><td>d</td><td>></td><td><</td><td>t</td><td>d</td><td>></td><td>T</td><td>h</td><td>e</td><td> </td><td>m</td><td>i</td><td>n</td><td>i</td><td> </td><td>a</td><td>p</td><td>p</td><td>'</td><td>s</td><td> </td><td>i</td><td>d</td><td> </td><td>(</td><td>U</td><td>U</td><td>I</td><td>D</td><td>)</td><td> </td><td>o</td><td>r</td><td> </td><td>i</td><td>t</td><td>s</td><td> </td><td>s</td><td>l</td><td>u</td><td>g</td><td> </td><td>(</td><td>f</td><td>o</td><td>r</td><td> </td><td>e</td><td>x</td><td>a</td><td>m</td><td>p</td><td>l</td><td>e</td><td> </td><td><</td><td>c</td><td>o</td><td>d</td><td>e</td><td>></td><td>d</td><td>e</td><td>m</td><td>o</td><td>-</td><td>r</td><td>i</td><td>d</td><td>e</td><td><</td><td>/</td><td>c</td><td>o</td><td>d</td><td>e</td><td>></td><td>)</td><td>.</td><td> </td><td>T</td><td>h</td><td>e</td><td> </td><td>a</td><td>p</td><td>p</td><td> </td><td>m</td><td>u</td><td>s</td><td>t</td><td> </td><td>b</td><td>e</td><td> </td><td>L</td><td>I</td><td>V</td><td>E</td><td>.</td><td><</td><td>/</td><td>t</td><td>d</td><td>></td><td><</td><td>/</td><td>t</td><td>r</td><td>></td></tr></tbody></table></div>
+<h4>Real answer (token shortened)</h4><pre><code>POST $GATEWAY/api/v1/me/apps/demo-ride/launch</code></pre><pre class="out"><code>HTTP 200
+{
+  "launchToken": "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6ImFk...",
+  "expiresInSeconds": 300,
+  "url": "https://www.zayride.com?launch=eyJhbGciOiJSUzI1NiIs...",
+  "consents": [
+    {
+      "capability": "location.fine",
+      "state": "NOT_ASKED"
+    },
+    {
+      "capability": "notify.inapp",
+      "state": "NOT_ASKED"
+    },
+    {
+      "capability": "notify.sms",
+      "state": "NOT_ASKED"
+    },
+    {
+      "capability": "pay.request",
+      "state": "NOT_ASKED"
+    },
+    {
+      "capability": "user.basic",
+      "state": "GRANTED"
+    },
+    {
+      "capability": "user.full_name",
+      "state": "NOT_ASKED"
+    }
+  ]
+}</code></pre>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th><code>error</code></th><th>When</th><th>What to do</th></tr></thead><tbody><tr><td>404</td><td><code>not_found</code></td><td>No such app, or it is a draft.</td><td>Drop the app from the list.</td></tr><tr><td>403</td><td><code>app_not_live</code></td><td>The app is paused or killed.</td><td>Show that the app is unavailable.</td></tr><tr><td>403</td><td><code>account_suspended</code> / <code>account_deleted</code></td><td>The user's account is not active.</td><td>Sign the user out.</td></tr><tr><td>503</td><td><code>service_unavailable</code></td><td>The registry or the signer could not be reached.</td><td>Retry.</td></tr></tbody></table></div>
+<h4>How to use it</h4><ul><li>Load <code>url</code> in the WebView. If it is <code>null</code> (staff registered no URL) the app cannot be opened.</li><li>Call launch every time the mini app is opened; never cache a token.</li><li>Claims of the token and how a mini app verifies it: see "Mini app developers".</li></ul>
+</div></details>
+<h2 id="notbuilt">Not built yet</h2>
+<ul><li>The bridge that calls these endpoints on the mini app's behalf (see the specification page).</li><li>Consent expiry (it does not expire) and per-payment confirmation for <code>pay.request</code> (designed when payments are built).</li></ul>
+
+<div class="pager"><a class="prev" href="concepts.html"><small>Previous</small>How it works</a><a class="next" href="bridge-spec.html"><small>Next</small>Super app: the bridge specification</a></div>
+<p class="footer">Adera guides &middot; mini-app permissions and the bridge &middot; samples captured against the running dev stack on 2026-11-04 and 2026-11-05</p>
+</main>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

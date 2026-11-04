@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Known issues and not built yet | Mini-app permissions and the bridge</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+<button id="menu-btn" type="button" aria-label="Toggle menu">Menu</button>
+<a class="brand" href="index.html">Mini-app permissions and the bridge</a>
+<span class="spacer"></span>
+<button id="theme-btn" type="button" aria-label="Toggle light or dark theme">Theme</button>
+</header>
+<div class="layout">
+<nav class="sidebar" aria-label="Pages in this guide">
+<h4>This guide</h4>
+<ul><li><a href="index.html">Overview and contents</a></li><li><a href="concepts.html">How it works</a></li><li><a href="super-app-api.html">Super app: the user API</a></li><li><a href="bridge-spec.html">Super app: the bridge specification</a></li><li><a href="mini-app.html">Mini app developers</a></li><li><a href="scenario.html">Worked example: Demo Ride</a></li><li><a href="staff.html">What staff configure</a></li><li><a href="errors.html">Error codes</a></li><li><a href="known-issues.html" class="current">Known issues and not built yet</a></li></ul>
+</nav>
+<main>
+<h1>Known issues and not built yet</h1>
+<p class="lead">What is missing and the decisions taken where the design was silent.</p>
+
+<h2 id="not-built">Not built yet</h2>
+<ul>
+<li><strong>The bridge.</strong> Specified in this guide; the page side (<code>window.adera</code>, the dialog, the settings sheet, <code>getLocation</code>) is for the super app team. Until it exists, a mini app's page cannot trigger the dialog; everything behind it works through the user API.</li>
+<li><strong>Consent expiry.</strong> Consent does not expire (the default of the design). A review-after-N-months policy is not built.</li>
+<li><strong>Payments.</strong> <code>pay.request</code> can be granted and answered like the others, but payments are not built; the design says a payment confirmation is asked every time rather than stored.</li>
+<li><strong>A street address.</strong> The platform has no postal address: <code>user.address</code> releases the saved place (country, region, city). Coordinates are never released.</li>
+<li><strong>Staff browsing of who answered what.</strong> By design only counts.</li>
+</ul>
+<h2 id="decisions">Decisions where the design was silent</h2>
+<ul>
+<li>A DRAFT or unknown app is <code>404 not_found</code>; a PAUSED or KILLED app is <code>403 app_not_live</code>; Disconnect works on any non-draft app.</li>
+<li><code>user.basic</code> is reported <code>GRANTED</code> with no row until the user disconnects; the menu cannot switch it off alone (<code>409 use_disconnect</code>); launch reconnects it.</li>
+<li>The profile call returns whatever is allowed; <code>?fields=</code> says what the partner needs, and a missing one is <code>403 consent_required</code>. Without it, a user who only opened the app gives a normal 200 with <code>granted: ["user.basic"]</code>.</li>
+<li>A notification is refused for <code>NOT_ASKED</code> too (default deny), and there is no fallback to another channel the user allowed.</li>
+<li>Callbacks are sent only to apps with a callback address; one <code>user.disconnected</code> per disconnect, not one <code>user.consent_changed</code> per permission; at least once, possibly late.</li>
+<li>The launch token is signed by the service that holds the Adera signing key; the user service decides who gets one and with which scopes.</li>
+</ul>
+<h2 id="issues">Known issues</h2>
+<ul>
+<li>The launch response lists <code>consents</code> in the registry's alphabetical order (not "user.basic first").</li>
+<li>Notification callbacks and consent callbacks share one queue; a partner address that keeps failing delays neither type beyond its own retries, but both stop after 24 hours.</li>
+</ul>
+
+<div class="pager"><a class="prev" href="errors.html"><small>Previous</small>Error codes</a><span class="placeholder"></span></div>
+<p class="footer">Adera guides &middot; mini-app permissions and the bridge &middot; samples captured against the running dev stack on 2026-11-04 and 2026-11-05</p>
+</main>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

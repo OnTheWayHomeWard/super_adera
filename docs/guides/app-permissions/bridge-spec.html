@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Super app: the bridge specification | Mini-app permissions and the bridge</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+<button id="menu-btn" type="button" aria-label="Toggle menu">Menu</button>
+<a class="brand" href="index.html">Mini-app permissions and the bridge</a>
+<span class="spacer"></span>
+<button id="theme-btn" type="button" aria-label="Toggle light or dark theme">Theme</button>
+</header>
+<div class="layout">
+<nav class="sidebar" aria-label="Pages in this guide">
+<h4>This guide</h4>
+<ul><li><a href="index.html">Overview and contents</a></li><li><a href="concepts.html">How it works</a></li><li><a href="super-app-api.html">Super app: the user API</a></li><li><a href="bridge-spec.html" class="current">Super app: the bridge specification</a></li><li><a href="mini-app.html">Mini app developers</a></li><li><a href="scenario.html">Worked example: Demo Ride</a></li><li><a href="staff.html">What staff configure</a></li><li><a href="errors.html">Error codes</a></li><li><a href="known-issues.html">Known issues and not built yet</a></li></ul>
+</nav>
+<main>
+<h1>Super app: the bridge specification</h1>
+<p class="lead">The JavaScript bridge a mini app's page calls: the four methods, the message format, the origin rule, the rules and the error codes.</p>
+
+<h2 id="overview">Overview</h2>
+<p>For the super app team. The bridge lets a mini app's page ask for permissions and a location reading. It is thin by design: every method ends in one of the user endpoints (see "Super app: the user API") and the backend decides. The text below is the specification to implement; no code in the Adera backend or in this repository implements the page side.</p>
+
+<h3 id="bridge-what">What the bridge is</h3>
+<p>The bridge is a thin layer in the super app (the Adera app, a Flutter WebView host) that lets the mini app's page ask for permissions and a location reading. It adds <strong>no authority of its own</strong>: a mini app is third-party code, so the backend decides everything (the three gates), and the bridge only drives the dialog and carries answers. Every bridge method ends in one of the user endpoints <a href="super-app-api.html">(the user API)</a>; a mini app that bypasses the bridge and calls them directly has no session of the user, and a mini app's <em>backend</em> can never trigger a dialog. This is a specification for the super app team: nothing in the Adera backend implements the page side.</p>
+<h3 id="bridge-methods">The four methods</h3>
+<p>The super app injects <code>window.adera</code> into the mini app's page (only for the registered origin, see the origin rule). Every method returns a Promise.</p>
+<div class="table-wrap"><table><thead><tr><th>Call</th><th>Resolves with</th><th>What the super app does</th></tr></thead><tbody>
+<tr><td><code>adera.requestPermission(capability)</code></td><td><code>"granted"</code>, <code>"denied"</code>, <code>"blocked"</code> or <code>"not_available"</code></td><td>One permission per call; there is no batch call. Calls <code>POST /api/v1/me/apps/{app}/permissions/{capability}/request</code>. If the answer has a <code>prompt</code>, shows the dialog with <code>prompt.label</code> and <code>prompt.purpose</code> <strong>verbatim</strong> and Allow / Deny, then calls <code>PUT .../answer</code> with the <code>promptId</code> and resolves with the new state. If the state is <code>GRANTED</code>, <code>BLOCKED</code> or <code>NOT_AVAILABLE</code> there is no dialog and it resolves at once. A dialog dismissed without Allow or Deny (back button) answers nothing: the Promise rejects with <code>dialog_dismissed</code> and the prompt expires by itself.</td></tr>
+<tr><td><code>adera.getPermission(capability)</code></td><td>The same four values plus <code>"not_asked"</code></td><td>Never shows a dialog. Calls <code>GET .../permissions</code> and picks the capability (a capability that is not in the list resolves <code>"not_available"</code>). Use it to decide whether to explain first or to show a different screen.</td></tr>
+<tr><td><code>adera.openPermissionSettings()</code></td><td><code>{"permissions": {"location.fine": "granted", ...}}</code> when the user closes the sheet</td><td>Opens the app's permission sheet from the super app menu (one switch per permission, <code>GET .../permissions</code>, switches call <code>PUT .../permissions/{capability}</code>, the only way out of <code>blocked</code>) and resolves with the states at the moment the sheet closes.</td></tr>
+<tr><td><code>adera.getLocation(options?)</code></td><td>Success: <code>{"state": "granted", "location": {"latitude": 9.0054, "longitude": 38.7636, "accuracyMeters": 12, "at": "2026-11-04T09:12:44Z"}}</code>. Not allowed: <code>{"state": "denied"}</code>, <code>"blocked"</code>, <code>"not_asked"</code> or <code>"not_available"</code></td><td>Never shows a dialog by itself. With <code>{"precision": "fine"}</code> (default) it needs the permission <code>location.fine</code>; with <code>{"precision": "coarse"}</code> it needs <code>location.coarse</code> and returns only <code>{"place": {"countryCode": "ET", "region": "Addis Ababa", "city": "Addis Ababa"}}</code>, never coordinates. It returns a reading only if <strong>both</strong> our consent and the phone's own location permission are yes, and otherwise says <code>denied</code> or <code>blocked</code> <strong>without telling which of the two refused</strong> (so the mini app cannot probe the phone). The reading comes from the phone; Adera never stores a position. The phone's own dialog is the system's and comes after ours (the first time).</td></tr>
+</tbody></table></div>
+<p>State names on the bridge are the lower-case form of the API's states: <code>NOT_ASKED</code> becomes <code>not_asked</code>, and so on; <code>NOT_AVAILABLE</code> (staff did not grant the capability to the app) becomes <code>not_available</code>.</p>
+<h3 id="bridge-format">Message format</h3>
+<p>All messages are JSON objects with the marker <code>"adera": 1</code> (the protocol version). A request has a unique <code>id</code> chosen by the mini app (a string of at most 64 characters), a <code>method</code> and <code>params</code>. The answer repeats the <code>id</code> and has <code>ok</code> true with a <code>result</code>, or <code>ok</code> false with an <code>error</code> object (<code>code</code>, <code>message</code>). A message that is not an object, has no <code>"adera": 1</code>, has an unknown <code>method</code> or a <code>params</code> over 1 KB is answered with an error and nothing else happens.</p>
+<pre><code>// mini app -&gt; super app
+{"adera": 1, "id": "m_17", "method": "requestPermission", "params": {"capability": "location.fine"}}
+
+// super app -&gt; mini app, success
+{"adera": 1, "id": "m_17", "ok": true, "result": {"state": "granted"}}
+
+// super app -&gt; mini app, failure
+{"adera": 1, "id": "m_17", "ok": false, "error": {"code": "busy", "message": "A permission dialog is already open."}}</code></pre>
+<p><strong>Transport.</strong> In a native WebView (the Flutter app) the page posts the JSON string to a JavaScript channel named <code>AderaBridge</code> and the super app answers by calling <code>window.adera._receive(json)</code>; <code>window.adera</code> wraps this in the four Promise methods so mini app code never touches the channel. In a web-hosted super app the page uses <code>window.parent.postMessage(message, superAppOrigin)</code> and the super app answers with <code>event.source.postMessage(answer, miniAppOrigin)</code>, never with <code>"*"</code>.</p>
+<h3 id="bridge-origin">The origin rule</h3>
+<ul>
+<li>The bridge is injected <strong>only</strong> for pages whose origin (scheme, host and port) is the origin of the mini app's registered URL (<code>entryUrl</code>) or one of its <code>allowedOrigins</code>, both set by staff in the backoffice. Navigating to any other origin removes the bridge before the page loads; a page of another origin never sees <code>window.adera</code>.</li>
+<li>Every message is checked again: in a WebView the host compares the origin of the frame that sent it, and a message from a frame whose origin is not in the list (for example an embedded advertisement) is ignored with no answer. Answers go only to the registered origin.</li>
+<li>The super app sends the user's session to the backend itself. The mini app never receives the session token, the user's id or the launch scopes through the bridge.</li>
+</ul>
+<h3 id="bridge-rules">Rules the super app must keep</h3>
+<ul>
+<li><strong>One dialog at a time.</strong> A second <code>requestPermission</code> while a dialog is open is rejected with <code>busy</code>; there is no queue and no batch.</li>
+<li><strong>The text is ours.</strong> The dialog shows only <code>label</code> and <code>purpose</code> from the server, as plain text. The mini app cannot change it, add to it or style it.</li>
+<li><strong>The server decides.</strong> Never answer from a cached state: <code>requestPermission</code> always calls the server first (the state may have changed in the menu or been blocked), and <code>getLocation</code> checks the consent on the server before it reads the phone.</li>
+<li>Show no dialog at launch. A mini app opening is <code>POST .../launch</code> only.</li>
+<li>Limit calls: at most 30 <code>requestPermission</code> per minute per mini app (the gateway also limits that endpoint to 30 per minute per address). Beyond it the bridge rejects with <code>too_many_requests</code>.</li>
+</ul>
+<h3 id="bridge-errors">Bridge error codes</h3>
+<div class="table-wrap"><table><thead><tr><th><code>error.code</code></th><th>When</th><th>Caused by (API answer)</th></tr></thead><tbody>
+<tr><td><code>invalid_message</code></td><td>Not a JSON object, no <code>"adera": 1</code>, missing or too long <code>id</code>, params over 1 KB</td><td>(the bridge)</td></tr>
+<tr><td><code>unknown_method</code></td><td>A method other than the four</td><td>(the bridge)</td></tr>
+<tr><td><code>invalid_params</code></td><td>The capability is not a key like <code>location.fine</code></td><td>400 <code>validation_failed</code></td></tr>
+<tr><td><code>busy</code></td><td>A permission dialog is already open</td><td>(the bridge)</td></tr>
+<tr><td><code>dialog_dismissed</code></td><td>The user closed the dialog without Allow or Deny</td><td>(the bridge; nothing was answered)</td></tr>
+<tr><td><code>prompt_expired</code></td><td>The user answered after more than 5 minutes</td><td>409 <code>prompt_expired</code>; the mini app may call <code>requestPermission</code> again</td></tr>
+<tr><td><code>app_not_live</code></td><td>The mini app was paused or killed while open</td><td>403 <code>app_not_live</code></td></tr>
+<tr><td><code>session_expired</code></td><td>The user's session is no longer valid</td><td>401; the super app signs the user in again, then the mini app may retry</td></tr>
+<tr><td><code>account_not_active</code></td><td>The account was suspended or deleted</td><td>403 <code>account_suspended</code> / <code>account_deleted</code></td></tr>
+<tr><td><code>too_many_requests</code></td><td>Over the call limit</td><td>(the bridge) or 429 from the gateway</td></tr>
+<tr><td><code>service_unavailable</code></td><td>The backend could not be reached</td><td>503 or no network; retry later</td></tr>
+<tr><td><code>internal_error</code></td><td>Anything else; never carries details of the user or the phone</td><td>5xx / unexpected</td></tr>
+</tbody></table></div>
+<p>Not errors, because they are answers: <code>denied</code>, <code>blocked</code>, <code>not_asked</code> and <code>not_available</code>. The API's own error bodies are listed in <a href="errors.html">Error codes</a>.</p>
+<div class="callout warn"><span class="label">Status</span><p>This specification is written, but the bridge is not built (the super app is a separate project). Everything behind it exists and is captured against the running stack: the endpoints it calls, the launch token and the backend profile call. The samples in this specification (the messages above) are protocol examples, not captures.</p></div>
+
+<h2 id="mapping">Which endpoint each method calls</h2>
+<div class="table-wrap"><table><thead><tr><th>Bridge call</th><th>Endpoint(s)</th></tr></thead><tbody>
+<tr><td><code>requestPermission</code></td><td><a href="super-app-api.html#ep-request">request</a>, then <a href="super-app-api.html#ep-answer">answer</a> when a dialog was shown</td></tr>
+<tr><td><code>getPermission</code></td><td><a href="super-app-api.html#ep-list">list</a></td></tr>
+<tr><td><code>openPermissionSettings</code></td><td><a href="super-app-api.html#ep-list">list</a>, <a href="super-app-api.html#ep-menu">menu</a> (per switch), <a href="super-app-api.html#ep-disconnect">disconnect</a></td></tr>
+<tr><td><code>getLocation</code></td><td><a href="super-app-api.html#ep-list">list</a> (consent check), then the phone's location API</td></tr>
+<tr><td>(opening the app)</td><td><a href="super-app-api.html#ep-launch">launch</a>: no bridge call, the token goes to the mini app in the URL</td></tr>
+</tbody></table></div>
+
+<div class="pager"><a class="prev" href="super-app-api.html"><small>Previous</small>Super app: the user API</a><a class="next" href="mini-app.html"><small>Next</small>Mini app developers</a></div>
+<p class="footer">Adera guides &middot; mini-app permissions and the bridge &middot; samples captured against the running dev stack on 2026-11-04 and 2026-11-05</p>
+</main>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

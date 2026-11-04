@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Error codes | Mini-app permissions and the bridge</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+<button id="menu-btn" type="button" aria-label="Toggle menu">Menu</button>
+<a class="brand" href="index.html">Mini-app permissions and the bridge</a>
+<span class="spacer"></span>
+<button id="theme-btn" type="button" aria-label="Toggle light or dark theme">Theme</button>
+</header>
+<div class="layout">
+<nav class="sidebar" aria-label="Pages in this guide">
+<h4>This guide</h4>
+<ul><li><a href="index.html">Overview and contents</a></li><li><a href="concepts.html">How it works</a></li><li><a href="super-app-api.html">Super app: the user API</a></li><li><a href="bridge-spec.html">Super app: the bridge specification</a></li><li><a href="mini-app.html">Mini app developers</a></li><li><a href="scenario.html">Worked example: Demo Ride</a></li><li><a href="staff.html">What staff configure</a></li><li><a href="errors.html" class="current">Error codes</a></li><li><a href="known-issues.html">Known issues and not built yet</a></li></ul>
+</nav>
+<main>
+<h1>Error codes</h1>
+<p class="lead">Every error code of the permission API and the backend profile and notification calls, with what to do.</p>
+
+<h2 id="overview">Overview</h2>
+<p>Every error of our services has the shape <code>{"error": "&lt;code&gt;", ...details}</code>; validation failures add <code>fields</code>. Errors produced by the gateway (an empty 401, a 429 page) are not in that shape. Statuses and codes below were produced by the running dev stack.</p>
+<h2 id="table">All codes</h2>
+<div class="table-wrap"><table><thead><tr><th>Status</th><th><code>error</code></th><th>When</th><th>What to do</th></tr></thead><tbody><tr><td>400</td><td><code>validation_failed</code></td><td>A field is not acceptable: <code>fields.capability</code> not a capability key, <code>fields.state</code> not GRANTED or DENIED, <code>fields.answer</code>, missing <code>fields.promptId</code>, unknown field.</td><td>Fix the call. The body names the field.</td></tr><tr><td>401</td><td><code>(empty body, gateway)</code></td><td>No session, an expired or revoked one.</td><td>Sign the user in again.</td></tr><tr><td>403</td><td><code>app_not_live</code></td><td>The mini app is paused or killed.</td><td>Show that the app is unavailable. Disconnect still works.</td></tr><tr><td>403</td><td><code>capability_not_granted</code></td><td>Staff did not grant that capability to the app (answer, menu, or a profile field).</td><td>Stop; for a mini app: ask Adera.</td></tr><tr><td>403</td><td><code>consent_required</code></td><td>The user did not allow it. Body: <code>capability</code>, <code>state</code> (<code>NOT_ASKED</code>, <code>DENIED</code>, <code>BLOCKED</code>). Seen by mini-app backends (profile, notifications).</td><td>Do not loop. Send the user to the page to ask, or go on without.</td></tr><tr><td>403</td><td><code>account_suspended / account_deleted</code></td><td>The user's account is not active.</td><td>Sign the user out.</td></tr><tr><td>403</td><td><code>wrong_environment</code></td><td>A partner key of the other environment (DEV key on prod or the reverse).</td><td>Use the key of the deployment you call.</td></tr><tr><td>404</td><td><code>not_found</code></td><td>No such app, or the app is a draft.</td><td>Drop the app.</td></tr><tr><td>409</td><td><code>prompt_invalid</code></td><td>An answer with no open prompt, another prompt, an already used one, or for another user, app or capability.</td><td>Call request again.</td></tr><tr><td>409</td><td><code>prompt_expired</code></td><td>The prompt is older than 5 minutes.</td><td>Call request again.</td></tr><tr><td>409</td><td><code>use_disconnect</code></td><td>A menu switch tried to deny <code>user.basic</code> alone.</td><td>Offer Disconnect.</td></tr><tr><td>422</td><td><code>user_unreachable</code></td><td>Partner calls: unknown alias, an alias of another app, deleted or suspended user.</td><td>Do not retry.</td></tr><tr><td>422</td><td><code>synthetic_user_not_allowed</code></td><td>A <code>u_p_test_*</code> alias on a PROD deployment.</td><td>Test users exist in DEV only.</td></tr><tr><td>429</td><td><code>(gateway)</code></td><td>Over the gateway limit (30 per minute for the dialog request, 60 for launch, 300 for the rest).</td><td>Wait and retry.</td></tr><tr><td>503</td><td><code>service_unavailable</code></td><td>The registry or the signer could not be reached.</td><td>Retry later.</td></tr></tbody></table></div>
+<h2 id="samples">Real samples</h2>
+<pre class="out"><code>403 (the partner texts a user who refused SMS)
+HTTP 403
+{
+  "error": "consent_required",
+  "capability": "notify.sms",
+  "state": "DENIED"
+}
+
+409 (a prompt used twice)
+{
+  "error": "prompt_invalid"
+}
+
+409 (an expired prompt)
+{
+  "error": "prompt_expired"
+}
+
+403 (user.basic cannot be denied alone)
+{
+  "error": "use_disconnect"
+}
+
+403 (a paused app)
+{
+  "error": "app_not_live"
+}
+
+400
+{
+  "error": "validation_failed",
+  "fields": {
+    "state": "must be GRANTED or DENIED"
+  }
+}</code></pre>
+<h2 id="bridge">The bridge's own codes</h2>
+<p>The bridge turns these into its own <code>error.code</code> values (<code>app_not_live</code>, <code>prompt_expired</code>, <code>session_expired</code>, <code>account_not_active</code>, <code>service_unavailable</code>, ...). See the table at the end of the bridge specification page.</p>
+
+<div class="pager"><a class="prev" href="staff.html"><small>Previous</small>What staff configure</a><a class="next" href="known-issues.html"><small>Next</small>Known issues and not built yet</a></div>
+<p class="footer">Adera guides &middot; mini-app permissions and the bridge &middot; samples captured against the running dev stack on 2026-11-04 and 2026-11-05</p>
+</main>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

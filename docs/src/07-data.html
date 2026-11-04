@@ -296,7 +296,7 @@ location.fine DENIED&gt;BLOCKED DIALOG
 location.fine BLOCKED&gt;GRANTED MENU
 notify.sms NOT_ASKED&gt;GRANTED DIALOG</code></pre>
 
-Database <code>notification</code> (notification-service)</h2>
+<h2 id="db-notification">Database <code>notification</code> (notification-service)</h2>
 <p>Schema: <code>V1__send_log.sql</code> (login codes) <code>V2__partner_platform.sql</code> (partner platform) <code>V6__profile_access.sql</code> (the partner profile read log, table <code>profile_access</code> below), <code>V7__consent_callbacks.sql</code> (the <code>callback</code> table also carries consent events: <code>notification_id</code> nullable, new <code>event</code> and <code>app_id</code>) and <code>V3__environments_dev_prod.sql</code> (renames TEST/LIVE to DEV/PROD in <code>notification</code>, <code>usage_daily</code>, <code>usage_total</code> and queued callback payloads; adds the CHECK constraints). Two different jobs share this database: (1) the Kratos courier path, which logs every code delivery (verification, recovery, staff sign-in) in <code>send_log</code>; (2) the partner platform, which has templates, notifications, attempts, inbox, callbacks and usage counters. Only <code>send_log</code> has rows in the dev stack; the others show <span class="badge partial">illustrative example</span> rows.</p>
 
 <h3 id="notif-profile_access"><code>profile_access</code></h3>
