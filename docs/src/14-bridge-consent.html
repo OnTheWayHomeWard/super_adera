@@ -67,7 +67,7 @@
 <h1>14. Mini app bridge and user consent (agreed design)</h1>
 <p class="lead">How a mini app gets data about a user and from the device, how the user decides what it may have, and how we stop it from taking more. Permissions are asked <strong>at the moment of need, one at a time, like Android</strong>, not all at launch. Design agreed on 2026-11-04; implementation starts from this page. Every endpoint and sample below is the intended shape; once a step is built, its real requests and responses replace the illustrations (marked as such on each step).</p>
 
-<div class="callout warn"><span class="label">Status</span><p>Agreed, build in progress (section 10 lists the steps and which are built). Decisions taken are in section 11. Built so far: step 1 (purpose per capability), step 2 (the consent endpoints in user-service) and step 3 (counts per capability in the backoffice).</p></div>
+<div class="callout warn"><span class="label">Status</span><p>Agreed, build in progress (section 10 lists the steps and which are built). Decisions taken are in section 11. Built so far: step 1 (purpose per capability), step 2 (the consent endpoints in user-service) and step 3 (counts per capability in the backoffice) and step 4 (notify gate, mute as consent).</p></div>
 
 <section><h2 id="short">1. The short answer</h2>
 <ul>
@@ -572,7 +572,57 @@ notify.sms NOT_ASKED&gt;GRANTED DIALOG</code></pre>
 <li><strong>Revoke is immediate.</strong> The gate reads the consent row on each call. There is no cached "allowed".</li>
 <li><strong>Tell the partner.</strong> When consent changes, we send a signed callback (the retry-for-24-hours mechanism already exists): <code>user.consent_changed</code> with the alias, the capability and the new state, and <code>user.disconnected</code> on disconnect. A partner that kept the user's name is expected to delete it on <code>user.disconnected</code>. We can require this in the partner terms, but we cannot enforce it technically once the data has left.</li>
 <li><strong>Suspended or deleted users</strong> fail gate 2 for everything.</li>
-</ul></section>
+</ul><h3>Built (step 4): the notify gate and mute as consent <span class="badge built">real, built 2026-11-04</span></h3>
+<p>notification-service now asks user-service (internal delivery context, field <code>consents</code>) for the user's answer per notify capability on every partner request, and again right before delivery. Only <code>GRANTED</code> passes. Real captures from the dev stack through the gateway with the seeded partner of <code>demo-food</code>/<code>demo-ride</code> and seeded users:</p>
+<pre><code>POST /v1/notifications   (signed, ADERA-SIG-1)   user: Demo Fully, who refused SMS for demo-food
+
+403  {
+  "error": "consent_required",
+  "capability": "notify.sms",
+  "state": "DENIED"
+}
+
+POST /v1/notifications   user: Demo Blank, who was never asked by demo-ride
+
+403  {
+  "error": "consent_required",
+  "capability": "notify.sms",
+  "state": "NOT_ASKED"
+}
+
+Sandbox users (DEV only) show the other states:
+u_p_test_noconsent -&gt; 403 {"error": "consent_required", "capability": "notify.sms", "state": "NOT_ASKED"}
+u_p_test_denied    -&gt; 403 {"error": "consent_required", "capability": "notify.sms", "state": "DENIED"}
+u_p_test_blocked   -&gt; 403 {"error": "consent_required", "capability": "notify.sms", "state": "BLOCKED"}
+u_p_test_muted     -&gt; 200 status SUPPRESSED (unchanged: kept as before)</code></pre>
+<p>The old mute endpoints keep working and are views of the same data (real capture, Demo Fully; the second call switches SMS back on):</p>
+<pre><code>GET /api/v1/me/apps/{appId}/preferences
+
+200  {
+  "muteInApp": true,
+  "muteSms": true,
+  "muteEmail": true,
+  "states": {
+    "notify.inapp": "DENIED",
+    "notify.sms": "DENIED",
+    "notify.email": "DENIED"
+  }
+}
+
+PUT /api/v1/me/apps/{appId}/preferences   {"muteSms": false}
+
+200  {
+  "muteInApp": true,
+  "muteSms": false,
+  "muteEmail": true,
+  "states": {
+    "notify.inapp": "DENIED",
+    "notify.sms": "GRANTED",
+    "notify.email": "DENIED"
+  }
+}</code></pre>
+<p>Migration <code>V4__mute_is_consent.sql</code> (user-service) converted every existing mute into a <code>DENIED</code> consent with source <code>MUTE</code> and a proof row, then dropped <code>app_notification_preference</code>. In the dev stack it converted 11 mutes (4 in-app, 3 SMS, 4 email). A migration test runs it on a fresh Postgres.</p>
+</section>
 
 <section><h2 id="threats">9. What this does and does not protect</h2>
 <div class="table-wrap"><table>
@@ -592,7 +642,7 @@ notify.sms NOT_ASKED&gt;GRANTED DIALOG</code></pre>
 <li><strong>Built 2026-11-04.</strong> Registry: <code>purpose</code> per granted capability, with backoffice field and audit.</li>
 <li><strong>Built 2026-11-04.</strong> user-service: <code>app_consent</code>, <code>consent_event</code>, the request, answer, menu, list and disconnect endpoints with the state rules of section 5. Tests, docs.</li>
 <li><strong>Built 2026-11-04.</strong> Backoffice: counts per capability on the app page.</li>
-<li>notify.* gate in the notification path, and mute converted to consent.</li>
+<li><strong>Built 2026-11-04.</strong> notify.* gate in the notification path, and mute converted to consent.</li>
 <li>Launch token and the partner <code>/profile</code> endpoint.</li>
 <li>Callbacks <code>user.consent_changed</code> and <code>user.disconnected</code>.</li>
 <li>The bridge specification for the super app team: method list, message format, origin rule, error codes. Written last, because it is a thin layer over steps 1 to 6.</li>
@@ -622,6 +672,11 @@ notify.sms NOT_ASKED&gt;GRANTED DIALOG</code></pre>
 <li><strong>Step 2, ticket.</strong> <code>pr_</code> plus 24 random hex characters, valid 5 minutes, single use, replaced by the next request. Never-asked permissions stay <code>NOT_ASKED</code> after Disconnect; a <code>BLOCKED</code> one becomes <code>DENIED</code> with count 0 (the page says "everything to DENIED, count 0").</li>
 <li><strong>Step 2, rate limit.</strong> 30 per minute per address for the dialog request route, matched in the gateway by a regular expression on the path (APISIX does not match a wildcard in the middle of a path); everything else under <code>/api/v1/me</code> keeps 300 per minute.</li>
 <li><strong>Step 3, who serves the counts.</strong> user-service, because it owns the consent data; it asks registry-service (existing internal call) which capabilities the app has. The gateway sends only this one path to user-service (route <code>admin-app-permissions</code>, matched by regular expression). Any staff role may read it (counts are not personal data). <code>user.basic</code> counts users with a pseudonymous id for the app: granted = not disconnected, denied = disconnected. Deleted users are not counted, suspended ones are; capabilities staff removed are not listed. The backoffice shows the numbers in a <em>Users</em> column of the Capabilities tab.</li>
+<li><strong>Step 4, the gate.</strong> A partner request is refused with <code>403 consent_required</code> (body: <code>capability</code>, <code>state</code>) when the user's answer for the notify capability of the channel Adera picked is not <code>GRANTED</code>; <code>NOT_ASKED</code> is refused too (the page: DENIED, BLOCKED and NOT_ASKED all refuse). The capability gate (<code>403 capability_not_granted</code>) still comes first. "Recorded the way other refusals are": like the other 4xx refusals it is the HTTP answer to the partner and leaves no notification row and no quota use. The channel is still chosen as before (SMS if the user has a phone and the app has <code>notify.sms</code>, else email, in-app for in-app templates) and <strong>there is no fallback to another channel the user allowed</strong>, keeping the old mute behaviour.</li>
+<li><strong>Step 4, delivery time.</strong> Consent is re-read right before every send: a user who switched the channel off after the request was accepted ends <code>SUPPRESSED</code> with reason <code>recipient_opted_out</code> (the only way SUPPRESSED by user choice still happens).</li>
+<li><strong>Step 4, mute endpoints.</strong> <code>GET/PUT /api/v1/me/apps/{appId}/preferences</code> keep their shape and gain <code>states</code>. <code>muteX</code> is true for DENIED and BLOCKED; <code>muteX: true</code> sets DENIED (count 0) and <code>false</code> sets GRANTED (the menu switch, source MENU), also for a channel staff did not grant (the answer stays inert). A user who never answered shows "not muted" but is refused until they allow it: default-deny. This is a breaking change for old clients that assumed muted = false means messages flow; documented, no real users.</li>
+<li><strong>Step 4, synthetic users.</strong> <code>u_p_test_ok</code>, <code>_unreachable</code> and <code>_muted</code> behave as before. Three new ones, <code>u_p_test_noconsent</code>, <code>_denied</code> and <code>_blocked</code>, show the consent gate in DEV.</li>
+<li><strong>Step 4, seed data.</strong> A seeded user allows every channel of the apps they use except the ones they muted (<code>seed_scenarios.py</code>, step <code>notifyconsent</code>); the e2e scripts grant consent through the same endpoints before sending.</li>
 </ul></section>
 
 <div class="pager"><a class="prev" href="13-sample-data.html"><small>Previous</small>13. Sample data</a><a class="next" href="../index.html"><small>Back to</small>Home / contents</a></div>

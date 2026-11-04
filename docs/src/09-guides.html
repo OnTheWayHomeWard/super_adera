@@ -408,7 +408,7 @@ curl -sS -X PUT $BASE/api/v1/me/notifications/read-all -H "Authorization: Bearer
   }
 ]</code></pre>
 <p><code>data</code> is a JSON object (the key-values the partner sent; since 2026-10-26, before it was a string); <code>notificationId</code> is the id the push carries, so a push can be matched to its inbox row. <code>readAt</code> is <code>null</code> until read. Details and errors: <a href="08a-user-api.html">user API</a>.</p></section>
-<section><h2 id="mute-app">7. Mute an app</h2><p>A user can switch off SMS, email or in-app messages <em>per app</em>. The partner is not told: its requests are answered <code>200</code> with status <code>SUPPRESSED</code> (reason <code>recipient_opted_out</code>).</p>
+<section><h2 id="mute-app">7. Mute an app</h2><p>A user can switch off SMS, email or in-app messages <em>per app</em>. Since 2026-11-04 the switches are the user's <strong>notification consent</strong> (<code>notify.sms</code>, <code>notify.email</code>, <code>notify.inapp</code>, section 14): muted means DENIED. The partner's request is then refused with <code>403 consent_required</code> (<code>state: DENIED</code>), nothing is sent; a message queued before the user switched off ends <code>SUPPRESSED</code> (<code>recipient_opted_out</code>). A user who never answered has <code>NOT_ASKED</code>, which is also refused.</p>
 <pre><code>curl -sS -X PUT $BASE/api/v1/me/apps/$APP/preferences -H "Authorization: Bearer $USER_TOKEN" -H "Content-Type: application/json" -d '{"muteSms":true}'</code></pre>
 <pre class="out"><code>{
   "muteInApp": false,
@@ -432,7 +432,7 @@ X-Adera-Signature: nWjePDcUU2k2Htyn0OQn0xpy... (base64 RS256 signature)
   "createdAt": "2026-10-25T06:07:26.409313Z",
   "expiresAt": "2026-10-25T07:07:26.356333Z",
   "completedAt": "2026-10-25T06:07:26.409313Z"
-}</code></pre><p>Unmute with <code>{"muteSms":false}</code>. The app id is checked against the registry: an unknown or non-LIVE app is <code>404 not_found</code> (<code>503 service_unavailable</code> if the registry is down).</p></section>
+}</code></pre><p>The response also has <code>states</code> (the real consent state per channel: <code>NOT_ASKED</code>, <code>GRANTED</code>, <code>DENIED</code>, <code>BLOCKED</code>); <code>muteX</code> is true for DENIED and BLOCKED. Unmute with <code>{"muteSms":false}</code> (= switching the permission on, GRANTED). The app id is checked against the registry: an unknown or non-LIVE app is <code>404 not_found</code> (<code>503 service_unavailable</code> if the registry is down).</p></section>
 <section><h2 id="revoke-key">8. Revoke a key</h2><p>Do this first when a partner key may have leaked, then rotate: register a new key, let the partner switch, revoke the old one.</p>
 <pre><code>adm $BASE/admin/api/v1/apps/$APP/keys | jq '.[] | {keyId, environment, status, label}'   # find the key id
 adm -X DELETE $BASE/admin/api/v1/apps/$APP/keys/$KEY_ID | jq '{keyId, status, revokedAt}'</code></pre>
@@ -527,7 +527,7 @@ adm "$BASE/admin/api/v1/notification/notifications/$NOTIFICATION_ID" | jq .</cod
 <tr><td><code>RETRYING</code>, <code>reason</code> like <code>twilio_http_503</code>, <code>user_directory_unavailable</code></td><td>Temporary failure; backoff 30 s doubling to 1 h</td><td>Wait; check the provider or user-service. Gives up after 8 attempts or at <code>expiresAt</code>.</td></tr>
 <tr><td><code>FAILED</code> with <code>twilio_http_400</code>-style code</td><td>Permanent provider refusal (bad or unreachable number, unverified sender; Ethiopian numbers from the US sender: Twilio 21612)</td><td>Fix the number or provider setup; not retried.</td></tr>
 <tr><td><code>UNREACHABLE</code> (<code>user_unreachable</code>, <code>no_phone</code>, <code>no_email</code>)</td><td>User deleted or suspended, or no contact for the channel</td><td>Nothing to retry.</td></tr>
-<tr><td><code>SUPPRESSED</code> <code>recipient_opted_out</code></td><td>The user muted this app and channel</td><td>Respect it.</td></tr>
+<tr><td><code>SUPPRESSED</code> <code>recipient_opted_out</code></td><td>The user switched this channel off after the message was accepted</td><td>Respect it.</td></tr>
 <tr><td><code>SUPPRESSED</code> <code>not_allowlisted</code></td><td>Real provider with <code>NOTIFY_LIVE_ALLOWLIST</code> set, recipient not on it</td><td>Intended during first real tests.</td></tr>
 <tr><td><code>EXPIRED</code></td><td><code>ttlSeconds</code> passed while retrying</td><td>Raise <code>ttlSeconds</code> or fix the cause.</td></tr>
 <tr><td><code>SENT</code> but the user saw nothing</td><td>The provider accepted it; handset delivery is not tracked. For IN_APP, check the inbox (always written) and devices (<code>GET /api/v1/me/devices</code>); push may have had no active token (attempt reason <code>no_devices</code>)</td><td>Check the number, device tokens, and the provider's own dashboard.</td></tr>

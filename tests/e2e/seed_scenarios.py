@@ -441,7 +441,7 @@ def alias(k, slug):
 def seed_user(u):
     k = u["k"]
     user_id = ensure_user(u)
-    steps = [s for s in ("profile", "devices", "aliases", "prefs", "consent", "reviews", "reports") if not done(f"user:{k}:{s}")]
+    steps = [s for s in ("profile", "devices", "aliases", "prefs", "notifyconsent", "consent", "reviews", "reports") if not done(f"user:{k}:{s}")]
     if not steps:
         return
     needs_token = [s for s in steps if s not in ("aliases",)]
@@ -499,6 +499,16 @@ def seed_user(u):
             st, r = ucall(k, "PUT", f"/api/v1/me/apps/{S['apps'][slug]['id']}/preferences", prefs)
             ok(f"{k} mute preferences for {slug} {prefs}", st == 200, st if st != 200 else "")
         mark(f"user:{k}:prefs")
+    if "notifyconsent" in steps and needs_token:
+        # Notification consent replaces mute: a message is delivered only if the user allowed the channel. A seeded user allows every
+        # channel of the apps they use, except the ones they muted above (muted = refused), through the same switches the app's menu has.
+        for slug in u["apps"]:
+            prefs = {"muteInApp": False, "muteSms": False, "muteEmail": False, **u["mute"].get(slug, {})}
+            st, r = ucall(k, "PUT", f"/api/v1/me/apps/{S['apps'][slug]['id']}/preferences", prefs)
+            if st == 404:
+                continue   # a PAUSED or KILLED app is not reachable for users
+            ok(f"{k} notification consent for {slug}: {', '.join(c for c, v in r.get('states', {}).items() if v == 'GRANTED') or 'none'} allowed", st == 200, st if st != 200 else "")
+        mark(f"user:{k}:notifyconsent")
     if "consent" in steps and needs_token:
         for slug, caps in CONSENT.get(k, {}).items():
             for cap, outcome in caps.items():
@@ -991,11 +1001,11 @@ def stage_partner():
     send(F, "seed-food-inapp-6", "u03", "seed-order-update", {"name": "Hana", "eta": "8 min"}, final="SENT")
     send(F, "seed-food-inapp-7", "u05", "seed-order-update", {"name": "Mulu", "eta": "3 min"}, final="SENT")
     send(F, "seed-food-inapp-8", "u06", "seed-order-update", {"name": "Selam", "eta": "4 min"}, final="SENT")  # its only device was deactivated
-    send(F, "seed-food-sms-muted", "u05", "seed-order-confirmed", {"name": "Mulu", "orderNo": "A-1005"}, expect=(200, "SUPPRESSED"), callbackUrl=hb + "/hook")
-    send(F, "seed-food-inapp-muted", "u04", "seed-order-update", {"name": "Dawit", "eta": "6 min"}, expect=(200, "SUPPRESSED"))
-    send(F, "seed-food-email-muted", "u09", "seed-order-confirmed", {"name": "Tigist", "orderNo": "A-1009"}, expect=(200, "SUPPRESSED"))
-    send(F, "seed-food-inapp-allmuted", "u15", "seed-order-update", {"name": "Fully", "eta": "1 min"}, expect=(200, "SUPPRESSED"))
-    send(F, "seed-food-inapp-u15-sms", "u15", "seed-order-confirmed", {"name": "Fully", "orderNo": "A-1015"}, expect=(200, "SUPPRESSED"))
+    send(F, "seed-food-sms-muted", "u05", "seed-order-confirmed", {"name": "Mulu", "orderNo": "A-1005"}, expect=(403, "consent_required"), callbackUrl=hb + "/hook")
+    send(F, "seed-food-inapp-muted", "u04", "seed-order-update", {"name": "Dawit", "eta": "6 min"}, expect=(403, "consent_required"))
+    send(F, "seed-food-email-muted", "u09", "seed-order-confirmed", {"name": "Tigist", "orderNo": "A-1009"}, expect=(403, "consent_required"))
+    send(F, "seed-food-inapp-allmuted", "u15", "seed-order-update", {"name": "Fully", "eta": "1 min"}, expect=(403, "consent_required"))
+    send(F, "seed-food-inapp-u15-sms", "u15", "seed-order-confirmed", {"name": "Fully", "orderNo": "A-1015"}, expect=(403, "consent_required"))
 
     out(" -- synthetic users (DEV only)")
     send(F, "seed-food-synth-ok", "u_p_test_ok", "seed-order-confirmed", {"name": "Test", "orderNo": "T-1"}, final="SENT")
@@ -1047,7 +1057,7 @@ def stage_partner():
     send(RD, "seed-ride-sms-2", "u02", "seed-ride-arriving", {"driver": "Tesfaye", "plate": "AA-9999"}, final="SENT")
     send(RD, "seed-ride-inapp-1", "u01", "seed-ride-receipt", {"fare": "180"}, final="SENT")
     send(RD, "seed-ride-inapp-2", "u07", "seed-ride-receipt", {"fare": "95"}, final="SENT")
-    send(RD, "seed-ride-sms-muted", "u06", "seed-ride-arriving", {"driver": "Girma", "plate": "AA-777"}, expect=(200, "SUPPRESSED"))
+    send(RD, "seed-ride-sms-muted", "u06", "seed-ride-arriving", {"driver": "Girma", "plate": "AA-777"}, expect=(403, "consent_required"))
     send(RD, "seed-ride-email-denied", "u03", "seed-ride-arriving", {"driver": "Girma", "plate": "AA-777"}, expect=(403, "capability_not_granted"))  # email-only user, notify.email is SUSPENDED
     send(RD, "seed-ride-tpl-expired", "u01", "seed-ride-old-offer", {"name": "Abebe"}, expect=(422, "template_expired"))
     code, r = pcall(RD, "POST", "/v1/notifications", {"externalId": "seed-ride-prod", "userId": alias("u01", RD), "templateId": TPL[(RD, "seed-ride-receipt")], "params": {"fare": "1"}}, env="prod")
@@ -1340,7 +1350,7 @@ def stage_counts():
     out("   with avatar:      " + psql("users", f"SELECT count(*) FROM app_user WHERE id IN ({ids_u}) AND avatar_image_id IS NOT NULL"))
     out("   devices:          " + psql("users", f"SELECT 'active=' || count(*) FILTER (WHERE is_active) || ' inactive=' || count(*) FILTER (WHERE NOT is_active) FROM device WHERE user_id IN ({ids_u})"))
     out("   aliases:          " + psql("users", f"SELECT count(*) || ' (' || count(DISTINCT app_id) || ' apps)' FROM app_user_alias WHERE user_id IN ({ids_u})"))
-    out("   mute prefs:       " + psql("users", f"SELECT count(*) FROM app_notification_preference WHERE user_id IN ({ids_u})"))
+    out("   notify refusals (old mutes): " + psql("users", f"SELECT count(*) FROM app_consent WHERE capability LIKE 'notify.%' AND state IN ('DENIED','BLOCKED') AND user_id IN ({ids_u})"))
     out("   reviews per app:  " + psql("registry", f"SELECT string_agg(a.slug || '=' || n::text || '(' || v::text || ' visible)', ', ') FROM (SELECT app_id, count(*) n, count(*) FILTER (WHERE status='VISIBLE') v FROM app_review WHERE user_id IN ({ids_u}) GROUP BY app_id) r JOIN mini_app a ON a.id = r.app_id"))
     out("   reports per app:  " + psql("registry", f"SELECT string_agg(a.slug || ' ' || s, '; ') FROM (SELECT app_id, string_agg(status || '=' || n::text, ',') s FROM (SELECT app_id, status, count(*) n FROM app_report WHERE user_id IN ({ids_u}) GROUP BY app_id, status) x GROUP BY app_id) r JOIN mini_app a ON a.id = r.app_id"))
     out("   partner keys:     " + psql("registry", f"SELECT string_agg(a.slug || ' ' || k.environment || ':' || k.status, ', ') FROM partner_key k JOIN mini_app a ON a.id = k.app_id WHERE k.label LIKE '{LABEL}%'"))
@@ -1427,7 +1437,7 @@ def stage_remove():
     for k, i in user_ids.items():
         staff.call("DELETE", f"{KRATOS_ADMIN}/admin/identities/{i}")
     if ids:
-        for t in ("device", "app_user_alias", "app_notification_preference"):
+        for t in ("device", "app_user_alias", "app_consent", "consent_event"):
             psql("users", f"DELETE FROM {t} WHERE user_id IN ({in_list(ids)})")
         psql("users", f"DELETE FROM app_user WHERE id IN ({in_list(ids)})")
     # staff members
@@ -1525,7 +1535,7 @@ def stage_wipe_users():
         out(f"  object storage cleanup skipped: {e}")
     for i in ids:
         staff.call("DELETE", f"{KRATOS_ADMIN}/admin/identities/{i}")
-    for t in ("device", "app_user_alias", "app_notification_preference"):
+    for t in ("device", "app_user_alias", "app_consent", "consent_event"):
         psql("users", f"DELETE FROM {t} WHERE user_id IN ({L})")
     psql("users", f"DELETE FROM app_user WHERE id IN ({L})")
     if addresses:

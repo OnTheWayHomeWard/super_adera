@@ -167,6 +167,19 @@ try:
     # the gateway reports our real address: allow it
     admin("PUT", f"/apps/{app_id}/environments/DEV", {"allowedCidrs": ["127.0.0.1", "172.16.0.0/12", "192.168.0.0/16", "10.0.0.0/8"]})
     time.sleep(16)  # notification-service caches app config for 15 seconds
+    # the user's own yes (gate 2): until the user allowed the channel, nothing is sent and the partner is told which permission is missing
+    code, r, *_ = partner_call(key_id, "POST", "/v1/notifications", {**msg, "externalId": "job-noconsent"})
+    ok("user never answered -> 403 consent_required (notify.sms, NOT_ASKED)", code == 403 and r.get("error") == "consent_required" and r.get("capability") == "notify.sms" and r.get("state") == "NOT_ASKED", f"{code} {r}")
+    UH = {"Authorization": "Bearer " + session}
+    for cap in ("notify.sms", "notify.email", "notify.inapp"):
+        st, r = staff.call("PUT", f"{G}/api/v1/me/apps/{slug}/permissions/{cap}", {"state": "GRANTED"}, UH)
+        ok(f"user allows {cap} in the menu (PUT /me/apps/{{app}}/permissions/{cap})", st == 200 and r.get("state") == "GRANTED", f"{st} {r}")
+    st, r = staff.call("PUT", f"{G}/api/v1/me/apps/{app_id}/preferences", {"muteSms": True}, UH)
+    ok("the old mute switch is the same data: muteSms true -> notify.sms DENIED", st == 200 and r.get("muteSms") is True and r.get("states", {}).get("notify.sms") == "DENIED", f"{st} {r}")
+    code, r, *_ = partner_call(key_id, "POST", "/v1/notifications", {**msg, "externalId": "job-muted"})
+    ok("muted user -> 403 consent_required (notify.sms, DENIED), nothing queued", code == 403 and r.get("state") == "DENIED", f"{code} {r}")
+    st, r = staff.call("PUT", f"{G}/api/v1/me/apps/{app_id}/preferences", {"muteSms": False}, UH)
+    ok("unmuting switches the permission on again", st == 200 and r.get("muteSms") is False and r.get("states", {}).get("notify.sms") == "GRANTED", f"{st} {r}")
     code, r, h, rsig, rbody = partner_call(key_id, "POST", "/v1/notifications", msg)
     ok("signed request accepted -> 202 QUEUED", code == 202 and r.get("status") == "QUEUED", f"{code} {r}")
     ok("response carries our signature", bool(h.get("X-Adera-Signature")) and bool(h.get("X-Adera-Key-Id")))
@@ -298,7 +311,7 @@ finally:
         subprocess.run(["curl", "-s", "-X", "DELETE", f"http://127.0.0.1:4434/admin/identities/{user_id}"], capture_output=True)
         psql("users", f"DELETE FROM app_user_alias WHERE user_id='{user_id}'")
         psql("users", f"DELETE FROM device WHERE user_id='{user_id}'")
-        psql("users", f"DELETE FROM app_notification_preference WHERE user_id='{user_id}'")
+        psql("users", f"DELETE FROM consent_event WHERE user_id='{user_id}'"); psql("users", f"DELETE FROM app_consent WHERE user_id='{user_id}'")
         psql("users", f"DELETE FROM app_user WHERE id='{user_id}'")
     hook.shutdown()
     handle.close()

@@ -575,7 +575,7 @@ X-Request-Id: 47fcb5ea-a36f-496c-9e93-93efc0939797</code></pre>
 <dt>Rate limit</dt><dd>300 per 60 s per client IP (gateway route <code>me</code>); over the limit the gateway answers <code>429</code></dd>
 <dt>Implemented in</dt><dd><code>services/user-service/src/main/java/app/adera/user/alias/PreferenceController.java#get, PreferenceService.java</code></dd>
 </dl>
-<h4>Purpose</h4><p>The "3-dot menu" switches of a mini app window: mute in-app messages, SMS or email from that app. Without a stored row everything is <code>false</code>. Muted notifications are accepted from the partner but not delivered (the partner sees <code>SUPPRESSED</code>, never the reason).</p>
+<h4>Purpose</h4><p>The "3-dot menu" switches of a mini app window: mute in-app messages, SMS or email from that app. <strong>Since 2026-11-04 these are the user's notification consent, not separate data</strong> (<a href="14-bridge-consent.html">section 14</a>): <code>muteSms</code> is <code>notify.sms</code>, <code>muteInApp</code> is <code>notify.inapp</code>, <code>muteEmail</code> is <code>notify.email</code>. A switch is <code>true</code> when the user's answer is <code>DENIED</code> or <code>BLOCKED</code>. <code>states</code> carries the real state per channel; <code>NOT_ASKED</code> shows "not muted" but a partner message is still refused (<code>403 consent_required</code>) until the user allows it. The endpoints keep working for existing clients; new clients should use the permission endpoints above.</p>
 <h4>Request parameters</h4><div class="table-wrap"><table><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why it exists</th></tr></thead><tbody><tr><td><code>appId</code></td><td>path</td><td>UUID</td><td>yes</td><td>the mini app's id (not the slug)</td><td>Preferences are per user and per app. The id is not checked against the registry: any well-formed UUID answers with the defaults.</td></tr></tbody></table></div>
 <h4>Example request</h4>
 <pre><code>curl -s "$GATEWAY/api/v1/me/apps/$APP_ID/preferences" \
@@ -587,9 +587,14 @@ X-RateLimit-Remaining: 281
 X-Request-Id: 6892aa62-d319-49e6-b33f-dac252d66fc3
 
 {
-  "muteInApp": false,
-  "muteSms": false,
-  "muteEmail": false
+  "muteInApp": true,
+  "muteSms": true,
+  "muteEmail": true,
+  "states": {
+    "notify.inapp": "DENIED",
+    "notify.sms": "DENIED",
+    "notify.email": "DENIED"
+  }
 }</code></pre>
 <h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th>Error code</th><th>When it happens</th></tr></thead><tbody><tr><td><strong>404</strong></td><td><code>not_found</code></td><td>The app does not exist or is not LIVE (checked with registry-service).</td></tr><tr><td><strong>503</strong></td><td><code>service_unavailable</code></td><td>registry-service could not be reached for that check.</td></tr><tr><td><strong>400</strong></td><td><code>invalid_request</code></td><td><code>appId</code> is not a UUID (before 2026-10-26 this was Spring's default body).</td></tr><tr><td><strong>401</strong></td><td><code>(empty body)</code></td><td>Missing, expired, revoked or malformed session token. Produced by the gateway's forward-auth step (user-service <code>/internal/auth/verify</code> answers 401, the body is empty). A session of an account that has an authenticator app but only completed the first step (<code>aal1</code>) is also a 401 here.</td></tr><tr><td><strong>429</strong></td><td><code>(HTML page)</code></td><td>Gateway rate limit exceeded. The body is APISIX's HTML page, not JSON; the response carries <code>X-RateLimit-*</code> headers (see <a href="08f-operational.html#gateway-behaviour">8f</a>).</td></tr><tr><td><strong>503</strong></td><td><code>identity_service_unavailable</code></td><td>Kratos could not be reached while the gateway asked who the token belongs to (forward-auth is sent to user-service, which answers 503 instead of a misleading 401).</td></tr></tbody></table></div>
 </div></details>
@@ -604,12 +609,13 @@ X-Request-Id: 6892aa62-d319-49e6-b33f-dac252d66fc3
 <dt>Implemented in</dt><dd><code>services/user-service/src/main/java/app/adera/user/alias/PreferenceController.java#update, PreferenceService.java</code></dd>
 </dl>
 <h4>Purpose</h4><p>Partial update despite the verb: only the switches you send change; the answer is the resulting full state. Stored in <code>app_notification_preference</code> (upsert).</p>
-<h4>Request parameters</h4><div class="table-wrap"><table><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why it exists</th></tr></thead><tbody><tr><td><code>appId</code></td><td>path</td><td>UUID</td><td>yes</td><td>mini app id</td><td>Which app the choice is for.</td></tr><tr><td><code>muteInApp</code></td><td>body</td><td>boolean</td><td>no</td><td>must be a JSON boolean</td><td>Do not put this app's messages in my inbox / push.</td></tr><tr><td><code>muteSms</code></td><td>body</td><td>boolean</td><td>no</td><td>boolean</td><td>No SMS from this app.</td></tr><tr><td><code>muteEmail</code></td><td>body</td><td>boolean</td><td>no</td><td>boolean</td><td>No email from this app.</td></tr></tbody></table></div>
+<h4>Request parameters</h4><div class="table-wrap"><table><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why it exists</th></tr></thead><tbody><tr><td><code>appId</code></td><td>path</td><td>UUID</td><td>yes</td><td>mini app id</td><td>Which app the choice is for.</td></tr><tr><td><code>muteInApp</code></td><td>body</td><td>boolean</td><td>no</td><td>must be a JSON boolean</td><td>Do not put this app's messages in my inbox / push (= refuse <code>notify.inapp</code>; <code>false</code> = allow it).</td></tr><tr><td><code>muteSms</code></td><td>body</td><td>boolean</td><td>no</td><td>boolean</td><td>No SMS from this app.</td></tr><tr><td><code>muteEmail</code></td><td>body</td><td>boolean</td><td>no</td><td>boolean</td><td>No email from this app.</td></tr></tbody></table></div>
+<p class="masked">Examples captured 2026-11-04 with the seeded user Demo Fully (who had muted all three channels of demo-food); the second call switches SMS back on.</p>
 <h4>Example request</h4>
 <pre><code>curl -s -X PUT "$GATEWAY/api/v1/me/apps/$APP_ID/preferences" \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"muteSms": true}'</code></pre>
+  -d '{"muteSms": false}'</code></pre>
 <pre class="out"><code>HTTP/1.1 200 OK
 Content-Type: application/json
 X-RateLimit-Limit: 300
@@ -617,9 +623,14 @@ X-RateLimit-Remaining: 280
 X-Request-Id: 1a87700c-e7c6-4e07-8f13-a42e1d9b922a
 
 {
-  "muteInApp": false,
-  "muteSms": true,
-  "muteEmail": false
+  "muteInApp": true,
+  "muteSms": false,
+  "muteEmail": true,
+  "states": {
+    "notify.inapp": "DENIED",
+    "notify.sms": "GRANTED",
+    "notify.email": "DENIED"
+  }
 }</code></pre>
 <h4>Example: wrong type and unknown key</h4>
 <pre><code>curl -s -X PUT "$GATEWAY/api/v1/me/apps/$APP_ID/preferences" \

@@ -4,7 +4,7 @@ import java.util.List;
 import java.util.UUID;
 
 import app.adera.user.alias.AliasService;
-import app.adera.user.alias.PreferenceService;
+import app.adera.user.consent.ConsentService;
 import app.adera.user.device.Device;
 import app.adera.user.device.DeviceRepository;
 import app.adera.user.profile.AppUser;
@@ -35,23 +35,26 @@ public class InternalController {
 	public record DeactivateRequest(@NotBlank String fcmToken) {
 	}
 
-	/** How to reach one user on behalf of one app. {@code reachable=false} means deleted or suspended. */
+	/**
+	 * How to reach one user on behalf of one app. {@code reachable=false} means deleted or suspended. {@code consents} is the user's
+	 * answer per notify.* capability for this app (NOT_ASKED, GRANTED, DENIED, BLOCKED): only GRANTED lets a message through.
+	 */
 	public record DeliveryContext(UUID userId, boolean reachable, String language, String phone, String email,
-			List<String> pushTokens, PreferenceService.Preference muted) {
+			List<String> pushTokens, java.util.Map<String, String> consents) {
 	}
 
 	private final AliasService aliases;
-	private final PreferenceService preferences;
+	private final ConsentService consents;
 	private final ProfileService profiles;
 	private final UserRepository users;
 	private final DeviceRepository devices;
 	private final RegistryAppClient registry;
 
-	public InternalController(AliasService aliases, PreferenceService preferences, ProfileService profiles, UserRepository users,
+	public InternalController(AliasService aliases, ConsentService consents, ProfileService profiles, UserRepository users,
 			DeviceRepository devices, RegistryAppClient registry) {
 		this.registry = registry;
 		this.aliases = aliases;
-		this.preferences = preferences;
+		this.consents = consents;
 		this.profiles = profiles;
 		this.users = users;
 		this.devices = devices;
@@ -78,7 +81,7 @@ public class InternalController {
 		boolean reachable = user.getDeletedAt() == null && user.getStatus() == AppUser.Status.ACTIVE;
 		List<String> tokens = reachable ? devices.findByUserIdAndActiveTrueOrderByLastSeenAtDesc(userId).stream().map(Device::getFcmToken).toList() : List.of();
 		return new DeliveryContext(userId, reachable, user.getLanguage(), reachable ? user.getPhoneE164() : null,
-				reachable ? user.getEmail() : null, tokens, preferences.get(userId, appId));
+				reachable ? user.getEmail() : null, tokens, consents.notifyStates(userId, appId));
 	}
 
 	/** Firebase said this token no longer works. */

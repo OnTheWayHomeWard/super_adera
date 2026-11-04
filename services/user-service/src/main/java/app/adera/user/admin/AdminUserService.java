@@ -167,7 +167,15 @@ public class AdminUserService {
 			.param("id", id).query(String.class).list())));
 		out.put("devices", devices);
 		out.put("aliasCount", jdbc.sql("SELECT COUNT(*) FROM app_user_alias WHERE user_id = :id").param("id", id).query(Long.class).single());
-		out.put("mutePreferences", jdbc.sql("SELECT app_id, mute_in_app, mute_sms, mute_email, updated_at FROM app_notification_preference WHERE user_id = :id ORDER BY updated_at DESC")
+		// The mute switches are the notify.* consents now: one entry per app where the user refused at least one channel.
+		out.put("mutePreferences", jdbc.sql("""
+				SELECT app_id,
+				       bool_or(capability = 'notify.inapp' AND state IN ('DENIED', 'BLOCKED')) AS mute_in_app,
+				       bool_or(capability = 'notify.sms' AND state IN ('DENIED', 'BLOCKED')) AS mute_sms,
+				       bool_or(capability = 'notify.email' AND state IN ('DENIED', 'BLOCKED')) AS mute_email,
+				       max(decided_at) AS updated_at
+				FROM app_consent WHERE user_id = :id AND capability IN ('notify.inapp', 'notify.sms', 'notify.email')
+				GROUP BY app_id HAVING bool_or(state IN ('DENIED', 'BLOCKED')) ORDER BY max(decided_at) DESC""")
 			.param("id", id).query((rs, n) -> {
 				Map<String, Object> m = new LinkedHashMap<>();
 				m.put("appId", rs.getObject("app_id", UUID.class));

@@ -71,7 +71,7 @@
 <div class="table-wrap"><table><thead><tr><th>Field</th><th>Meaning</th></tr></thead><tbody>
 <tr><td><code>notificationId</code></td><td>Adera's UUID for it. Quote it to Adera support.</td></tr>
 <tr><td><code>externalId</code></td><td>Echo of yours.</td></tr>
-<tr><td><code>status</code></td><td><code>QUEUED</code> on <code>202</code>; <code>SUPPRESSED</code> on the muted-user <code>200</code>; on a replay the current status. See <a href="statuses-and-callbacks.html#statuses">statuses</a>.</td></tr>
+<tr><td><code>status</code></td><td><code>QUEUED</code> on <code>202</code>; <code>SUPPRESSED</code> when the user withdrew the channel after acceptance; on a replay the current status. See <a href="statuses-and-callbacks.html#statuses">statuses</a>.</td></tr>
 <tr><td><code>channel</code></td><td>The channel Adera chose: <code>SMS</code>, <code>EMAIL</code> or <code>IN_APP</code>. Fixed at acceptance.</td></tr>
 <tr><td><code>reason</code></td><td>Only present when there is one (for example <code>recipient_opted_out</code>).</td></tr>
 <tr><td><code>environment</code></td><td><code>DEV</code> or <code>PROD</code>: the environment that handled it.</td></tr>
@@ -85,7 +85,7 @@
 <div class="table-wrap"><table><thead><tr><th>Status</th><th><code>error</code> / meaning</th><th>When</th><th>What to do</th></tr></thead><tbody>
 <tr><td>202</td><td><code>QUEUED</code></td><td>Accepted and stored.</td><td>Wait for the callback / poll.</td></tr>
 <tr><td>200</td><td><code>replayed: true</code></td><td>Same <code>externalId</code> and the same request seen before.</td><td>Treat as success; the <code>status</code> shows where it is now.</td></tr>
-<tr><td>200</td><td><code>SUPPRESSED</code></td><td>The user muted this channel for your app.</td><td>Nothing: it is final. See <a href="limits-and-quotas.html#muted">muted users</a>.</td></tr>
+<tr><td>403</td><td><code>consent_required</code></td><td>The user did not allow this channel for your app (<code>capability</code>, <code>state</code> in the body). Not queued, no quota used.</td><td>Do not retry in a loop; see <a href="limits-and-quotas.html#muted">users who did not allow the channel</a>.</td></tr><tr><td>200</td><td><code>SUPPRESSED</code></td><td>The user switched the channel off after you were accepted (or the test user <code>u_p_test_muted</code>).</td><td>Nothing: it is final. See <a href="limits-and-quotas.html#muted">muted users</a>.</td></tr>
 <tr><td>400</td><td><code>validation_failed</code> (+ <code>fields</code>)</td><td>A field is missing, unknown or malformed.</td><td>Fix the fields named; never retry unchanged.</td></tr>
 <tr><td>400</td><td><code>invalid_request</code></td><td>Body is not valid JSON or not a JSON object.</td><td>Send a JSON object.</td></tr>
 <tr><td>401 / 403</td><td>signature, key, status, address codes</td><td>See <a href="errors.html#auth-errors">authentication errors</a>.</td><td>As listed there.</td></tr>
@@ -109,7 +109,7 @@
 <li><code>params</code> against the template (<code>422 param_invalid</code>).</li>
 <li>User: synthetic-user rule (PROD), the id resolves to an active user (<code>422 user_unreachable</code>).</li>
 <li>Channel choice and capability (<code>403 capability_not_granted</code> or <code>422 user_unreachable</code>).</li>
-<li>Mute check: a muted channel is stored as <code>SUPPRESSED</code> and answered <code>200</code> (no quota used).</li>
+<li>Consent check: the user must have allowed the chosen channel (<code>notify.sms</code>, <code>notify.email</code>, <code>notify.inapp</code>); otherwise <code>403 consent_required</code> (nothing stored, no quota used).</li>
 <li>Quota (<code>429</code>): the request is counted and stored atomically.</li>
 <li>Stored as <code>QUEUED</code>, <code>202</code>.</li>
 </ol>
@@ -131,7 +131,7 @@
 <tr><td>any (IN_APP template)</td><td><code>notify.inapp</code> DENIED</td><td><code>403 {"error":"capability_not_granted","capability":"notify.inapp"}</code></td></tr>
 </tbody></table></div>
 <ul>
-<li><strong>There is no fallback after acceptance.</strong> If the chosen channel is muted by the user, the request is <code>SUPPRESSED</code>, it is not re-sent by another channel. If an SMS fails permanently, it is <code>FAILED</code>, not re-sent by email.</li>
+<li><strong>There is no fallback after acceptance.</strong> If the user did not allow the chosen channel, the request is refused (<code>403 consent_required</code>), it is not re-sent by another channel. If an SMS fails permanently, it is <code>FAILED</code>, not re-sent by email.</li>
 <li>The contact data are read again at delivery time. If the user removed their phone or email between acceptance and delivery, the notification ends as <code>UNREACHABLE</code> with reason <code>no_phone</code> or <code>no_email</code>.</li>
 <li>Whoever needs to know which channel was used reads <code>channel</code> in the answer.</li>
 <li>If you need a message to reach a user by <em>every</em> channel, send one request per template kind with different <code>externalId</code>s.</li>

@@ -79,30 +79,28 @@
 <li>Partners cannot read their limits or their remaining quota through the API; staff can see usage per channel (<code>GET /admin/api/v1/notification/usage?appId=...</code>, fields <code>lifetime</code>, <code>today</code>, <code>distinctUsersToday</code>) and set limits (<code>PUT /admin/api/v1/apps/{id}/notification-limits/{channel}</code>, role ADMIN, audit action <code>limit.set</code>, effective within about 15 seconds). Ask staff for your numbers.</li>
 </ul>
 
-<h2 id="muted">Muted users: <code>200 SUPPRESSED</code></h2>
-<p>A user can switch off a channel for your app (in-app, SMS or email) in the Adera app. Respecting that is a product rule, not an error, so Adera does not answer with an error status:</p>
-<pre class="out"><code>HTTP 200
+<h2 id="muted">Users who did not allow the channel: <code>403 consent_required</code></h2>
+<p>Since 2026-11-04 a user decides, per channel and per app, whether you may message them: the permissions <code>notify.sms</code>, <code>notify.email</code> and <code>notify.inapp</code> (asked in the Adera app when your mini app needs them; the old "mute" switches are the same data). Adera sends only while the answer is <code>GRANTED</code>. Otherwise the request is refused and nothing is queued:</p>
+<pre class="out"><code>HTTP 403
 {
-  "notificationId": "f7dad0c0-d9db-4ed6-90a5-ccef62448016",
-  "externalId": "doc-x6",
-  "status": "SUPPRESSED",
-  "channel": "SMS",
-  "reason": "recipient_opted_out",
-  "environment": "DEV",
-  "createdAt": "2026-10-26T10:58:25.167863Z",
-  "expiresAt": "2026-10-27T10:58:25.158642Z",
-  "completedAt": "2026-10-26T10:58:25.167863Z"
+  "error": "consent_required",
+  "capability": "notify.sms",
+  "state": "DENIED"
+}</code></pre>
+<p><code>state</code> is <code>NOT_ASKED</code> (the user was never asked: your mini app's frontend must request the permission first; your backend can never open the dialog), <code>DENIED</code> (the user said no) or <code>BLOCKED</code> (the user said no twice; only the user can undo it, in the app's menu). Real capture for a user who was never asked:</p>
+<pre class="out"><code>HTTP 403
+{
+  "error": "consent_required",
+  "capability": "notify.sms",
+  "state": "NOT_ASKED"
 }</code></pre>
 <ul>
-<li>It is <strong>final</strong> and already complete: nothing is sent, ever. A callback (if you gave a <code>callbackUrl</code>) follows with <code>"status": "SUPPRESSED"</code>.</li>
-<li>It uses <strong>no quota</strong>.</li>
-<li>The <strong>channel</strong> is the one Adera would have used. A user with a phone and an email who muted <em>SMS</em> for your app is <code>SUPPRESSED</code> for <code>DIRECT</code> templates even though email is not muted: there is no fallback to another channel (verified). Muting in-app does not affect SMS (verified).</li>
-<li>The mute is also checked at delivery time, so a user who mutes your app after you sent gets a final <code>SUPPRESSED</code> via callback or poll.</li>
-<li>You cannot read the user's settings, only observe the result. Do not nag around it (for example by resending as another template kind): the user chose this.</li>
-<li>The same request again is a normal replay (<code>200</code>, <code>"replayed": true</code>, status <code>SUPPRESSED</code>).</li>
+<li>A refused request is <strong>not stored</strong> and uses <strong>no quota</strong>; nothing is sent. Do not retry it in a loop: it will answer the same until the user changes the permission. Handle it in your product ("we could not text you; allow text messages in the menu").</li>
+<li>The <strong>channel</strong> is the one Adera would have used. A user with a phone and an email who refused <em>SMS</em> for your app is refused for <code>DIRECT</code> templates even though email is allowed: there is no fallback to another channel. Refusing in-app does not affect SMS.</li>
+<li>The consent is also checked right before delivery: a user who switches the channel off after you were accepted gets a final <code>SUPPRESSED</code> (reason <code>recipient_opted_out</code>), by callback or poll. That is the only <code>SUPPRESSED</code> caused by a user's choice (it also exists for the DEV test user <code>u_p_test_muted</code>).</li>
+<li>You cannot read the user's settings, only observe the answer. Do not nag around it (for example by resending as another template kind): the user chose this.</li>
 </ul>
-<p>Where the user sets it: <code>PUT /api/v1/me/apps/{appId}/preferences</code> with for example <code>{"muteSms": true}</code>, an endpoint of the Adera app's user API (not part of the partner API).</p>
-
+<p>Where the user sets it: the permission dialog and the menu of the Adera app (<code>PUT /api/v1/me/apps/{app}/permissions/{capability}</code>, an endpoint of the user API, not part of the partner API).</p>
 <h2 id="unreachable">Unreachable users: <code>422 user_unreachable</code></h2>
 <pre class="out"><code>HTTP 422
 {"error": "user_unreachable"}</code></pre>

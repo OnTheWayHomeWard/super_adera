@@ -128,7 +128,9 @@ class InternalApiTests {
 			.andExpect(jsonPath("$.email").exists())
 			.andExpect(jsonPath("$.language").value("en"))
 			.andExpect(jsonPath("$.pushTokens[0]").value("tok-ctx-" + user))
-			.andExpect(jsonPath("$.muted.muteSms").value(false));
+			// nothing answered yet: every notify channel is NOT_ASKED, which the sender must treat as "no"
+			.andExpect(jsonPath("$.consents['notify.sms']").value("NOT_ASKED")).andExpect(jsonPath("$.consents['notify.email']").value("NOT_ASKED"))
+			.andExpect(jsonPath("$.consents['notify.inapp']").value("NOT_ASKED")).andExpect(jsonPath("$.muted").doesNotExist());
 	}
 
 	@Test
@@ -164,13 +166,17 @@ class InternalApiTests {
 		mvc.perform(asUser(put("/api/v1/me/apps/{a}/preferences", app), user).contentType(MediaType.APPLICATION_JSON).content("{\"muteInApp\":true}"))
 			.andExpect(jsonPath("$.muteInApp").value(true)).andExpect(jsonPath("$.muteSms").value(true));
 
+		// a mute IS the notify consent: DENIED for the muted channels, nothing for the others, nothing for other apps
 		mvc.perform(internal(get("/internal/users/{id}/delivery-context", user)).param("appId", app.toString()))
-			.andExpect(jsonPath("$.muted.muteSms").value(true)).andExpect(jsonPath("$.muted.muteInApp").value(true));
+			.andExpect(jsonPath("$.consents['notify.sms']").value("DENIED")).andExpect(jsonPath("$.consents['notify.inapp']").value("DENIED"))
+			.andExpect(jsonPath("$.consents['notify.email']").value("NOT_ASKED"));
 		mvc.perform(internal(get("/internal/users/{id}/delivery-context", user)).param("appId", otherApp.toString()))
-			.andExpect(jsonPath("$.muted.muteSms").value(false));
+			.andExpect(jsonPath("$.consents['notify.sms']").value("NOT_ASKED"));
 
+		// unmuting is switching the permission on
 		mvc.perform(asUser(put("/api/v1/me/apps/{a}/preferences", app), user).contentType(MediaType.APPLICATION_JSON).content("{\"muteSms\":false}"))
-			.andExpect(jsonPath("$.muteSms").value(false)).andExpect(jsonPath("$.muteInApp").value(true));
+			.andExpect(jsonPath("$.muteSms").value(false)).andExpect(jsonPath("$.muteInApp").value(true)).andExpect(jsonPath("$.states['notify.sms']").value("GRANTED"));
+		mvc.perform(internal(get("/internal/users/{id}/delivery-context", user)).param("appId", app.toString())).andExpect(jsonPath("$.consents['notify.sms']").value("GRANTED"));
 		for (String bad : new String[] { "{\"muteSms\":\"yes\"}", "{\"muteFax\":true}" }) {
 			mvc.perform(asUser(put("/api/v1/me/apps/{a}/preferences", app), user).contentType(MediaType.APPLICATION_JSON).content(bad)).andExpect(status().isBadRequest());
 		}
@@ -221,7 +227,7 @@ class InternalApiTests {
 			mvc.perform(asUser(get("/api/v1/me/apps/{a}/preferences", app), user)).andExpect(status().isNotFound()).andExpect(jsonPath("$.error").value("not_found"));
 			mvc.perform(asUser(put("/api/v1/me/apps/{a}/preferences", app), user).contentType(MediaType.APPLICATION_JSON).content("{\"muteSms\":true}"))
 				.andExpect(status().isNotFound()).andExpect(jsonPath("$.error").value("not_found"));
-			assertThat(jdbc.sql("SELECT count(*) FROM app_notification_preference WHERE app_id = :a").param("a", app).query(Long.class).single()).as("no row for an unusable app").isZero();
+			assertThat(jdbc.sql("SELECT count(*) FROM app_consent WHERE app_id = :a").param("a", app).query(Long.class).single()).as("no row for an unusable app").isZero();
 		}
 		mvc.perform(asUser(put("/api/v1/me/apps/{a}/preferences", UUID.randomUUID()), user).contentType(MediaType.APPLICATION_JSON).content("{\"muteSms\":true}")).andExpect(status().isOk());
 	}

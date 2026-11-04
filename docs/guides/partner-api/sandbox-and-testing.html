@@ -29,15 +29,19 @@
 <h2 id="synthetic">Synthetic users <code>u_p_test_*</code> (DEV only)</h2>
 <p>A user id that starts with <code>u_p_test_</code> (followed by anything: <code>u_p_test_ok</code>, <code>u_p_test_driver42</code>) is not a person. It needs no issuing by Adera: you can use it right away with your DEV key. It exists so that you can try every path of your integration, including error paths, with no real people and no contact data.</p>
 <div class="table-wrap"><table><thead><tr><th>User id</th><th>Behaviour in DEV</th></tr></thead><tbody>
-<tr><td><code>u_p_test_ok</code>, or any other <code>u_p_test_&lt;anything&gt;</code> except the two below</td><td>Accepted (<code>202</code>). It behaves like a user with a phone number, an email address and a device, who has not muted anything. Delivery is <strong>simulated</strong>: nothing is sent, Adera records an attempt with provider <code>sandbox</code> and the notification becomes <code>SENT</code> within a second or two, and the callback fires. <code>DIRECT</code> templates choose <code>SMS</code> (needs <code>notify.sms</code>), <code>IN_APP</code> templates choose <code>IN_APP</code>. The ids are separate per app: <code>u_p_test_ok</code> of your app is not the one of another app.</td></tr>
+<tr><td><code>u_p_test_ok</code>, or any other <code>u_p_test_&lt;anything&gt;</code> except the ones below</td><td>Accepted (<code>202</code>). It behaves like a user with a phone number, an email address and a device, who allowed every channel. Delivery is <strong>simulated</strong>: nothing is sent, Adera records an attempt with provider <code>sandbox</code> and the notification becomes <code>SENT</code> within a second or two, and the callback fires. <code>DIRECT</code> templates choose <code>SMS</code> (needs <code>notify.sms</code>), <code>IN_APP</code> templates choose <code>IN_APP</code>. The ids are separate per app: <code>u_p_test_ok</code> of your app is not the one of another app.</td></tr>
 <tr><td><code>u_p_test_unreachable</code></td><td><code>422 {"error":"user_unreachable"}</code> immediately, like a deleted user.</td></tr>
-<tr><td><code>u_p_test_muted</code></td><td><code>200</code> with status <code>SUPPRESSED</code>, reason <code>recipient_opted_out</code>, on every channel, like a user who muted your app. A callback follows.</td></tr>
+<tr><td><code>u_p_test_muted</code></td><td><code>200</code> with status <code>SUPPRESSED</code>, reason <code>recipient_opted_out</code>, on every channel, like a user who withdrew the permission after you were accepted. A callback follows.</td></tr>
+<tr><td><code>u_p_test_noconsent</code>, <code>u_p_test_denied</code>, <code>u_p_test_blocked</code></td><td><code>403 {"error":"consent_required","capability":"notify.sms","state":"NOT_ASKED"}</code> (or <code>DENIED</code>, <code>BLOCKED</code>), like a real user who was never asked, said no, or said no twice. The capability is the one of the channel chosen for your template (<code>notify.sms</code>, <code>notify.email</code> or <code>notify.inapp</code>).</td></tr>
 </tbody></table></div>
 <p>Everything else still applies to them exactly as to real users: signature and address checks, template and <code>params</code> validation, capabilities, <strong>quotas</strong> (synthetic users count in DEV), idempotency. Real captured answers:</p>
 <pre class="out nocopy"><code>u_p_test_anything     202 {"notificationId":"e8f0ea5c-...","externalId":"doc-u5","status":"QUEUED","channel":"SMS","environment":"DEV",...}
    ... a second later:  GET -> {"status":"SENT","channel":"SMS","attempts":1,...}   (attempt recorded with provider "sandbox")
 u_p_test_unreachable  422 {"error":"user_unreachable"}
 u_p_test_muted        200 {"status":"SUPPRESSED","channel":"IN_APP","reason":"recipient_opted_out","environment":"DEV",...}
+u_p_test_noconsent    403 {"error": "consent_required", "capability": "notify.sms", "state": "NOT_ASKED"}
+u_p_test_denied       403 {"error": "consent_required", "capability": "notify.sms", "state": "DENIED"}
+u_p_test_blocked      403 {"error": "consent_required", "capability": "notify.sms", "state": "BLOCKED"}
 u_p_test_ok with an IN_APP template and callbackUrl:
    202 {"channel":"IN_APP","status":"QUEUED",...}  -> SENT, and the callback arrived with {"status":"SENT","channel":"IN_APP",...}</code></pre>
 <div class="callout danger"><span class="label">PROD</span><p>On a PROD deployment <strong>every</strong> <code>u_p_test_*</code> id is refused with <code>422 {"error":"synthetic_user_not_allowed"}</code> (from the code: the check runs before any lookup). If you ever see this in production, a test id leaked into production code. It does not make a PROD request reach anybody.</p></div>
@@ -78,6 +82,7 @@ u_p_test_ok with an IN_APP template and callbackUrl:
 <h3>Soft refusals and limits</h3>
 <ul>
 <li>[ ] <code>u_p_test_muted</code>: your code treats <code>200 SUPPRESSED</code> as final and does not retry or switch channel.</li>
+<li>[ ] <code>u_p_test_noconsent</code>, <code>u_p_test_denied</code>, <code>u_p_test_blocked</code>: your code treats <code>403 consent_required</code> as "the user has not allowed this channel": no retry loop, and a product path (ask through your frontend, or use another channel your user allowed).</li>
 <li>[ ] <code>u_p_test_unreachable</code>: your code treats <code>422 user_unreachable</code> as "do not retry", without showing the user a reason.</li>
 <li>[ ] Quotas: ask staff to set a small limit (for example <code>maxPerUserPerDay: 1</code>) and check that your server handles <code>429 quota_exceeded</code> (for each <code>limit</code> value) by delaying or dropping, not by hammering.</li>
 <li>[ ] <code>403 capability_not_granted</code> is logged with its <code>capability</code> and alerts a human.</li>

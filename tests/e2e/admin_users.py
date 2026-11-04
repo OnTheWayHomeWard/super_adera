@@ -71,7 +71,7 @@ try:
 finally:
     print("cleanup")
     subprocess.run(["curl", "-s", "-X", "DELETE", f"http://127.0.0.1:4434/admin/identities/{user_id}"], capture_output=True)
-    for t in ("app_user_alias", "device", "app_notification_preference"):
+    for t in ("app_user_alias", "device", "app_consent", "consent_event"):
         psql("users", f"DELETE FROM {t} WHERE user_id='{user_id}'")
     psql("users", f"DELETE FROM app_user WHERE id='{user_id}'")
     psql("registry", f"DELETE FROM audit_event WHERE target_id='{user_id}'")

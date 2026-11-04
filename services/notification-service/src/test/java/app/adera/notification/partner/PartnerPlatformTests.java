@@ -64,6 +64,13 @@ class PartnerPlatformTests {
 	@MockitoBean UserDirectoryClient directory;
 	@MockitoBean app.adera.notification.partner.admin.AuditClient audit;
 
+	/** The user allowed every notification channel of the app (the consent states user-service reports). */
+	static final java.util.Map<String, String> ALL_GRANTED = java.util.Map.of("notify.inapp", "GRANTED", "notify.sms", "GRANTED", "notify.email", "GRANTED");
+
+	static java.util.Map<String, String> consents(String inapp, String sms, String email) {
+		return java.util.Map.of("notify.inapp", inapp, "notify.sms", sms, "notify.email", email);
+	}
+
 	KeyPair partnerKeys;
 	UUID appId;
 	String keyId;
@@ -84,7 +91,7 @@ class PartnerPlatformTests {
 		app("DEV", List.of("notify.sms", "notify.email", "notify.inapp"), List.of());
 		when(directory.resolve(eq(appId), eq(alias))).thenReturn(Optional.of(userId));
 		when(directory.context(eq(userId), eq(appId))).thenReturn(Optional.of(new UserDirectoryClient.DeliveryContext(userId, true, "en",
-				"+251911000001", "user@example.com", List.of("tok-1"), new UserDirectoryClient.Muted(false, false, false))));
+				"+251911000001", "user@example.com", List.of("tok-1"), ALL_GRANTED)));
 	}
 
 	/** The deployment is DEV and the key is a DEV key. */
@@ -263,7 +270,7 @@ class PartnerPlatformTests {
 		mvc.perform(signed(post("/v1/notifications"), "POST", "/v1/notifications", send("g1", template, "u_p_ghost", "")))
 			.andExpect(status().isUnprocessableEntity()).andExpect(jsonPath("$.error").value("user_unreachable"));
 		when(directory.context(eq(userId), eq(appId))).thenReturn(Optional.of(new UserDirectoryClient.DeliveryContext(userId, false, "en", null, null,
-				List.of(), new UserDirectoryClient.Muted(false, false, false))));
+				List.of(), ALL_GRANTED)));
 		mvc.perform(signed(post("/v1/notifications"), "POST", "/v1/notifications", send("g2", template, alias, "")))
 			.andExpect(status().isUnprocessableEntity()).andExpect(jsonPath("$.error").value("user_unreachable"));
 	}
@@ -305,17 +312,68 @@ class PartnerPlatformTests {
 	void capabilityNotGrantedIsForbidden() throws Exception {
 		app("DEV", List.of("notify.email"), List.of());
 		when(directory.context(eq(userId), eq(appId))).thenReturn(Optional.of(new UserDirectoryClient.DeliveryContext(userId, true, "en", "+251911000001",
-				null, List.of(), new UserDirectoryClient.Muted(false, false, false))));
+				null, List.of(), ALL_GRANTED)));
 		mvc.perform(signed(post("/v1/notifications"), "POST", "/v1/notifications", send("c1", directTemplate(), alias, "")))
 			.andExpect(status().isForbidden()).andExpect(jsonPath("$.error").value("capability_not_granted"));
 	}
 
-	@Test
-	void mutedUsersAreSuppressedWithoutBeingTold() throws Exception {
+	private void userConsents(java.util.Map<String, String> consents) {
 		when(directory.context(eq(userId), eq(appId))).thenReturn(Optional.of(new UserDirectoryClient.DeliveryContext(userId, true, "en", "+251911000001",
-				"user@example.com", List.of(), new UserDirectoryClient.Muted(false, true, false))));
-		mvc.perform(signed(post("/v1/notifications"), "POST", "/v1/notifications", send("m1", directTemplate(), alias, "")))
-			.andExpect(status().isOk()).andExpect(jsonPath("$.status").value("SUPPRESSED"));
+				"user@example.com", List.of("tok-1"), consents)));
+	}
+
+	@Test
+	void withoutTheUsersConsentNothingIsSentAndThePartnerIsToldWhichPermissionAndState() throws Exception {
+		String template = directTemplate();
+		for (String state : List.of("NOT_ASKED", "DENIED", "BLOCKED")) {
+			userConsents(consents("GRANTED", state, "GRANTED"));
+			mvc.perform(signed(post("/v1/notifications"), "POST", "/v1/notifications", send("cr-" + state, template, alias, "")))
+				.andExpect(status().isForbidden()).andExpect(jsonPath("$.error").value("consent_required"))
+				.andExpect(jsonPath("$.capability").value("notify.sms")).andExpect(jsonPath("$.state").value(state));
+		}
+		// refused at the door: nothing stored, nothing counted against the limits, nothing delivered
+		assertThat(jdbc.sql("SELECT COUNT(*) FROM notification WHERE external_id LIKE 'cr-%'").query(Integer.class).single()).isZero();
+	}
+
+	@Test
+	void theConsentThatCountsIsTheOneOfTheChosenChannelAndThereIsNoFallbackToAnother() throws Exception {
+		// direct message: SMS is chosen (phone + notify.sms); the user allowed email but not SMS -> refused for SMS, not rerouted to email
+		userConsents(consents("GRANTED", "DENIED", "GRANTED"));
+		mvc.perform(signed(post("/v1/notifications"), "POST", "/v1/notifications", send("ch-1", directTemplate(), alias, "")))
+			.andExpect(status().isForbidden()).andExpect(jsonPath("$.capability").value("notify.sms"));
+		// without notify.sms for the app the channel is email, and then the EMAIL consent is the one that counts
+		app("DEV", List.of("notify.email", "notify.inapp"), List.of());
+		userConsents(consents("GRANTED", "GRANTED", "DENIED"));
+		mvc.perform(signed(post("/v1/notifications"), "POST", "/v1/notifications", send("ch-2", directTemplate(), alias, "")))
+			.andExpect(status().isForbidden()).andExpect(jsonPath("$.capability").value("notify.email")).andExpect(jsonPath("$.state").value("DENIED"));
+		userConsents(consents("DENIED", "DENIED", "GRANTED"));
+		assertThat(sendRaw(send("ch-3", directTemplate(), alias, ""))).isEqualTo(202);
+		// in-app messages need notify.inapp consent
+		String inapp = createTemplate("IN_APP", "{\"en\":{\"title\":\"Hello {name}\",\"body\":\"Your ride is here\"}}", "");
+		mvc.perform(signed(post("/v1/notifications"), "POST", "/v1/notifications", send("ch-4", inapp, alias, "")))
+			.andExpect(status().isForbidden()).andExpect(jsonPath("$.capability").value("notify.inapp")).andExpect(jsonPath("$.state").value("DENIED"));
+	}
+
+	@Test
+	void theCapabilityGateComesBeforeTheConsentGate() throws Exception {
+		app("DEV", List.of("notify.email"), List.of());
+		userConsents(consents("NOT_ASKED", "NOT_ASKED", "NOT_ASKED"));
+		// the app has no notify.sms, the user has a phone and an email: email is chosen, and consent is what is missing
+		mvc.perform(signed(post("/v1/notifications"), "POST", "/v1/notifications", send("cg-1", directTemplate(), alias, "")))
+			.andExpect(status().isForbidden()).andExpect(jsonPath("$.error").value("consent_required")).andExpect(jsonPath("$.capability").value("notify.email"));
+		app("DEV", List.of(), List.of());
+		mvc.perform(signed(post("/v1/notifications"), "POST", "/v1/notifications", send("cg-2", directTemplate(), alias, "")))
+			.andExpect(status().isForbidden()).andExpect(jsonPath("$.error").value("capability_not_granted"));
+	}
+
+	@Test
+	void aUserWhoWithdrawsConsentAfterAcceptanceIsNotSentToAndThePartnerSeesSuppressed() throws Exception {
+		String ext = "wd-" + UUID.randomUUID();
+		assertThat(sendRaw(send(ext, directTemplate(), alias, ""))).isEqualTo(202);
+		userConsents(consents("GRANTED", "DENIED", "GRANTED"));    // switched off in the menu while the message was queued
+		deliveries.runOnce();
+		assertThat(statusOf(ext)).isEqualTo("SUPPRESSED");
+		assertThat(jdbc.sql("SELECT reason FROM notification WHERE external_id = :e").param("e", ext).query(String.class).single()).isEqualTo("recipient_opted_out");
 	}
 
 	@Test
@@ -463,6 +521,12 @@ class PartnerPlatformTests {
 			.andExpect(status().isUnprocessableEntity()).andExpect(jsonPath("$.error").value("user_unreachable"));
 		assertThat(sendRaw(send("sb3", template, "u_p_test_muted", ""))).isEqualTo(200);
 		assertThat(statusOf("sb3")).isEqualTo("SUPPRESSED");
+		// the consent states of the new gate can be tried too, without real people
+		for (String state : List.of("noconsent:NOT_ASKED", "denied:DENIED", "blocked:BLOCKED")) {
+			mvc.perform(signed(post("/v1/notifications"), "POST", "/v1/notifications", send("sb-" + state.split(":")[0], template, "u_p_test_" + state.split(":")[0], "")))
+				.andExpect(status().isForbidden()).andExpect(jsonPath("$.error").value("consent_required"))
+				.andExpect(jsonPath("$.capability").value("notify.sms")).andExpect(jsonPath("$.state").value(state.split(":")[1]));
+		}
 		// a real user in DEV is delivered for real by the dev provider (console SMS), not simulated
 		String real = "real-" + UUID.randomUUID();
 		assertThat(sendRaw(send(real, template, alias, ""))).isEqualTo(202);
@@ -475,7 +539,7 @@ class PartnerPlatformTests {
 	void syntheticUsersAreRefusedInProd() throws Exception {
 		appIn("PROD", "PROD", List.of("notify.sms"), List.of());
 		String template = directTemplate();
-		for (String synthetic : List.of("u_p_test_ok", "u_p_test_unreachable", "u_p_test_muted")) {
+		for (String synthetic : List.of("u_p_test_ok", "u_p_test_unreachable", "u_p_test_muted", "u_p_test_noconsent", "u_p_test_denied", "u_p_test_blocked")) {
 			mvc.perform(signed(post("/v1/notifications"), "POST", "/v1/notifications", send("p-" + synthetic, template, synthetic, "")))
 				.andExpect(status().isUnprocessableEntity()).andExpect(jsonPath("$.error").value("synthetic_user_not_allowed"));
 		}

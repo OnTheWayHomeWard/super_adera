@@ -160,11 +160,15 @@ public class NotificationAcceptor {
 		if ("IN_APP".equals(channel)) {
 			templates.checkInboxFits(template, values);
 		}
-		boolean muted = switch (channel) {
-			case "SMS" -> user.muted().muteSms();
-			case "EMAIL" -> user.muted().muteEmail();
-			default -> user.muted().muteInApp();
-		};
+		// The user's own yes for this channel (gate 2). A synthetic "muted" user keeps the old door behaviour for the sandbox.
+		boolean muted = alias.equals(SYNTHETIC_MUTED);
+		if (!muted) {
+			String capability = UserDirectoryClient.DeliveryContext.capabilityOf(channel);
+			String state = user.consent(capability);
+			if (!"GRANTED".equals(state)) {
+				throw new ApiException(403, "consent_required", Map.of("capability", capability, "state", state));
+			}
+		}
 		NotificationStore.NewNotification n = new NotificationStore.NewNotification(ctx.appId(), ctx.environment(), externalId, hash,
 				user.userId(), alias, template.getId(), template.getVersion(), values, data, template.getKind(), channel, callbackUrl,
 				now.plus(Duration.ofSeconds(ttl)));
@@ -189,15 +193,21 @@ public class NotificationAcceptor {
 	/** Synthetic users (DEV only): u_p_test_* let partners try every path without real people. Refused in PROD. */
 	public static final String SYNTHETIC_PREFIX = "u_p_test_";
 
+	/** Sandbox user whose messages are suppressed at the door (as before the consent gate existed). */
+	public static final String SYNTHETIC_MUTED = "u_p_test_muted";
+
+	/** Sandbox users that show what the consent gate answers, by the state of notify consent they simulate. */
+	private static final Map<String, String> SYNTHETIC_CONSENT = Map.of("u_p_test_noconsent", "NOT_ASKED", "u_p_test_denied", "DENIED", "u_p_test_blocked", "BLOCKED");
+
 	private UserDirectoryClient.DeliveryContext resolveUser(PartnerContext ctx, String alias) {
 		if (alias.startsWith(SYNTHETIC_PREFIX) && !ctx.isDev()) {
 			throw new ApiException(422, "synthetic_user_not_allowed");
 		}
 		if (alias.startsWith(SYNTHETIC_PREFIX)) {
 			UUID synthetic = UUID.nameUUIDFromBytes(("sandbox:" + ctx.appId() + ":" + alias).getBytes(StandardCharsets.UTF_8));
-			boolean mutedAll = alias.equals("u_p_test_muted");
+			String state = SYNTHETIC_CONSENT.getOrDefault(alias, "GRANTED");
 			return new UserDirectoryClient.DeliveryContext(synthetic, !alias.equals("u_p_test_unreachable"), "en", "+251900000000",
-					"sandbox@example.test", List.of("sandbox-token"), new UserDirectoryClient.Muted(mutedAll, mutedAll, mutedAll));
+					"sandbox@example.test", List.of("sandbox-token"), Map.of("notify.inapp", state, "notify.sms", state, "notify.email", state));
 		}
 		try {
 			Optional<UUID> userId = directory.resolve(ctx.appId(), alias);

@@ -94,12 +94,8 @@ public class DeliveryService {
 			store.markTerminal(id, Notification.UNREACHABLE, "user_unreachable");
 			return;
 		}
-		boolean muted = switch (n.getChannel()) {
-			case "SMS" -> user.muted().muteSms();
-			case "EMAIL" -> user.muted().muteEmail();
-			default -> user.muted().muteInApp();
-		};
-		if (muted) {
+		// the user may have switched the permission off since the request was accepted: re-checked right before every send
+		if (!"GRANTED".equals(user.consent(UserDirectoryClient.DeliveryContext.capabilityOf(n.getChannel())))) {
 			store.markTerminal(id, Notification.SUPPRESSED, "recipient_opted_out");
 			return;
 		}

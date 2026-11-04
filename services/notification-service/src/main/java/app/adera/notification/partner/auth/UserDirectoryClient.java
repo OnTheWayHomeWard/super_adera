@@ -16,11 +16,28 @@ import org.springframework.web.client.RestClientException;
 @Component
 public class UserDirectoryClient {
 
-	public record Muted(boolean muteInApp, boolean muteSms, boolean muteEmail) {
-	}
-
+	/**
+	 * {@code consents}: the user's answer for this app per notify capability (notify.inapp, notify.sms, notify.email):
+	 * NOT_ASKED, GRANTED, DENIED or BLOCKED. Only GRANTED lets a message through.
+	 */
 	public record DeliveryContext(UUID userId, boolean reachable, String language, String phone, String email,
-			List<String> pushTokens, Muted muted) {
+			List<String> pushTokens, Map<String, String> consents) {
+
+		/** The state for one capability; a missing entry is NOT_ASKED. */
+		public String consent(String capability) {
+			String state = consents == null ? null : consents.get(capability);
+			return state == null ? "NOT_ASKED" : state;
+		}
+
+		/** The notify capability that covers a delivery channel (SMS, EMAIL, IN_APP). */
+		public static String capabilityOf(String channel) {
+			return switch (channel) {
+				case "SMS" -> "notify.sms";
+				case "EMAIL" -> "notify.email";
+				default -> "notify.inapp";
+			};
+		}
+
 	}
 
 	private final RestClient client;

@@ -261,6 +261,37 @@ public class ConsentService {
 		return changed;
 	}
 
+	// ---------------------------------------------------------------- notification consent (what the old mute switches were)
+
+	public static final List<String> NOTIFY = List.of("notify.inapp", "notify.sms", "notify.email");
+
+	/** The user's state per notify.* capability for one app (NOT_ASKED when never answered). What the sender must enforce. */
+	@Transactional(readOnly = true)
+	public Map<String, String> notifyStates(UUID userId, UUID appId) {
+		Map<String, Row> rows = rows(userId, appId);
+		Map<String, String> out = new LinkedHashMap<>();
+		for (String capability : NOTIFY) {
+			out.put(capability, rows.getOrDefault(capability, Row.NONE).state());
+		}
+		return out;
+	}
+
+	/**
+	 * The old mute switches: switching a channel on or off is the menu switch of its notify capability (on = GRANTED, off = DENIED,
+	 * count 0). It works for any LIVE app, also for a channel staff did not grant it (the answer stays inert until they do).
+	 */
+	@Transactional
+	public void setSwitch(UUID userId, UUID appId, String capability, boolean on) {
+		profiles.getOrCreate(userId);
+		ensureRow(userId, appId, capability);
+		Row row = find(userId, appId, capability, true);
+		String to = on ? "GRANTED" : "DENIED";
+		if (row.state().equals(to) && row.denialCount() == 0 && row.promptId() == null) {
+			return;
+		}
+		store(userId, appId, capability, row.state(), to, 0, "MENU", clock.instant());
+	}
+
 	// ---------------------------------------------------------------- helpers
 
 	private RegistryAppClient.AppInfo liveApp(String app) {

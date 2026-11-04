@@ -236,7 +236,7 @@
 <tr><td><code>SENT</code></td><td>yes</td><td>Handed to the provider (SMS/email) or written to the inbox (+ push attempted). For a synthetic <code>u_p_test_*</code> user in DEV it means "simulated".</td></tr>
 <tr><td><code>FAILED</code></td><td>yes</td><td>Permanent provider error (bad number, rejected sender) or 8 attempts used (<code>reason</code> starts with <code>max_attempts:</code>).</td></tr>
 <tr><td><code>UNREACHABLE</code></td><td>yes</td><td>User deleted/suspended at delivery time, or no phone / no email on file.</td></tr>
-<tr><td><code>SUPPRESSED</code></td><td>yes</td><td>The user muted the app or channel (<code>recipient_opted_out</code>), or the live allowlist excluded the recipient (<code>not_allowlisted</code>). Muted-at-request is answered 200, not as an error.</td></tr>
+<tr><td><code>SUPPRESSED</code></td><td>yes</td><td>The user withdrew the channel permission after acceptance (<code>recipient_opted_out</code>), or the live allowlist excluded the recipient (<code>not_allowlisted</code>). Muted-at-request is answered 200, not as an error.</td></tr>
 <tr><td><code>EXPIRED</code></td><td>yes</td><td>The next attempt would fall after <code>ttlSeconds</code>.</td></tr>
 </tbody></table></div>
 <p>A callback (<code>notification.status</code> event) is queued whenever a notification reaches a final status and a <code>callbackUrl</code> was given.</p>
@@ -315,7 +315,7 @@
 <tr><td>User <code>verification_tier</code></td><td><code>CONTACT</code> (code sent to phone/email, the default) | <code>ID</code> (identity document checked) | <code>PROVIDER</code> (a service provider). Only CONTACT is ever set today.</td></tr>
 <tr><td>User <code>gender</code></td><td><code>MALE</code>, <code>FEMALE</code>, <code>OTHER</code>, <code>PREFER_NOT_TO_SAY</code></td></tr>
 <tr><td>Device <code>platform</code></td><td><code>ANDROID</code>, <code>IOS</code>, <code>WEB</code></td></tr>
-<tr><td>Mute switches (per user per app)</td><td><code>muteInApp</code>, <code>muteSms</code>, <code>muteEmail</code> (all default false)</td></tr>
+<tr><td>Mute switches (per user per app)</td><td><code>muteInApp</code>, <code>muteSms</code>, <code>muteEmail</code>: views of the notify consent (muted = DENIED or BLOCKED); <code>states</code> carries the real state per channel</td></tr>
 <tr><td>Session assurance</td><td><code>aal1</code> (one factor: emailed code) | <code>aal2</code> (plus authenticator app)</td></tr>
 <tr><td>Delivery modes</td><td>SMS <code>console</code> | <code>twilio</code>; email <code>mailpit</code> | <code>resend</code>; push <code>fake</code> | <code>firebase</code></td></tr>
 </tbody></table></div>
@@ -404,6 +404,7 @@
 <tr><td><code>template_not_found</code></td><td>404</td><td>Template id unknown or belongs to another app.</td></tr>
 <tr><td><code>external_id_reused</code></td><td>409</td><td>Same <code>externalId</code> with a different request (the request hash differs). The same request again is a 200 replay.</td></tr>
 <tr><td><code>wrong_environment</code></td><td>403</td><td>The key belongs to the other environment than this deployment (DEV key on a PROD deployment or the reverse); checked after the signature verifies. The registry's internal context endpoint gives the same code when asked for the other environment.</td></tr>
+<tr><td><code>consent_required</code> (with <code>capability</code>, <code>state</code>)</td><td>403</td><td>The user did not allow the notify channel the message would use (state NOT_ASKED, DENIED or BLOCKED). Nothing queued or counted.</td></tr>
 <tr><td><code>synthetic_user_not_allowed</code></td><td>422</td><td>A <code>u_p_test_*</code> user on a PROD deployment (synthetic users exist in DEV only).</td></tr>
 <tr><td><code>user_unreachable</code></td><td>422</td><td>Alias unknown, user deleted or suspended, or no usable channel (all look the same on purpose).</td></tr>
 <tr><td><code>template_inactive</code>, <code>template_not_yet_valid</code>, <code>template_expired</code></td><td>422</td><td>Template switched off, before <code>validFrom</code>, or past <code>expiresAt</code>.</td></tr>
@@ -411,7 +412,7 @@
 <tr><td><code>quota_exceeded</code> (with <code>limit</code>, <code>channel</code>)</td><td>429</td><td><code>max_per_user_per_day</code>, <code>max_per_day</code>, <code>max_distinct_users_per_day</code> or <code>max_total</code>.</td></tr>
 <tr><td><code>service_unavailable</code></td><td>503</td><td>Registry or user-service unreachable; retry.</td></tr>
 </tbody></table></div>
-<p>Not errors: 202 <code>QUEUED</code> accepted; 200 with <code>"replayed": true</code>; 200 with status <code>SUPPRESSED</code> (the user muted the app, not revealed as an error).</p>
+<p>Not errors: 202 <code>QUEUED</code> accepted; 200 with <code>"replayed": true</code>; 200 with status <code>SUPPRESSED</code> (sandbox user <code>u_p_test_muted</code>, or a user who withdrew consent after acceptance).</p>
 <p><strong>Doc vs code:</strong> <code>docs/PARTNER_API.md</code> does not list <code>invalid_timestamp</code>, <code>unknown_app</code>, <code>request_too_large</code>, <code>template_not_yet_valid</code>, the exact 403 codes <code>app_draft|app_paused|app_killed</code> (it says "app not active in this environment"), or <code>template_not_found</code> (it says "404 template not yours / unknown").</p>
 
 <h3 id="errors-notification-admin">notification-service: staff and inbox</h3>
@@ -447,7 +448,7 @@
 <dt>Callback</dt><dd>A signed HTTP POST from us to the partner's <code>callbackUrl</code> when a notification reaches a final status.</dd>
 <dt>Capability</dt><dd>A permission staff can grant an app (read user name, send SMS, ...). See the catalog above.</dd>
 <dt>Courier (Kratos)</dt><dd>Kratos' component that sends messages. Here it posts to notification-service instead of sending itself.</dd>
-<dt>Delivery context</dt><dd>What notification-service learns from user-service about one user for one app: reachable?, language, phone, email, push tokens, mute switches.</dd>
+<dt>Delivery context</dt><dd>What notification-service learns from user-service about one user for one app: reachable?, language, phone, email, push tokens, and the user's consent per notify capability.</dd>
 <dt>Dev mode / real mode</dt><dd>Dev: SMS to the console log, email to Mailpit, fake push, dev endpoints on. Real: Twilio, Resend, Firebase. See <a href="02-setup.html#delivery-modes">delivery modes</a>.</dd>
 <dt>externalId</dt><dd>The partner's own unique id for a notification: idempotency key and lookup reference.</dd>
 <dt>Forward-auth</dt><dd>An APISIX plugin that asks another service "may this request pass?" before forwarding. The answer's headers (<code>X-User-Id</code>, <code>X-Staff-Id</code>, <code>X-Staff-Role</code>) are copied onto the forwarded request.</dd>
@@ -458,7 +459,7 @@
 <dt>JWKS</dt><dd>JSON Web Key Set at <code>/.well-known/jwks.json</code>: our public signing key, so partners can verify responses and callbacks.</dd>
 <dt>Kratos identity id = user id</dt><dd>The Ory Kratos identity UUID is used as the user id everywhere (user-service <code>app_user.id</code>, staff <code>identity_id</code>).</dd>
 <dt>Mini app</dt><dd>A partner service shown inside the Adera super app, registered in registry-service.</dd>
-<dt>Mute</dt><dd>A user's per-app choice to stop in-app, SMS or email messages. Partners are never told; the notification is simply SUPPRESSED.</dd>
+<dt>Mute</dt><dd>A user's per-app choice to stop in-app, SMS or email messages; since 2026-11-04 the same data as the notify.* consent (muted = DENIED). The partner is told with 403 consent_required.</dd>
 <dt>RS256 / ADERA-SIG-1</dt><dd>RSA signature with SHA-256 over our canonical string. The signing scheme for partner requests, responses and callbacks.</dd>
 <dt>Environment (DEV / PROD)</dt><dd>What a deployment is (<code>ADERA_ENV</code>); keys and allowed addresses are stored per environment but only the deployment's own is active. See environments above.</dd>
 <dt>Session token</dt><dd>The Kratos session token the native app sends as <code>Authorization: Bearer ...</code>; valid 30 days.</dd>

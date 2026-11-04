@@ -99,7 +99,7 @@
 <tr><td><code>externalId</code></td><td>Your own unique id for one notification request. Makes sending idempotent and is the key for polling.</td></tr>
 <tr><td>Callback</td><td>A signed HTTP POST from Adera to your <code>callbackUrl</code> when a notification reaches a final status.</td></tr>
 <tr><td>Quota</td><td>A per-app, per-channel cap staff set (per user per day, per day, distinct users per day, lifetime total).</td></tr>
-<tr><td>Muted / suppressed</td><td>The user switched off a channel for your app in the Adera app. The request is answered <code>200</code> with status <code>SUPPRESSED</code>.</td></tr>
+<tr><td>Consent required / suppressed</td><td>The user did not allow a channel for your app in the Adera app: the request is refused with <code>403 consent_required</code>. A message the user switched off after you were accepted ends <code>SUPPRESSED</code>.</td></tr>
 <tr><td>Synthetic user</td><td>A fake user id starting with <code>u_p_test_</code> that exists only in DEV, for testing without real people.</td></tr>
 </tbody></table></div>
 

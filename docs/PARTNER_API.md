@@ -62,7 +62,8 @@ retried; temporary ones retry with backoff (30s doubling, max 1h, 8 attempts) un
 | Code | Meaning |
 |---|---|
 | 202 | accepted, `QUEUED` |
-| 200 | replay, or `SUPPRESSED` (the user muted your app; not revealed as an error) |
+| 200 | replay, or `SUPPRESSED` (the user withdrew the channel after you were accepted; not an error) |
+| 403 | `consent_required` with `capability` and `state` (`NOT_ASKED`, `DENIED`, `BLOCKED`): the user did not allow this channel for your app; nothing was queued |
 | 400 `validation_failed` | malformed request (`fields` says which) |
 | 400 `invalid_request` | the body is not a JSON object, or a value has the wrong type |
 | 401 | `missing_signature`, `invalid_timestamp` (not a number), `stale_timestamp` (more than 5 minutes off), `invalid_signature`, `unknown_key`, `key_revoked_or_expired`, `unknown_app` (the key's app no longer exists) |
@@ -91,5 +92,5 @@ There is no separate simulated sandbox: the dev deployment's own providers are t
 real user in DEV is delivered through them like any message, and nothing reaches a real phone or inbox. The only simulation left is for
 synthetic users: ids named `u_p_test_<anything>` are not real people (no contact details or push tokens), so in DEV their delivery is
 simulated (nothing is sent, the attempt is recorded with provider `sandbox`, status `SENT`). `u_p_test_unreachable` is refused at once with
-`422 user_unreachable`; `u_p_test_muted` answers `200 SUPPRESSED` (`recipient_opted_out`). In PROD every `u_p_test_*` id is refused with
+`422 user_unreachable`; `u_p_test_muted` answers `200 SUPPRESSED` (`recipient_opted_out`); `u_p_test_noconsent`, `u_p_test_denied` and `u_p_test_blocked` answer `403 consent_required` with state `NOT_ASKED`, `DENIED` and `BLOCKED`. In PROD every `u_p_test_*` id is refused with
 `422 synthetic_user_not_allowed`.

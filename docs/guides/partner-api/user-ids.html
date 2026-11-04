@@ -63,7 +63,7 @@
 <p><span class="badge ours">Adera staff</span> To test a partner integration against DEV with real (seeded) users, a developer mints the ids for chosen test users with the call above and gives them to the partner; or the partner uses the synthetic ids <code>u_p_test_*</code> that need no minting (<a href="sandbox-and-testing.html">Sandbox</a>). There is no endpoint in the dashboard API to mint or look up aliases.</p>
 
 <h2 id="users-control">What the user controls</h2>
-<p>A user can mute your app per channel in the Adera app (<code>mute in-app</code>, <code>mute SMS</code>, <code>mute email</code>, stored per user and per app). A muted channel makes your request answer <code>200 SUPPRESSED</code>; see <a href="limits-and-quotas.html#muted">muted users</a>. You cannot read the setting; you only see its effect.</p>
+<p>A user decides per channel and per app whether you may message them (<code>notify.inapp</code>, <code>notify.sms</code>, <code>notify.email</code>; the old "mute" switches are the same data). A channel the user did not allow makes your request answer <code>403 consent_required</code>; see <a href="limits-and-quotas.html#muted">users who did not allow the channel</a>. You cannot read the setting; you only see its effect.</p>
 
 <h2 id="not-built">Not built yet</h2>
 <ul>

@@ -210,7 +210,7 @@ FROM courier_messages ORDER BY created_at DESC LIMIT 2;
 <div class="callout"><span class="label">Note</span><p>Kratos keeps flow, code and courier rows after use; it has a cleanup command (<code>kratos cleanup sql</code>) that we do not schedule yet. Expect these tables to grow in production (not verified at scale). The numeric courier <code>type</code>/<code>status</code> codes are Kratos' own enums; the values above (2 = SMS, status 2 = sent) were inferred from the data, not from Kratos' source.</p></div>
 
 <h2 id="db-users">Database <code>users</code> (user-service)</h2>
-<p>Schema: <code>services/user-service/src/main/resources/db/migration/V1__users_and_devices.sql</code> <code>V2__aliases_and_preferences.sql</code> and <code>V3__app_consent.sql</code> (the two consent tables below have real captured rows). The older tables are empty in the dev stack right now, so every example below is an <span class="badge partial">illustrative example</span> (made up, but valid against the real constraints).</p>
+<p>Schema: <code>services/user-service/src/main/resources/db/migration/V1__users_and_devices.sql</code> <code>V2__aliases_and_preferences.sql</code>, <code>V3__app_consent.sql</code> and <code>V4__mute_is_consent.sql</code> (the two consent tables below have real captured rows). The older tables are empty in the dev stack right now, so every example below is an <span class="badge partial">illustrative example</span> (made up, but valid against the real constraints).</p>
 
 <h3 id="users-app_user"><code>app_user</code></h3>
 <p><strong>Purpose:</strong> the full person record. <strong>Why:</strong> Kratos knows only "email or phone"; the app needs a name, language, avatar, location and room for fields nobody planned. Keeping this out of Kratos means profile changes never touch the login system. <strong>Written by:</strong> user-service (<code>UserRepository</code>): the Kratos registration hook creates the row, <code>PATCH /api/v1/me</code> edits it, <code>GET /me</code> creates it if the hook was lost. <strong>Read by:</strong> user-service only; other services get what they need through internal endpoints (alias resolution, contact lookup).</p>
@@ -273,15 +273,8 @@ fcm_token &lt;masked&gt;   app_version 1.0.3   os_version 14   device_name "Pixe
 alias   u_p_9f2c4d6e8a1b3c5d7e9f0a2b4c6d8e10
 user_id 7c1e4a52-3b0d-4f6e-9a1b-2d5f8e9c0a11</code></pre>
 
-<h3 id="users-pref"><code>app_notification_preference</code></h3>
-<p><strong>Purpose:</strong> what a user chose about one mini app: mute in-app, SMS or email. <strong>Why:</strong> users must be able to silence an app without leaving it, and the partner must not be told (a muted send is reported as <code>SUPPRESSED</code>, status 200). <strong>Written by:</strong> user-service (<code>PreferenceService</code>, <code>PreferenceController</code>). <strong>Read by:</strong> notification-service through the internal API when deciding a channel.</p>
-<div class="table-wrap"><table><thead><tr><th>Column</th><th>Type</th><th>Notes</th></tr></thead><tbody>
-<tr><td><code>user_id</code>, <code>app_id</code></td><td>uuid, composite PK</td><td>user FK cascade; app id from registry.</td></tr>
-<tr><td><code>mute_in_app</code>, <code>mute_sms</code>, <code>mute_email</code></td><td>boolean, default false</td><td>One flag per channel.</td></tr>
-<tr><td><code>updated_at</code></td><td>timestamptz</td><td></td></tr>
-</tbody></table></div>
-<p><span class="badge partial">illustrative example</span></p>
-<pre class="out"><code>user_id 7c1e4a52-...  app_id 2398a5ca-...  mute_in_app f  mute_sms t  mute_email f  updated_at 2026-10-25 10:02:11+00</code></pre>
+<h3 id="users-pref"><code>app_notification_preference</code> (removed)</h3>
+<p>The mute switches (<code>mute_in_app</code>, <code>mute_sms</code>, <code>mute_email</code>) were a separate table until <code>V4__mute_is_consent.sql</code> (2026-11-04). Notification consent replaces mute: the migration turned every existing mute into a <code>DENIED</code> row of <code>app_consent</code> for <code>notify.inapp</code> / <code>notify.sms</code> / <code>notify.email</code> (source <code>MUTE</code>, decided at the time of the mute, with a <code>consent_event</code> row) and dropped the table. In the dev stack it converted 11 mutes (4 in-app, 3 SMS, 4 email). The public mute endpoints still exist and read and write <code>app_consent</code>.</p>
 
 <h3 id="users-consent"><code>app_consent</code></h3>
 <p><strong>Purpose:</strong> what a user answered for each capability of each mini app (gate 2 of the bridge design, <a href="14-bridge-consent.html">section 14</a>). <strong>Why:</strong> staff decide what an app MAY ask for; this table records what the user ALLOWED, and enforces "two refusals block, only the menu unblocks" on the server. One current row per user, app and capability; no row means <code>NOT_ASKED</code>. <strong>Written by:</strong> user-service (<code>ConsentService</code>, migration <code>V3__app_consent.sql</code>). <strong>Read by:</strong> user-service; the notification, profile and callback steps read it through internal calls.</p>
@@ -289,7 +282,7 @@ user_id 7c1e4a52-3b0d-4f6e-9a1b-2d5f8e9c0a11</code></pre>
 <tr><td><code>user_id</code>, <code>app_id</code>, <code>capability</code></td><td>uuid, uuid, varchar(40); composite PK</td><td>user FK cascade; app id from registry; capability key such as <code>location.fine</code>.</td></tr>
 <tr><td><code>state</code></td><td>varchar(10)</td><td><code>NOT_ASKED</code> (a row exists only to hold an open dialog ticket), <code>GRANTED</code>, <code>DENIED</code>, <code>BLOCKED</code>.</td></tr>
 <tr><td><code>denial_count</code></td><td>int</td><td>Consecutive refusals; the second one blocks. Reset by a yes, by the menu switch and by Disconnect.</td></tr>
-<tr><td><code>decided_at</code>, <code>source</code></td><td>timestamptz, varchar(16)</td><td>When and how: <code>DIALOG</code>, <code>MENU</code>, <code>DISCONNECT</code> (later <code>MUTE</code>). Null until decided.</td></tr>
+<tr><td><code>decided_at</code>, <code>source</code></td><td>timestamptz, varchar(16)</td><td>When and how: <code>DIALOG</code>, <code>MENU</code> (also the old mute switches), <code>DISCONNECT</code>, <code>MUTE</code> (converted by migration V4). Null until decided.</td></tr>
 <tr><td><code>prompt_id</code>, <code>prompt_expires_at</code></td><td>varchar(40), timestamptz</td><td>The one-time dialog ticket (<code>pr_</code> + 24 hex, valid 5 minutes) while a dialog is open; cleared by any answer, menu change or disconnect.</td></tr>
 </tbody></table></div>
 <p>The pseudonymous id <code>user.basic</code> needs no dialog: it is reported <code>GRANTED</code> without a row, and a <code>DENIED</code> row means the user disconnected.</p>

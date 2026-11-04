@@ -235,51 +235,21 @@ Content-Type: application/json;charset=ISO-8859-1
 Content-Type: application/json
 
 {
-  "userId": "ff11b469-af24-4970-9ecd-8fed609a1bc7"
-}</code></pre>
-<h4>Unknown alias</h4>
-<pre class="out"><code>HTTP/1.1 404 Not Found
-Content-Type: application/json
-
-{
-  "error": "not_found"
-}</code></pre>
-<h4>Without the parameter</h4>
-<pre><code>curl -s "http://127.0.0.1:8087/internal/apps/&lt;app uuid&gt;/context" -H "X-Internal-Secret: $INTERNAL_SECRET"</code></pre>
-<p>Answers exactly like <code>?environment=DEV</code> on a dev deployment (the deployment's environment is used).</p>
-<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th>Error code</th><th>When it happens</th></tr></thead><tbody><tr><td><strong>401</strong></td><td><code>unauthorized</code></td><td>The required secret header is missing or wrong (body <code>{"error":"unauthorized"}</code>).</td></tr><tr><td><strong>404</strong></td><td><code>not_found</code></td><td>No such alias for this app (never minted, or from another app). notification-service turns it into the same <code>422 user_unreachable</code> a deleted user gets, so partners cannot probe for ids.</td></tr><tr><td><strong>400</strong></td><td><code>validation_failed</code> / <code>invalid_request</code></td><td>A required query parameter is missing (<code>validation_failed</code>, <code>fields</code>) or not a UUID (<code>invalid_request</code>).</td></tr></tbody></table></div>
-</div></details>
-<details class="endpoint" id="ep-int-get-delivery-context">
-<summary><span class="method m-get">GET</span><span class="path">/internal/users/{userId}/delivery-context</span><span class="sum">How to reach one user on behalf of one app</span></summary>
-<div class="body"><dl class="meta">
-<dt>Audience</dt><dd>other services, never end users or partners</dd>
-<dt>Client path</dt><dd><strong>none</strong>: not routed by the gateway (calling it through <code>$GATEWAY</code> answers <code>404 {"error_msg":"404 Route Not Found"}</code>, captured)</dd>
-<dt>Internal path</dt><dd><code>http://user-service:8080/internal/users/{userId}/delivery-context?appId=...</code></dd>
-<dt>Called by</dt><dd>notification-service (<code>UserDirectoryClient.context</code>) while delivering</dd>
-<dt>Auth</dt><dd><code>X-Internal-Secret: $INTERNAL_SECRET</code> (the value of <code>INTERNAL_API_SECRET</code> in <code>.env</code>; constant-time compare; an empty configured secret disables the check, dev only)</dd>
-<dt>Rate limit</dt><dd>none (no gateway in the path)</dd>
-<dt>Implemented in</dt><dd><code>services/user-service/.../internal/InternalController.java#deliveryContext</code></dd>
-</dl>
-<h4>Purpose</h4><p>Everything the delivery worker needs in one call: whether the user can be reached at all (<code>reachable</code> is false for deleted or suspended users), their language, phone, email, active FCM tokens, and this app's mute switches. When <code>reachable</code> is false, the phone, email and token fields are blanked, so a deleted user's data is never used. This is the one place where real phone/email leave user-service; the partner never sees them.</p>
-<h4>Request parameters</h4><div class="table-wrap"><table><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why it exists</th></tr></thead><tbody><tr><td><code>userId</code></td><td>path</td><td>UUID</td><td>yes</td><td>real user id (as resolved from the alias)</td><td>Whose contact data.</td></tr><tr><td><code>appId</code></td><td>query</td><td>UUID</td><td>yes</td><td>uuid</td><td>Which app's mute switches to include.</td></tr></tbody></table></div>
-<h4>Example request</h4>
-<pre><code>curl -s "http://127.0.0.1:8086/internal/users/&lt;user uuid&gt;/delivery-context?appId=&lt;app uuid&gt;" -H "X-Internal-Secret: $INTERNAL_SECRET"</code></pre>
-<pre class="out"><code>HTTP/1.1 200 OK
-Content-Type: application/json
-
-{
-  "userId": "ff11b469-af24-4970-9ecd-8fed609a1bc7",
+  "userId": "a5572953-...",
   "reachable": true,
-  "language": "am",
-  "phone": "+2519******49",
-  "email": null,
-  "pushTokens": [],
-  "muted": {
-    "muteInApp": false,
-    "muteSms": true,
-    "muteEmail": false
+  "language": "en",
+  "phone": "+2519******15",
+  "email": "de***@example.com",
+  "pushTokens": [
+    "fake-fcm-84d2...",
+    "fake-fcm-7ac9..."
+  ],
+  "consents": {
+    "notify.inapp": "DENIED",
+    "notify.sms": "DENIED",
+    "notify.email": "DENIED"
   }
-}</code></pre><p class="masked">Values masked: phone. &lt;code&gt;muted.muteSms&lt;/code&gt; was set to true by the earlier preference example.</p>
+}</code></pre><p class="masked">Real capture (seeded user Demo Fully); values masked: user id, phone, email, tokens. <code>consents</code> is the user's answer per notify capability for this app: here the seeded user Demo Fully refused all three (the old mute switches are the same data, section 14).</p>
 <h4>Unknown user</h4>
 <pre class="out"><code>HTTP/1.1 404 Not Found
 Content-Type: application/json
@@ -452,7 +422,7 @@ Content-Type: text/plain; charset=utf-8
 <details class="endpoint" id="ep-int-get-app">
 <summary><span class="method m-get">GET</span><span class="path">/internal/apps/{appId}</span><span class="sum">Does this mini app exist, and in which status?</span></summary>
 <div class="body"><dl class="meta">
-<dt>Audience</dt><dd>user-service (mute preferences and alias minting check the app id against it); never end users or partners</dd>
+<dt>Audience</dt><dd>user-service (mute preferences, consent and alias minting check the app id against it); never end users or partners</dd>
 <dt>Client path</dt><dd><strong>none</strong>: not routed by the gateway</dd>
 <dt>Internal path</dt><dd><code>http://registry-service:8080/internal/apps/{appId}</code></dd>
 <dt>Auth</dt><dd>internal secret header, like the other internal endpoints</dd>

@@ -141,13 +141,13 @@ export function UserShowPage() {
         </Col>
       </Row>
 
-      <Card size="small" title="Mute preferences per app" style={{ marginTop: 12 }}>
+      <Card size="small" title="Mute preferences per app (channels the user refused: notification consent DENIED or BLOCKED)" style={{ marginTop: 12 }}>
         <Table
           size="small"
           rowKey="appId"
           pagination={false}
           dataSource={u.mutePreferences}
-          locale={{ emptyText: "No per-app preferences (nothing is muted)." }}
+          locale={{ emptyText: "Nothing refused: no channel is muted for any app." }}
           columns={[
             { title: "App", render: (_, p) => <Link to={`/apps/${p.appId}`}>{appName(p.appId)}</Link> },
             { title: "In-app muted", render: (_, p) => (p.muteInApp ? "muted" : "-") },

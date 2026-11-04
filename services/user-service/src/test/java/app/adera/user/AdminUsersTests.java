@@ -165,7 +165,7 @@ class AdminUsersTests {
 			.param("d", UUID.randomUUID()).param("u", id).update();
 		jdbc.sql("INSERT INTO app_user_alias (app_id, alias, user_id, created_at) VALUES (:a, 'u_p_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', :u, now())")
 			.param("a", app).param("u", id).update();
-		jdbc.sql("INSERT INTO app_notification_preference (user_id, app_id, mute_in_app, mute_sms, mute_email, updated_at) VALUES (:u, :a, false, true, false, now())")
+		jdbc.sql("INSERT INTO app_consent (user_id, app_id, capability, state, denial_count, decided_at, source) VALUES (:u, :a, 'notify.sms', 'DENIED', 0, now(), 'MENU')")
 			.param("u", id).param("a", app).update();
 
 		String body = mvc.perform(as(get("/admin/api/v1/users/{id}", id), "ADMIN")).andExpect(status().isOk())
