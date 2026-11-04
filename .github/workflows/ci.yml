@@ -1,0 +1,141 @@
+# CI/CD for the code we own. The other containers in docker-compose.yml are public images and are only pulled.
+# - Every push to master or staging (and every pull request): tests for the three services, the backoffice and the docs.
+# - A push to staging also builds our five images, pushes them to GHCR and deploys them to the staging server.
+#   To deploy: git push origin master:staging   (or merge master into staging and push)
+name: ci
+
+on:
+  push:
+    branches: [master, staging]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/staging' }}
+
+jobs:
+  service-tests:
+    name: test ${{ matrix.service }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [notification-service, user-service, registry-service]
+    defaults:
+      run:
+        working-directory: services/${{ matrix.service }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+          cache-dependency-path: services/${{ matrix.service }}/pom.xml
+      - name: mvn verify (Testcontainers starts its own Postgres)
+        run: ./mvnw -B -ntp verify
+      - name: test report
+        if: always()
+        run: |
+          python3 - <<'PY'
+          import glob, xml.etree.ElementTree as ET
+          t = f = e = s = 0
+          for p in glob.glob("target/surefire-reports/TEST-*.xml"):
+              r = ET.parse(p).getroot()
+              t += int(r.get("tests")); f += int(r.get("failures")); e += int(r.get("errors")); s += int(r.get("skipped"))
+          print(f"tests={t} failures={f} errors={e} skipped={s}")
+          PY
+
+  backoffice-tests:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backoffice
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: backoffice/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - run: npm test
+      - run: npm run build
+
+  docs-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 -I docs/guides/check.py
+
+  images:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/staging'
+    needs: [service-tests, backoffice-tests, docs-check]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - name: notification-service
+            context: services/notification-service
+            file: services/notification-service/Dockerfile
+          - name: user-service
+            context: services/user-service
+            file: services/user-service/Dockerfile
+          - name: registry-service
+            context: services/registry-service
+            file: services/registry-service/Dockerfile
+          - name: backoffice
+            context: backoffice
+            file: backoffice/Dockerfile
+          - name: edge
+            context: .
+            file: deploy/edge/Dockerfile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.file }}
+          push: true
+          tags: |
+            ghcr.io/onthewayhomeward/adera-${{ matrix.name }}:staging
+            ghcr.io/onthewayhomeward/adera-${{ matrix.name }}:${{ github.sha }}
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+
+  deploy:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/staging'
+    needs: images
+    runs-on: ubuntu-latest
+    environment:
+      name: staging
+      url: http://157.245.133.250:9080/backoffice/
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - name: ssh key
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "${{ secrets.STAGING_SSH_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          printf '%s\n' "${{ secrets.STAGING_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
+      - name: deploy
+        env:
+          HOST: ${{ secrets.STAGING_HOST }}
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ACTOR: ${{ github.actor }}
+        run: |
+          echo "$TOKEN" | ssh deploy@"$HOST" "docker login ghcr.io -u $ACTOR --password-stdin >/dev/null"
+          ssh deploy@"$HOST" "/opt/adera/deploy/staging/deploy.sh ${{ github.sha }}; rc=\$?; docker logout ghcr.io >/dev/null; exit \$rc"

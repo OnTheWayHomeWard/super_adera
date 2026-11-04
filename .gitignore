@@ -30,3 +30,7 @@ __pycache__/
 backoffice/tests/ui/out/
 backoffice/tests/.smoke-totp-*
 .DS_Store
+
+# staging server: basic-auth file for the dev inboxes (generated on the server)
+deploy/staging/htpasswd
+deploy/staging/CREDENTIALS.md

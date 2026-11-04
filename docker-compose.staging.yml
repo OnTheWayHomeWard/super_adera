@@ -1,0 +1,53 @@
+# Staging server override. Used on the server only, on top of docker-compose.yml:
+#   docker compose -f docker-compose.yml -f docker-compose.staging.yml up -d
+# - Our four images come from GHCR (built by .github/workflows/ci.yml from the staging branch) instead of a local build.
+# - Everything stays bound to 127.0.0.1 as on a laptop (tests and SSH tunnels use that); only the ports below are ALSO
+#   published on the server's public address: gateway 9080, docs 8090, Mailpit 8025 and SMS 8091 (both behind basic
+#   auth, through the edge container), and the object store 9000 (signed image links only; the bucket is private).
+# - The mode is the laptop's: ADERA_ENV=dev, console SMS, Mailpit email, fake push. Nothing real is sent.
+
+services:
+  notification-service:
+    image: ghcr.io/onthewayhomeward/adera-notification-service:${ADERA_IMAGE_TAG:-staging}
+  user-service:
+    image: ghcr.io/onthewayhomeward/adera-user-service:${ADERA_IMAGE_TAG:-staging}
+    environment:
+      STORAGE_PUBLIC_ENDPOINT: http://${STAGING_PUBLIC_IP:-157.245.133.250}:9000
+  registry-service:
+    image: ghcr.io/onthewayhomeward/adera-registry-service:${ADERA_IMAGE_TAG:-staging}
+    environment:
+      STORAGE_PUBLIC_ENDPOINT: http://${STAGING_PUBLIC_IP:-157.245.133.250}:9000
+  backoffice:
+    image: ghcr.io/onthewayhomeward/adera-backoffice:${ADERA_IMAGE_TAG:-staging}
+    environment:
+      BACKOFFICE_MAILPIT_URL: http://${STAGING_PUBLIC_IP:-157.245.133.250}:8025
+      # Grafana, Prometheus, Infisical, RabbitMQ and the RustFS console are reached through an SSH tunnel
+      # (docs/src/15-staging.html), so the local addresses stay right once the tunnel is open.
+
+  kratos:
+    environment:
+      # Flow URLs Kratos hands to clients (ui.action) must carry the server's address, not 127.0.0.1.
+      SERVE_PUBLIC_BASE_URL: http://${STAGING_PUBLIC_IP:-157.245.133.250}:9080/kratos/
+
+  apisix:
+    ports:
+      - "${STAGING_PUBLIC_IP:-157.245.133.250}:9080:9080"
+
+  rustfs:
+    ports:
+      - "${STAGING_PUBLIC_IP:-157.245.133.250}:9000:9000"
+
+  # Docs (8090) and the two dev inboxes (8025 Mailpit, 8091 SMS) behind basic auth. deploy/staging/htpasswd lives only
+  # on the server (gitignored); its login is in deploy/staging/CREDENTIALS.md.
+  edge:
+    image: ghcr.io/onthewayhomeward/adera-edge:${ADERA_IMAGE_TAG:-staging}
+    restart: unless-stopped
+    depends_on:
+      - mailpit
+      - notification-service
+    volumes:
+      - ./deploy/staging/htpasswd:/etc/nginx/htpasswd:ro
+    ports:
+      - "${STAGING_PUBLIC_IP:-157.245.133.250}:8090:8090"
+      - "${STAGING_PUBLIC_IP:-157.245.133.250}:8025:8025"
+      - "${STAGING_PUBLIC_IP:-157.245.133.250}:8091:8091"

@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Staging messages</title>
+<style>
+body{font:14px/1.45 system-ui,sans-serif;margin:16px;background:#fff;color:#1b1f24}
+table{border-collapse:collapse;width:100%}th,td{border-bottom:1px solid #ddd;padding:6px 8px;text-align:left;vertical-align:top}
+th{background:#f3f4f6}pre{margin:0;white-space:pre-wrap;font:13px ui-monospace,monospace}input{padding:4px 6px;width:220px}
+small{color:#555}
+</style>
+</head>
+<body>
+<h1>Staging: SMS and email codes</h1>
+<p><small>Messages the console SMS provider and Mailpit "sent" since notification-service last started (newest first). Nothing here reaches a real phone. JSON: <code>/messages?to=+251900000001</code>. Emails also appear in Mailpit on port 8025.</small></p>
+<p><label>Recipient <input id="to" placeholder="+251900000001 or email"></label> <button id="go">Show</button> <small id="info"></small></p>
+<table><thead><tr><th>At (UTC)</th><th>Channel</th><th>To</th><th>Message</th></tr></thead><tbody id="rows"></tbody></table>
+<script>
+async function load(){
+  const to=document.getElementById('to').value.trim();
+  const r=await fetch('messages'+(to?'?to='+encodeURIComponent(to):''));
+  const list=(await r.json()).reverse();
+  const rows=document.getElementById('rows'); rows.textContent='';
+  for(const m of list){
+    const tr=document.createElement('tr');
+    for(const v of [m.at.replace('T',' ').slice(0,19),m.channel,m.to,(m.subject?m.subject+'\n\n':'')+m.body]){
+      const td=document.createElement('td'); const p=document.createElement('pre'); p.textContent=v; td.appendChild(p); tr.appendChild(td);
+    }
+    rows.appendChild(tr);
+  }
+  document.getElementById('info').textContent=list.length+' messages, refreshed '+new Date().toLocaleTimeString();
+}
+document.getElementById('go').onclick=load; load(); setInterval(load,10000);
+</script>
+</body>
+</html>
