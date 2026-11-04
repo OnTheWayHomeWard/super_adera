@@ -1,0 +1,241 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Launch token and user profile | Adera partner API</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+<button id="menu-btn" type="button" aria-label="Toggle menu">Menu</button>
+<a class="brand" href="index.html">Adera partner API</a>
+<span class="spacer"></span>
+<button id="theme-btn" type="button" aria-label="Toggle light or dark theme">Theme</button>
+</header>
+<div class="layout">
+<nav class="sidebar" aria-label="Pages">
+<h4>Mini-app backend API</h4>
+<ul><li><a href="index.html">Overview and contents</a></li><li><a href="quickstart.html">Quick start</a></li><li><a href="signing.html">Signing requests (ADERA-SIG-1)</a></li><li><a href="environments-and-ips.html">Environments, IPs and keys</a></li><li><a href="user-ids.html">Pseudonymous user ids</a></li><li><a href="launch-and-profile.html" class="current">Launch token and user profile</a><ul><li><a href="#overview">Overview</a></li><li><a href="#flow">The flow</a></li><li><a href="#token">The launch token</a></li><li><a href="#profile">The profile call</a></li><li><a href="#handling">What to do with each answer</a></li><li><a href="#not-built">Not built yet</a></li></ul></li><li><a href="templates.html">Templates</a></li><li><a href="sending-notifications.html">Sending notifications</a></li><li><a href="statuses-and-callbacks.html">Statuses, retries and callbacks</a></li><li><a href="limits-and-quotas.html">Limits and quotas</a></li><li><a href="sandbox-and-testing.html">Sandbox and testing checklist</a></li><li><a href="errors.html">Error codes</a></li><li><a href="data-available-to-mini-apps.html">What data a mini app gets</a></li><li><a href="known-issues.html">Known issues and not built yet</a></li></ul>
+</nav>
+<main>
+<h1>Launch token and user profile</h1>
+<p class="lead">How your mini app learns who opened it, and how your backend reads what that user allowed: the launch token the Adera app gives your page, and the signed profile call.</p>
+
+<h2 id="overview">Overview</h2>
+<p>When a user opens your mini app, the Adera app loads your registered URL with a short-lived <strong>launch token</strong> (<code>?launch=&lt;token&gt;</code>). Your backend verifies the token with Adera's public key and learns the user's <strong>pseudonymous id</strong> for your app. To read anything about the user (name, contact, address) your backend then calls <code>GET /v1/users/{alias}/profile</code> with a signed request. Adera answers with <strong>only the fields the user allowed</strong>. Nothing personal travels through the browser.</p>
+<div class="callout why"><span class="label">Why this exists</span>A mini app is third-party code. It must not be able to describe its own powers or read data the user did not allow, and a leaked page script must not be able to copy the user's name. The launch token proves who is calling (and only for five minutes); the signed profile call proves it is really your server; and the user's own permission decides what comes back.</div>
+<h2 id="flow">The flow</h2>
+<ol>
+<li>The user taps your mini app. The Adera app calls its backend and gets a launch token (no dialog is shown).</li>
+<li>The Adera app opens your URL with <code>?launch=&lt;token&gt;</code>. Your page sends the token to your own backend.</li>
+<li>Your backend <strong>verifies the token</strong> (below) and now knows <code>sub</code>, the user's id for your app.</li>
+<li>If you need the user's name, contact or address, <strong>your page asks for the permission</strong> through the Adera app's bridge (<code>requestPermission</code>); the user sees the staff-approved sentence and answers.</li>
+<li>Your backend calls <code>GET /v1/users/{sub}/profile</code> (signed). If the user allowed the field it is in the answer; if not, you get <code>403 consent_required</code> and tell your page to ask.</li>
+</ol>
+<h2 id="token">The launch token</h2>
+<p>An RS256 JWT signed with the same Adera key as every response and callback; the public key is at <code>/.well-known/jwks.json</code> (the <code>kid</code> in the token header names the key). Decoded claims of a real token (DEV):</p>
+<pre class="out"><code>header   {"alg": "RS256", "typ": "JWT", "kid": "adera-sig-202610"}
+claims
+{
+  "iss": "adera",
+  "aud": "4e831b72-a33b-4d93-a7ba-65e19b9dbd0a",
+  "sub": "u_p_5496f0de1378750142d148c9ea19b2c9",
+  "env": "dev",
+  "scopes": [
+    "notify.inapp",
+    "notify.sms",
+    "user.basic"
+  ],
+  "iat": 1793824051,
+  "exp": 1793824351,
+  "jti": "d73f34b8-021e-420f-9f57-4fe89757e898"
+}</code></pre>
+<div class="table-wrap"><table><thead><tr><th>Claim</th><th>Meaning and what to check</th></tr></thead><tbody>
+<tr><td><code>iss</code></td><td>Always <code>adera</code>. Reject anything else.</td></tr>
+<tr><td><code>aud</code></td><td>Your app's id. <strong>Reject a token whose <code>aud</code> is not yours</strong>: it was issued for another mini app.</td></tr>
+<tr><td><code>sub</code></td><td>The user's pseudonymous id for your app (<code>u_p_...</code>): the id to put in <code>/v1/users/{sub}/profile</code> and in notification requests. Never the real user id.</td></tr>
+<tr><td><code>env</code></td><td><code>dev</code> or <code>prod</code>: the environment that issued it. Reject a token of an environment you are not running in.</td></tr>
+<tr><td><code>scopes</code></td><td>The permissions the user allowed when the app was opened. <strong>A hint only</strong>: Adera re-checks consent on every data call, so a permission revoked a minute later stops working even with a live token.</td></tr>
+<tr><td><code>iat</code>, <code>exp</code></td><td>Issued at and expiry, seconds since 1970. The life is five minutes. Reject an expired token; do not keep tokens, ask the Adera app for a new launch.</td></tr>
+<tr><td><code>jti</code></td><td>A random id of this token (you may remember used ones to refuse a replay).</td></tr>
+</tbody></table></div>
+<h3 id="verify">Verify it: runnable examples</h3>
+<p>Both files are in the <code>examples/</code> folder. They fetch the JWKS, check <code>alg</code> is <code>RS256</code> (never accept <code>none</code> or a different algorithm the sender chooses), verify the signature, then check <code>iss</code>, <code>aud</code>, <code>exp</code> and <code>env</code>. Cache the JWKS for an hour in a real service and refetch once when you meet an unknown <code>kid</code>.</p>
+<pre><code># Python (pip install cryptography)
+ADERA_BASE=https://api.example ADERA_APP_ID=&lt;your app id&gt; python examples/verify_launch_token.py "$LAUNCH_TOKEN"
+
+# Node.js 18+, no dependencies
+ADERA_BASE=https://api.example ADERA_APP_ID=&lt;your app id&gt; node examples/verify-launch-token.js "$LAUNCH_TOKEN"</code></pre>
+<p>Real runs against the dev stack (<code>ADERA_BASE</code> the dev gateway, a fresh token of the seeded app demo-ride):</p>
+<pre class="out"><code>$ python examples/verify_launch_token.py "$LAUNCH_TOKEN"
+{
+  "iss": "adera",
+  "aud": "4e831b72-a33b-4d93-a7ba-65e19b9dbd0a",
+  "sub": "u_p_5496f0de1378750142d148c9ea19b2c9",
+  "env": "dev",
+  "scopes": [
+    "notify.inapp",
+    "notify.sms",
+    "user.basic"
+  ],
+  "iat": 1793824403,
+  "exp": 1793824703,
+  "jti": "d63f1747-6ff5-46be-b4b4-e6e5f1cd24ee"
+}
+
+$ python examples/verify_launch_token.py "$TAMPERED_TOKEN"        (last characters of the signature changed)
+cryptography.exceptions.InvalidSignature
+
+$ ADERA_APP_ID=00000000-0000-0000-0000-000000000000 python examples/verify_launch_token.py "$LAUNCH_TOKEN"
+ValueError: this token is for another app
+
+$ node examples/verify-launch-token.js "$TAMPERED_TOKEN"
+INVALID: bad signature</code></pre>
+<h2 id="profile">The profile call</h2>
+<details class="endpoint" open id="ep-partner-get-v1-users-alias-profile">
+<summary><span class="method m-get">GET</span><span class="path">/v1/users/{alias}/profile</span><span class="sum">Read what the user allowed (name, contact, address)</span></summary>
+<div class="body"><dl class="meta"><dt>Who may call</dt><dd>A mini app's server (partner)</dd><dt>Client path</dt><dd><code>/v1/users/{alias}/profile</code> through the gateway</dd><dt>Auth</dt><dd><strong>No login.</strong> Headers <code>X-Adera-Key-Id</code>, <code>X-Adera-Timestamp</code>, <code>X-Adera-Signature</code> (ADERA-SIG-1, see the Signing page); the signature covers the path <strong>with</strong> the query string. The caller's IP must be on the app's allowed list and the key must belong to this deployment's environment.</dd><dt>Rate limit</dt><dd>600 per 60 s per client IP </dd><dt>Answers are signed</dt><dd>Yes, like every <code>/v1</code> answer (errors included).</dd></dl>
+<h4>Purpose</h4><p>The only way a mini app's backend learns anything about the user. Returns the user's <strong>pseudonymous id</strong>, the list <code>granted</code> of permissions the user allowed, and ONLY the fields of those permissions: <code>fullName</code> (<code>user.full_name</code>), <code>phone</code> and <code>email</code> (<code>user.contact</code>, each only when the user has one), <code>address</code> (<code>user.address</code>: <code>countryCode</code>, <code>region</code>, <code>city</code> as saved in the profile, never coordinates). Fields the user did not allow are <strong>absent, never null</strong>, so you cannot tell "no data" from "not allowed" except through <code>granted</code>. Three gates run on every call: your app was granted the capability (<code>403 capability_not_granted</code>), the user said yes (<code>403 consent_required</code>), and the field belongs to that capability. The data never travels through the browser, and each read is logged on our side (who asked, which permissions were released, no values). Your backend can never open a dialog: if a permission is missing, your frontend must ask through the super app.</p>
+<h4>Request parameters</h4><div class="table-wrap"><table><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why it exists</th></tr></thead><tbody><tr><td><code>alias</code></td><td>path</td><td>string</td><td>yes</td><td><code>u_p_</code> + 1 to 60 letters, digits or <code>_</code></td><td>The user's id for your app: the <code>sub</code> of the launch token.</td></tr><tr><td><code>fields</code></td><td>query</td><td>string</td><td>no</td><td>comma-separated among <code>user.basic</code>, <code>user.full_name</code>, <code>user.contact</code>, <code>user.address</code></td><td>What you NEED. If the user did not allow one of them the answer is <code>403 consent_required</code> naming it, so your backend knows to send the user back to the frontend permission request. Without it you get whatever is allowed (an empty profile is a normal 200).</td></tr></tbody></table></div>
+<h4>Only user.basic allowed (the user opened the app, nothing else)</h4>
+<pre><code>GET /v1/users/u_p_5496f0de1378750142d148c9ea19b2c9/profile   (signed)</code></pre>
+<pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+
+{
+  "alias": "u_p_5496f0de1378750142d148c9ea19b2c9",
+  "granted": [
+    "user.basic"
+  ]
+}</code></pre>
+<h4>After the user switched user.full_name on in the menu</h4>
+<pre><code>GET /v1/users/u_p_5496f0de1378750142d148c9ea19b2c9/profile</code></pre>
+<pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+
+{
+  "alias": "u_p_5496f0de1378750142d148c9ea19b2c9",
+  "granted": [
+    "user.basic",
+    "user.full_name"
+  ],
+  "fullName": "Demo Hana Tesfaye"
+}</code></pre>
+<h4>After the user switched it off again, a backend that needs the name asks for it</h4>
+<pre><code>GET /v1/users/u_p_5496f0de1378750142d148c9ea19b2c9/profile?fields=user.full_name</code></pre>
+<pre class="out"><code>HTTP/1.1 403 Forbidden
+Content-Type: application/json
+
+{
+  "error": "consent_required",
+  "capability": "user.full_name",
+  "state": "DENIED"
+}</code></pre>
+<h4>A demo-food user who allowed name, contact and address (this user signed up with an email only and has no saved place: no phone, no address; absent, not null)</h4>
+<pre><code>GET /v1/users/u_p_0221.../profile</code></pre>
+<pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+
+{
+  "alias": "u_p_0221b6aa2c859fa03869ed5534a97823",
+  "granted": [
+    "user.basic",
+    "user.full_name",
+    "user.contact",
+    "user.address"
+  ],
+  "fullName": "Demo Hana Tesfaye",
+  "email": "demo.hana@example.com"
+}</code></pre>
+<h4>After Disconnect</h4>
+<pre><code>GET /v1/users/u_p_5496f0de1378750142d148c9ea19b2c9/profile</code></pre>
+<pre class="out"><code>HTTP/1.1 403 Forbidden
+Content-Type: application/json
+
+{
+  "error": "consent_required",
+  "capability": "user.basic",
+  "state": "DENIED"
+}</code></pre>
+<h4>A permission your app was never granted</h4>
+<pre><code>GET /v1/users/u_p_5496f0de1378750142d148c9ea19b2c9/profile?fields=user.contact</code></pre>
+<pre class="out"><code>HTTP/1.1 403 Forbidden
+Content-Type: application/json
+
+{
+  "error": "capability_not_granted",
+  "capability": "user.contact"
+}</code></pre>
+<h4>A key of the other environment</h4>
+<pre><code>GET /v1/users/u_p_5496f0de1378750142d148c9ea19b2c9/profile   (PROD key on the dev deployment)</code></pre>
+<pre class="out"><code>HTTP/1.1 403 Forbidden
+Content-Type: application/json
+
+{
+  "error": "wrong_environment"
+}</code></pre>
+<h4>Unknown, deleted or suspended user, or an id of another app (all look the same)</h4>
+<pre><code>GET /v1/users/u_p_0000000000000000/profile</code></pre>
+<pre class="out"><code>HTTP/1.1 422 Unprocessable Entity
+Content-Type: application/json
+
+{
+  "error": "user_unreachable"
+}</code></pre>
+<h4>Bad fields</h4>
+<pre><code>GET /v1/users/u_p_5496f0de1378750142d148c9ea19b2c9/profile?fields=user.shoe_size</code></pre>
+<pre class="out"><code>HTTP/1.1 400 Bad Request
+Content-Type: application/json
+
+{
+  "error": "validation_failed",
+  "fields": {
+    "fields": "comma-separated capability keys among user.basic, user.full_name, user.contact, user.address"
+  }
+}</code></pre>
+<h4>No signature</h4>
+<pre><code>GET /v1/users/u_p_5496f0de1378750142d148c9ea19b2c9/profile</code></pre>
+<pre class="out"><code>HTTP/1.1 401 Unauthorized
+Content-Type: application/json
+
+{
+  "error": "missing_signature"
+}</code></pre>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th>Error code</th><th>When it happens</th></tr></thead><tbody><tr><td><strong>403</strong></td><td><code>consent_required</code></td><td>The user did not allow <code>user.basic</code> (for example after Disconnect), or one of the <code>fields</code> you asked for. Body: <code>capability</code>, <code>state</code> (<code>NOT_ASKED</code>, <code>DENIED</code>, <code>BLOCKED</code>).</td></tr><tr><td><strong>403</strong></td><td><code>capability_not_granted</code></td><td>Staff did not grant your app <code>user.basic</code> or a capability named in <code>fields</code>. Body: <code>capability</code>.</td></tr><tr><td><strong>422</strong></td><td><code>user_unreachable</code></td><td>Unknown alias (or one of another app), deleted or suspended user.</td></tr><tr><td><strong>422</strong></td><td><code>synthetic_user_not_allowed</code></td><td>A <code>u_p_test_*</code> id on a PROD deployment.</td></tr><tr><td><strong>400</strong></td><td><code>validation_failed</code></td><td>Bad alias, or <code>fields</code> with a key that is not a profile capability.</td></tr><tr><td><strong>403</strong></td><td><code>wrong_environment</code>, <code>ip_not_allowed</code>, <code>app_paused</code>...</td><td>As for every partner call (see the common errors).</td></tr><tr><td><strong>401</strong></td><td><code>missing_signature</code> and the other signature errors</td><td>See the common errors.</td></tr></tbody></table></div>
+<h4>How to use it</h4><ul><li><code>user.basic</code> is the connection itself: it is reported <code>granted</code> without a dialog until the user disconnects (then <code>403 consent_required</code> for the whole profile). Opening the app again (launch) reconnects it.</li><li>In DEV the synthetic users answer too: <code>u_p_test_ok</code> (all allowed, fake data), <code>u_p_test_noconsent</code> / <code>_denied</code> / <code>_blocked</code> (state <code>NOT_ASKED</code> / <code>DENIED</code> / <code>BLOCKED</code> for the non-basic permissions), <code>u_p_test_unreachable</code> (422).</li><li>Treat the values as personal data: keep only what you need, delete a user's data when you get the <code>user.disconnected</code> callback (Adera will send it; see "Not built yet"), and never log the values.</li><li>Runnable examples: <code>get_profile.py</code> and <code>get-profile.js</code> in the partner guide's <code>examples/</code> folder.</li></ul>
+</div></details>
+<h3 id="profile-run">Run it: examples</h3>
+<pre><code># Python
+python examples/get_profile.py "$ALIAS"                       # whatever the user allowed
+python examples/get_profile.py "$ALIAS" user.full_name        # I NEED the name: 403 consent_required if it is not allowed
+
+# Node.js
+node examples/get-profile.js "$ALIAS" user.full_name</code></pre>
+<p>Both use the signing client in the same folder (<code>adera_client.py</code> / <code>adera-client.js</code>), which also verifies Adera's signature on the answer. A real run (seeded app demo-ride, the alias from the token above):</p>
+<pre class="out"><code>$ python examples/get_profile.py u_p_5496...b2c9
+200 {
+  "alias": "u_p_5496f0de1378750142d148c9ea19b2c9",
+  "granted": [
+    "user.basic"
+  ]
+}</code></pre>
+<h2 id="handling">What to do with each answer</h2>
+<div class="table-wrap"><table><thead><tr><th>Answer</th><th>What your backend does</th></tr></thead><tbody>
+<tr><td><code>200</code> with <code>granted</code> and fields</td><td>Use only those fields; keep only what you need; never log the values. Absent fields are not allowed (or the user has none): do not treat absence as an error.</td></tr>
+<tr><td><code>403 consent_required</code>, state <code>NOT_ASKED</code></td><td>The user was never asked. Tell your page to call <code>requestPermission</code> for that capability, then retry.</td></tr>
+<tr><td><code>403 consent_required</code>, state <code>DENIED</code></td><td>The user said no once. Your page may explain why you need it and ask once more.</td></tr>
+<tr><td><code>403 consent_required</code>, state <code>BLOCKED</code></td><td>The user said no twice. Do not ask again; show a way to continue without it, or a button that opens the permission settings of the Adera app. Only the user can undo it.</td></tr>
+<tr><td><code>403 consent_required</code> for <code>user.basic</code></td><td>The user disconnected from your app. Delete what you hold about them as agreed in your terms; the user can open the app again.</td></tr>
+<tr><td><code>403 capability_not_granted</code></td><td>Adera staff did not grant your app that capability. Ask Adera; it is not a user problem.</td></tr>
+<tr><td><code>422 user_unreachable</code></td><td>Unknown id (or an id of another app), deleted or suspended user. Do not retry.</td></tr>
+</tbody></table></div>
+<h2 id="not-built">Not built yet</h2>
+<ul><li>The callbacks <code>user.consent_changed</code> and <code>user.disconnected</code> that tell your server when a user changes a permission or disconnects (until they exist, learn it from the next profile call).</li><li>The bridge (<code>requestPermission</code>, <code>getPermission</code>, <code>openPermissionSettings</code>, <code>getLocation</code>) is a separate specification for the Adera app team; until it exists, your page cannot trigger the dialog.</li></ul>
+<div class="pager"><a class="prev" href="user-ids.html"><small>Previous</small>Pseudonymous user ids</a><a class="next" href="templates.html"><small>Next</small>Templates</a></div>
+<p class="footer">Adera mini-app backend API guide &middot; verified against the dev deployment on 2026-10-26</p>
+</main>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

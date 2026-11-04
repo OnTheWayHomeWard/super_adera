@@ -390,6 +390,38 @@ routes:
         redis_password: ${{APISIX_REDIS_PASSWORD}}
     upstream_id: user-service
 
+  # Opening a mini app (launch token): each call signs a token and may create the user's pseudonymous id. Limited per address.
+  - id: me-launch
+    uris: ["/api/v1/me/apps/*"]
+    methods: ["POST"]
+    vars:
+      - ["uri", "~~", "^/api/v1/me/apps/[^/]+/launch$"]
+    priority: 30
+    plugins:
+      forward-auth:
+        uri: http://user-service:8080/internal/auth/verify
+        request_headers: ["Authorization", "Cookie"]
+        upstream_headers: ["X-User-Id"]
+        extra_headers:
+          X-Gateway-Secret: ${{USER_GATEWAY_SECRET}}
+        status_on_error: 503
+      proxy-rewrite:
+        headers:
+          set:
+            X-Gateway-Secret: ${{USER_GATEWAY_SECRET}}
+      limit-count:
+        count: 60
+        time_window: 60
+        key_type: var
+        key: remote_addr
+        rejected_code: 429
+        policy: redis
+        redis_host: redis
+        redis_port: 6379
+        redis_username: apisix
+        redis_password: ${{APISIX_REDIS_PASSWORD}}
+    upstream_id: user-service
+
   # Everything else under /api/v1/me
   - id: me
     uris: ["/api/v1/me", "/api/v1/me/*"]

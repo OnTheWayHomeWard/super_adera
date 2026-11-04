@@ -145,10 +145,12 @@ class PurposeTests {
 		grant(id, "location.fine", Map.of("state", "GRANTED", "purpose", Map.of("en", "Find a driver near you."))).andExpect(status().isOk());
 		grant(id, "notify.email", Map.of("state", "SUSPENDED")).andExpect(status().isOk());
 		String slug = JsonPath.read(mvc.perform(as(get("/admin/api/v1/apps/{id}", id), Role.VIEWER)).andReturn().getResponse().getContentAsString(), "$.app.slug");
+		mvc.perform(as(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch("/admin/api/v1/apps/{id}", id), Role.ADMIN).contentType(MediaType.APPLICATION_JSON)
+			.content("{\"entryUrl\":\"https://ride.example.com/app\"}")).andExpect(status().isOk());
 		for (String key : new String[] { id.toString(), slug }) {
 			mvc.perform(get("/internal/apps/{k}/permissions", key)).andExpect(status().isOk())
 				.andExpect(jsonPath("$.appId").value(id.toString())).andExpect(jsonPath("$.slug").value(slug))
-				.andExpect(jsonPath("$.name.en").value("App")).andExpect(jsonPath("$.status").value("DRAFT"))
+				.andExpect(jsonPath("$.name.en").value("App")).andExpect(jsonPath("$.status").value("DRAFT")).andExpect(jsonPath("$.entryUrl").value("https://ride.example.com/app"))
 				.andExpect(jsonPath("$.permissions.length()").value(1))
 				.andExpect(jsonPath("$.permissions[0].capability").value("location.fine"))
 				.andExpect(jsonPath("$.permissions[0].label").value("Your precise location"))

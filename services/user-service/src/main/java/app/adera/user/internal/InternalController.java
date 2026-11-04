@@ -84,6 +84,22 @@ public class InternalController {
 				reachable ? user.getEmail() : null, tokens, consents.notifyStates(userId, appId));
 	}
 
+	/**
+	 * What a partner profile read may release (notification-service serves {@code GET /v1/users/{alias}/profile}, user data stays here):
+	 * the user's state for each requested capability, and values only for the GRANTED ones. {@code reachable=false} for suspended or deleted users.
+	 */
+	@GetMapping("/users/{userId}/consented-profile")
+	public ConsentService.ProfileRelease consentedProfile(@PathVariable UUID userId, @RequestParam UUID appId, @RequestParam String capabilities) {
+		List<String> list = new java.util.ArrayList<>();
+		for (String c : capabilities.split(",")) {
+			if (!c.matches("^[a-z][a-z0-9_.]{1,38}$")) {
+				throw new app.adera.user.profile.ValidationFailedException("capabilities", "must be capability keys such as user.full_name");
+			}
+			list.add(c);
+		}
+		return consents.profileRelease(userId, appId, list);
+	}
+
 	/** Firebase said this token no longer works. */
 	@PostMapping("/devices/deactivate")
 	@Transactional

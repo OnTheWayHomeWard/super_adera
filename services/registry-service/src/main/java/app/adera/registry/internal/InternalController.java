@@ -48,8 +48,8 @@ public class InternalController {
 			List<String> grantedCapabilities, List<GrantedPermission> permissions, List<AppConfigRepository.LimitRow> notificationLimits, List<String> allowedCidrs) {
 	}
 
-	/** An app with what staff granted it, for the user-service consent endpoints. {@code name} is per language. */
-	public record AppPermissions(UUID appId, String slug, Map<String, String> name, String status, List<GrantedPermission> permissions) {
+	/** An app with what staff granted it, for the user-service consent endpoints. {@code name} is per language; {@code entryUrl} is where the mini app is served (launch URL). */
+	public record AppPermissions(UUID appId, String slug, Map<String, String> name, String status, String entryUrl, List<GrantedPermission> permissions) {
 	}
 
 	private static final java.util.regex.Pattern ACTION = java.util.regex.Pattern.compile("^[a-z][a-z0-9_.-]{1,60}$");
@@ -154,7 +154,7 @@ public class InternalController {
 			Capability cap = Capability.byKey(c.capability()).orElse(null);
 			return new GrantedPermission(c.capability(), cap == null ? c.capability() : cap.label(), c.purpose(), cap == null ? "" : cap.defaultPurpose());
 		}).toList();
-		return new AppPermissions(app.getId(), app.getSlug(), app.getName(), app.getStatus().name(), permissions);
+		return new AppPermissions(app.getId(), app.getSlug(), app.getName(), app.getStatus().name(), app.getEntryUrl(), permissions);
 	}
 
 	/** How other services (user-service) write to the central audit log. Not routed by the gateway. */

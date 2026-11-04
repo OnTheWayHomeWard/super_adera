@@ -69,12 +69,14 @@ public class ConsentService {
 	private final JdbcClient jdbc;
 	private final RegistryAppClient registry;
 	private final ProfileService profiles;
+	private final app.adera.user.profile.UserRepository users;
 	private final Clock clock;
 
-	public ConsentService(JdbcClient jdbc, RegistryAppClient registry, ProfileService profiles, Clock clock) {
+	public ConsentService(JdbcClient jdbc, RegistryAppClient registry, ProfileService profiles, app.adera.user.profile.UserRepository users, Clock clock) {
 		this.jdbc = jdbc;
 		this.registry = registry;
 		this.profiles = profiles;
+		this.users = users;
 		this.clock = clock;
 	}
 
@@ -261,6 +263,74 @@ public class ConsentService {
 		return changed;
 	}
 
+	// ---------------------------------------------------------------- launch and the partner profile
+
+	/**
+	 * Opening the app: the pseudonymous id is connected again if the user had disconnected (user.basic needs no dialog), then the
+	 * states of everything the app holds are returned. No dialog, no other state changes.
+	 */
+	@Transactional
+	public List<PermissionView> openApp(UUID userId, RegistryAppClient.AppInfo info) {
+		AppUser user = activeUser(userId);
+		if (grant(info, USER_BASIC) != null) {
+			Row basic = find(userId, info.appId(), USER_BASIC, false);
+			if (basic.state().equals("DENIED")) {
+				setSwitch(userId, info.appId(), USER_BASIC, true, "LAUNCH");
+			}
+		}
+		return views(userId, info, user.getLanguage());
+	}
+
+	/** The user's state per requested capability, and values ONLY for the GRANTED ones: what a partner's profile read may release. */
+	@Transactional(readOnly = true)
+	public ProfileRelease profileRelease(UUID userId, UUID appId, List<String> capabilities) {
+		AppUser user = users.findById(userId).orElseThrow(() -> new NotFoundException("user"));
+		boolean reachable = user.getStatus() == AppUser.Status.ACTIVE && user.getDeletedAt() == null;
+		Map<String, String> states = new LinkedHashMap<>();
+		Map<String, Object> fields = new LinkedHashMap<>();
+		if (!reachable) {
+			return new ProfileRelease(false, states, fields);
+		}
+		Map<String, Row> rows = rows(userId, appId);
+		for (String capability : capabilities) {
+			states.put(capability, effective(capability, rows.get(capability)).state());
+		}
+		if ("GRANTED".equals(states.get("user.full_name"))) {
+			String name = ((user.getFirstName() == null ? "" : user.getFirstName().strip()) + " " + (user.getLastName() == null ? "" : user.getLastName().strip())).strip();
+			if (!name.isEmpty()) {
+				fields.put("fullName", name);
+			}
+		}
+		if ("GRANTED".equals(states.get("user.contact"))) {
+			if (user.getPhoneE164() != null && !user.getPhoneE164().isBlank()) {
+				fields.put("phone", user.getPhoneE164());
+			}
+			if (user.getEmail() != null && !user.getEmail().isBlank()) {
+				fields.put("email", user.getEmail());
+			}
+		}
+		if ("GRANTED".equals(states.get("user.address"))) {
+			// no street address exists in the profile: the saved place is country, region and city (never the coordinates)
+			Map<String, Object> address = new LinkedHashMap<>();
+			if (user.getCountryCode() != null && !user.getCountryCode().isBlank()) {
+				address.put("countryCode", user.getCountryCode());
+			}
+			if (user.getRegion() != null && !user.getRegion().isBlank()) {
+				address.put("region", user.getRegion());
+			}
+			if (user.getCity() != null && !user.getCity().isBlank()) {
+				address.put("city", user.getCity());
+			}
+			if (!address.isEmpty()) {
+				fields.put("address", address);
+			}
+		}
+		return new ProfileRelease(true, states, fields);
+	}
+
+	public record ProfileRelease(boolean reachable, Map<String, String> states, Map<String, Object> fields) {
+	}
+
 	// ---------------------------------------------------------------- notification consent (what the old mute switches were)
 
 	public static final List<String> NOTIFY = List.of("notify.inapp", "notify.sms", "notify.email");
@@ -282,6 +352,11 @@ public class ConsentService {
 	 */
 	@Transactional
 	public void setSwitch(UUID userId, UUID appId, String capability, boolean on) {
+		setSwitch(userId, appId, capability, on, "MENU");
+	}
+
+	@Transactional
+	public void setSwitch(UUID userId, UUID appId, String capability, boolean on, String source) {
 		profiles.getOrCreate(userId);
 		ensureRow(userId, appId, capability);
 		Row row = find(userId, appId, capability, true);
@@ -289,7 +364,7 @@ public class ConsentService {
 		if (row.state().equals(to) && row.denialCount() == 0 && row.promptId() == null) {
 			return;
 		}
-		store(userId, appId, capability, row.state(), to, 0, "MENU", clock.instant());
+		store(userId, appId, capability, row.state(), to, 0, source, clock.instant());
 	}
 
 	// ---------------------------------------------------------------- helpers

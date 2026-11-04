@@ -260,6 +260,46 @@ Content-Type: application/json
 <h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th>Error code</th><th>When it happens</th></tr></thead><tbody><tr><td><strong>401</strong></td><td><code>unauthorized</code></td><td>The required secret header is missing or wrong (body <code>{"error":"unauthorized"}</code>).</td></tr><tr><td><strong>404</strong></td><td><code>not_found</code></td><td>No such user row.</td></tr><tr><td><strong>400</strong></td><td><code>validation_failed</code> / <code>invalid_request</code></td><td><code>appId</code> missing (<code>validation_failed</code>, <code>fields.appId</code>) or malformed (<code>invalid_request</code>).</td></tr></tbody></table></div>
 <h4>How to use it</h4><ul><li><code>pushTokens</code> are ordered by most recently seen; the FCM sender tries all of them and reports dead ones back through <code>/internal/devices/deactivate</code>.</li></ul>
 </div></details>
+<details class="endpoint" id="ep-int-get-consented-profile">
+<summary><span class="method m-get">GET</span><span class="path">/internal/users/{userId}/consented-profile</span><span class="sum">What a partner profile read may release</span></summary>
+<div class="body"><dl class="meta"><dt>Audience</dt><dd>other services; never end users or partners</dd><dt>Client path</dt><dd><strong>none</strong>: not routed by the gateway</dd><dt>Internal path</dt><dd><code>http://user-service:8080/internal/users/{userId}/consented-profile?appId=&capabilities=user.basic,user.full_name,...</code></dd><dt>Called by</dt><dd>notification-service <code>ProfileController</code> (for <code>GET /v1/users/{alias}/profile</code>)</dd><dt>Auth</dt><dd><code>X-Internal-Secret: $INTERNAL_SECRET</code></dd><dt>Implemented in</dt><dd><code>services/user-service/.../internal/InternalController.java#consentedProfile, consent/ConsentService.java#profileRelease</code></dd></dl>
+<h4>Purpose</h4><p>User data stays owned by user-service: this call returns the user's state for each capability the app holds and values ONLY for the GRANTED ones (<code>fullName</code>, <code>phone</code>, <code>email</code>, <code>address</code> as <code>{countryCode, region, city}</code>; absent when the user has no value). <code>reachable=false</code> (and no fields) for suspended or deleted users. <code>user.basic</code> is GRANTED without a row unless the user disconnected.</p>
+<h4>Request parameters</h4><div class="table-wrap"><table><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why it exists</th></tr></thead><tbody><tr><td><code>userId</code></td><td>path</td><td>UUID</td><td>yes</td><td>existing user</td><td>The real user id (resolved from the alias by <code>GET /internal/aliases/resolve</code>).</td></tr><tr><td><code>appId</code></td><td>query</td><td>UUID</td><td>yes</td><td></td><td>Consent is per app.</td></tr><tr><td><code>capabilities</code></td><td>query</td><td>string</td><td>yes</td><td>comma-separated capability keys</td><td>The profile capabilities the app holds (gate 1 is decided by the caller).</td></tr></tbody></table></div>
+<h4>Example (shape; the live exchange is in 8c)</h4>
+<pre><code>curl -s "http://127.0.0.1:8086/internal/users/&lt;user uuid&gt;/consented-profile?appId=&lt;app uuid&gt;&amp;capabilities=user.basic,user.full_name,user.contact" -H "X-Internal-Secret: $INTERNAL_SECRET"</code></pre>
+<pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+
+{
+  "reachable": true,
+  "states": {
+    "user.basic": "GRANTED",
+    "user.full_name": "GRANTED",
+    "user.contact": "NOT_ASKED"
+  },
+  "fields": {
+    "fullName": "Demo Hana Tesfaye"
+  }
+}</code></pre>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th>Error code</th><th>When it happens</th></tr></thead><tbody><tr><td><strong>404</strong></td><td><code>not_found</code></td><td>No such user.</td></tr><tr><td><strong>400</strong></td><td><code>validation_failed</code></td><td>A capability is not a key like <code>user.full_name</code>.</td></tr><tr><td><strong>401</strong></td><td><code>unauthorized</code></td><td>Secret missing or wrong.</td></tr></tbody></table></div>
+</div></details>
+<details class="endpoint" id="ep-int-post-launch-tokens">
+<summary><span class="method m-post">POST</span><span class="path">/internal/launch-tokens</span><span class="sum">Sign a launch token with the Adera key</span></summary>
+<div class="body"><dl class="meta"><dt>Audience</dt><dd>other services; never end users or partners</dd><dt>Client path</dt><dd><strong>none</strong>: not routed by the gateway</dd><dt>Internal path</dt><dd><code>http://notification-service:8080/internal/launch-tokens</code></dd><dt>Called by</dt><dd>user-service <code>LaunchSigner</code> (for <code>POST /api/v1/me/apps/{app}/launch</code>)</dd><dt>Auth</dt><dd><code>X-Internal-Secret: $INTERNAL_SECRET</code></dd><dt>Implemented in</dt><dd><code>services/notification-service/.../auth/LaunchTokenController.java, InternalSecretFilter.java</code></dd></dl>
+<h4>Purpose</h4><p>The Adera signing key lives only in notification-service (it signs responses and callbacks; partners fetch the public half at <code>/.well-known/jwks.json</code>). user-service decides who may get a token and with which scopes; this endpoint only validates the shape and signs: an RS256 JWT with header <code>kid</code>, claims <code>iss</code> "adera", <code>aud</code> the app id, <code>sub</code> the alias, <code>env</code> (this deployment's), <code>scopes</code>, <code>iat</code>, <code>exp</code> (+300 s), <code>jti</code>.</p>
+<h4>Request parameters</h4><div class="table-wrap"><table><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why it exists</th></tr></thead><tbody><tr><td><code>appId</code></td><td>body</td><td>UUID</td><td>yes</td><td></td><td>The token's <code>aud</code>.</td></tr><tr><td><code>alias</code></td><td>body</td><td>string</td><td>yes</td><td><code>u_p_...</code></td><td>The token's <code>sub</code>: never the real user id.</td></tr><tr><td><code>scopes</code></td><td>body</td><td>list of strings</td><td>yes</td><td>at most 20 capability keys</td><td>What the user allowed when the app was opened.</td></tr></tbody></table></div>
+<h4>Example</h4>
+<pre><code>curl -s -X POST http://127.0.0.1:8085/internal/launch-tokens -H "X-Internal-Secret: $INTERNAL_SECRET" -H 'Content-Type: application/json' -d '{"appId": "&lt;app uuid&gt;", "alias": "u_p_5496f0de1378750142d148c9ea19b2c9", "scopes": ["notify.inapp", "notify.sms", "user.basic"]}'</code></pre>
+<pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+
+{
+  "token": "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6ImFkZXJhLXNpZy0yMDI2MTAifQ.eyJpc3MiOiJhZGVyYSIs...",
+  "expiresInSeconds": 300,
+  "keyId": "adera-sig-202610"
+}</code></pre>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th>Error code</th><th>When it happens</th></tr></thead><tbody><tr><td><strong>400</strong></td><td><code>validation_failed</code></td><td>Missing or malformed field, unknown field.</td></tr><tr><td><strong>401</strong></td><td><code>unauthorized</code></td><td>Secret missing or wrong (the gateway secret does not open it).</td></tr></tbody></table></div>
+</div></details>
 <details class="endpoint" id="ep-int-post-devices-deactivate">
 <summary><span class="method m-post">POST</span><span class="path">/internal/devices/deactivate</span><span class="sum">Retire an FCM token that Firebase rejected</span></summary>
 <div class="body"><dl class="meta">
@@ -433,7 +473,7 @@ Content-Type: text/plain; charset=utf-8
 <details class="endpoint" id="ep-int-get-app-permissions">
 <summary><span class="method m-get">GET</span><span class="path">/internal/apps/{idOrSlug}/permissions</span><span class="sum">An app (by id or slug) with what staff granted it</span></summary>
 <div class="body"><dl class="meta"><dt>Audience</dt><dd>other services (user-service consent endpoints); never end users or partners</dd><dt>Client path</dt><dd><strong>none</strong>: not routed by the gateway</dd><dt>Internal path</dt><dd><code>http://registry-service:8080/internal/apps/{idOrSlug}/permissions</code></dd><dt>Called by</dt><dd>user-service <code>RegistryAppClient.app</code> on every consent call (not cached: a pause or a removed grant must bite at once)</dd><dt>Auth</dt><dd><code>X-Internal-Secret: $INTERNAL_SECRET</code></dd><dt>Implemented in</dt><dd><code>services/registry-service/.../internal/InternalController.java</code></dd></dl>
-<h4>Purpose</h4><p>The consent endpoints need the app's id, status and the capabilities granted to it, each with the dialog <code>label</code>, the staff-approved <code>purpose</code> per language and the catalog <code>defaultPurpose</code>. Only <code>GRANTED</code> capabilities are listed. <code>{idOrSlug}</code> is a UUID or a slug.</p>
+<h4>Purpose</h4><p>The consent endpoints need the app's id, status and the capabilities granted to it, each with the dialog <code>label</code>, the staff-approved <code>purpose</code> per language and the catalog <code>defaultPurpose</code>. Only <code>GRANTED</code> capabilities are listed. <code>entryUrl</code> is where the mini app is served (the launch URL base). <code>{idOrSlug}</code> is a UUID or a slug.</p>
 <h4>Example (the seeded app demo-market)</h4>
 <pre><code>curl -s http://127.0.0.1:8087/internal/apps/demo-market/permissions -H "X-Internal-Secret: $INTERNAL_SECRET"</code></pre>
 <pre class="out"><code>HTTP/1.1 200 OK
@@ -447,6 +487,7 @@ Content-Type: application/json
     "en": "Marketplace"
   },
   "status": "LIVE",
+  "entryUrl": "https://jiji.com.et",
   "permissions": [
     {
       "capability": "notify.email",
@@ -511,6 +552,7 @@ Content-Type: application/json
       "en": "Marketplace"
     },
     "status": "LIVE",
+    "entryUrl": "https://jiji.com.et",
     "permissions": [
       {
         "capability": "notify.email",

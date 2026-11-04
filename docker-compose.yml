@@ -212,7 +212,8 @@ services:
       DB_PASSWORD: ${USER_DB_PASSWORD}
       KRATOS_PUBLIC_URL: http://kratos:4433
       KRATOS_ADMIN_URL: http://kratos:4434
-      REGISTRY_URL: http://registry-service:8080   # staff actions on users are written to the central audit log there
+      REGISTRY_URL: http://registry-service:8080   # staff actions on users are written to the central audit log there; app status and granted capabilities are read from there
+      NOTIFICATION_SERVICE_URL: http://notification-service:8080   # signs the launch tokens with the Adera key (the key lives only there)
       STORAGE_ENDPOINT: http://rustfs:9000
       # The address phones/browsers use for signed image links (the signature covers the host). Dev: localhost.
       STORAGE_PUBLIC_ENDPOINT: ${STORAGE_PUBLIC_ENDPOINT:-http://127.0.0.1:9000}

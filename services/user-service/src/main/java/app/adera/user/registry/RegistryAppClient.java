@@ -30,7 +30,12 @@ public class RegistryAppClient {
 	}
 
 	/** The app as the consent endpoints see it, read fresh (no cache: a removed capability or a pause must bite at once). */
-	public record AppInfo(UUID appId, String slug, Map<String, String> name, String status, List<GrantedPermission> permissions) {
+	public record AppInfo(UUID appId, String slug, Map<String, String> name, String status, String entryUrl, List<GrantedPermission> permissions) {
+
+		public AppInfo(UUID appId, String slug, Map<String, String> name, String status, List<GrantedPermission> permissions) {
+			this(appId, slug, name, status, null, permissions);
+		}
+
 	}
 
 	private static final Duration TTL = Duration.ofSeconds(60);

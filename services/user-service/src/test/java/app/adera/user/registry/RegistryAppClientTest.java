@@ -25,7 +25,7 @@ class RegistryAppClientTest {
 	private final UUID known = UUID.randomUUID();
 
 	private RegistryAppClient client(String url, Clock clock) {
-		UserProperties props = new UserProperties("", "secret", "", new UserProperties.Kratos("", ""), new UserProperties.Registry(url), null, null, 1000);
+		UserProperties props = new UserProperties("", "secret", "", new UserProperties.Kratos("", ""), new UserProperties.Registry(url), new UserProperties.Notification("http://localhost:8085"), null, null, 1000);
 		return new RegistryAppClient(props, RestClient.builder(), clock);
 	}
 

@@ -40,6 +40,13 @@ public class UserDirectoryClient {
 
 	}
 
+	/**
+	 * What user-service releases for one partner profile read: {@code states} is the user's answer per requested capability,
+	 * {@code fields} holds values ONLY for the capabilities that are GRANTED (fullName, phone, email, address).
+	 */
+	public record ConsentedProfile(boolean reachable, Map<String, String> states, Map<String, Object> fields) {
+	}
+
 	private final RestClient client;
 
 	public UserDirectoryClient(PartnerProperties props, RestClient.Builder builder) {
@@ -78,6 +85,27 @@ public class UserDirectoryClient {
 					return res.bodyTo(DeliveryContext.class);
 				});
 			return Optional.ofNullable(ctx);
+		}
+		catch (RestClientException e) {
+			throw new UpstreamUnavailableException("cannot reach user-service", e);
+		}
+	}
+
+	/** The profile fields the user allowed this app to read. Empty when the user does not exist. */
+	public Optional<ConsentedProfile> profile(UUID userId, UUID appId, List<String> capabilities) {
+		try {
+			ConsentedProfile p = client.get().uri(u -> u.path("/internal/users/{id}/consented-profile").queryParam("appId", appId)
+					.queryParam("capabilities", String.join(",", capabilities)).build(userId))
+				.exchange((req, res) -> {
+					if (res.getStatusCode().value() == 404) {
+						return null;
+					}
+					if (!res.getStatusCode().is2xxSuccessful()) {
+						throw new UpstreamUnavailableException("user-service answered " + res.getStatusCode().value(), null);
+					}
+					return res.bodyTo(ConsentedProfile.class);
+				});
+			return Optional.ofNullable(p);
 		}
 		catch (RestClientException e) {
 			throw new UpstreamUnavailableException("cannot reach user-service", e);

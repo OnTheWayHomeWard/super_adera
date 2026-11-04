@@ -10,6 +10,7 @@ public record UserProperties(
 		@DefaultValue("") String aliasHmacSecret,
 		@DefaultValue Kratos kratos,
 		@DefaultValue Registry registry,
+		@DefaultValue Notification notification,
 		@DefaultValue Storage storage,
 		@DefaultValue Avatar avatar,
 		@DefaultValue("16384") int extraMaxBytes) {
@@ -22,6 +23,11 @@ public record UserProperties(
 	/** Where the central audit log lives (registry-service, internal network). */
 	public record Registry(
 			@DefaultValue("http://localhost:8087") String url) {
+	}
+
+	/** notification-service holds the Adera signing key; it signs the launch tokens (internal call). */
+	public record Notification(
+			@DefaultValue("http://localhost:8085") String url) {
 	}
 
 	public record Storage(

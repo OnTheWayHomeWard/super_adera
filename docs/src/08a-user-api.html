@@ -63,7 +63,7 @@
 </nav>
 <main>
 <h1>8a. End-user API</h1>
-<p class="lead">What the Flutter app calls with a session token: profile, location, avatar, devices, logout, per-app mute, per-app permissions (consent), the notification inbox and the mini-app catalog. 29 endpoints.</p>
+<p class="lead">What the Flutter app calls with a session token: profile, location, avatar, devices, logout, per-app mute, per-app permissions (consent), the notification inbox and the mini-app catalog. 30 endpoints.</p>
 <div class="callout"><span class="label">Conventions on this page</span>
 <p>All paths are relative to the gateway, <code>$GATEWAY</code> = <code>http://127.0.0.1:9080</code> in dev. <code>$TOKEN</code> is the Kratos <code>session_token</code> returned by sign-up or login (<a href="08e-kratos-flows.html">8e</a>); <code>$APP_ID</code> and <code>$ITEM_ID</code> are UUIDs taken from earlier answers. Examples were captured on <strong>2026-10-25</strong> against the dev stack (console SMS, Mailpit) with a throwaway user and a throwaway LIVE mini app, both deleted afterwards; phone numbers and signed-URL secrets are masked.</p>
 <p>Error bodies from our services are <code>{"error":"&lt;code&gt;","fields":{...}}</code> (<code>fields</code> only for validation). Two things do not follow that shape: errors produced by the gateway (empty <code>401</code>, HTML <code>429</code>, <code>404 {"error_msg":"404 Route Not Found"}</code>) and Kratos' own errors. Framework errors (<code>415</code>, a bad UUID in a path, unknown route, wrong method) use it since 2026-10-26: <code>unsupported_media_type</code>, <code>invalid_request</code>, <code>not_found</code>, <code>method_not_allowed</code>.</p></div>
@@ -76,7 +76,7 @@
 </ol>
 <p>Why: Kratos' <code>whoami</code> returns the identity in its body, not in headers, and services should not each implement session checking. One small translator endpoint keeps every service simple. Spoofing check: a request with a forged <code>X-User-Id</code> still returned the caller's own profile (the gateway overwrote the header; verified by <code>tests/e2e/journey.py</code>).</p>
 <h2 id="route-table">Gateway routes behind this page</h2>
-<div class="table-wrap"><table><thead><tr><th>Gateway route id</th><th>Paths</th><th>Upstream</th><th>Auth</th><th>Limit</th></tr></thead><tbody><tr><td><code>me-permission-request</code> (priority 30)</td><td><code>POST /api/v1/me/apps/{app}/permissions/{capability}/request</code> (matched by regular expression)</td><td>user-service</td><td>forward-auth (user)</td><td>30 / 60 s</td></tr><tr><td><code>me-avatar</code> (priority 30)</td><td><code>/api/v1/me/avatar</code></td><td>user-service</td><td>forward-auth (user)</td><td>20 / 60 s</td></tr><tr><td><code>me-notifications</code> (priority 30)</td><td><code>/api/v1/me/notifications</code>, <code>/api/v1/me/notifications/*</code></td><td>notification-service</td><td>forward-auth (user)</td><td>300 / 60 s</td></tr><tr><td><code>me</code> (priority 20)</td><td><code>/api/v1/me</code>, <code>/api/v1/me/*</code></td><td>user-service</td><td>forward-auth (user)</td><td>300 / 60 s</td></tr><tr><td><code>apps-catalog</code> (priority 20)</td><td><code>/api/v1/apps</code>, <code>/api/v1/apps/*</code></td><td>registry-service</td><td>forward-auth (user)</td><td>300 / 60 s</td></tr></tbody></table></div>
+<div class="table-wrap"><table><thead><tr><th>Gateway route id</th><th>Paths</th><th>Upstream</th><th>Auth</th><th>Limit</th></tr></thead><tbody><tr><td><code>me-launch</code> (priority 30)</td><td><code>POST /api/v1/me/apps/{app}/launch</code> (matched by regular expression)</td><td>user-service</td><td>forward-auth (user)</td><td>60 / 60 s</td></tr><tr><td><code>me-permission-request</code> (priority 30)</td><td><code>POST /api/v1/me/apps/{app}/permissions/{capability}/request</code> (matched by regular expression)</td><td>user-service</td><td>forward-auth (user)</td><td>30 / 60 s</td></tr><tr><td><code>me-avatar</code> (priority 30)</td><td><code>/api/v1/me/avatar</code></td><td>user-service</td><td>forward-auth (user)</td><td>20 / 60 s</td></tr><tr><td><code>me-notifications</code> (priority 30)</td><td><code>/api/v1/me/notifications</code>, <code>/api/v1/me/notifications/*</code></td><td>notification-service</td><td>forward-auth (user)</td><td>300 / 60 s</td></tr><tr><td><code>me</code> (priority 20)</td><td><code>/api/v1/me</code>, <code>/api/v1/me/*</code></td><td>user-service</td><td>forward-auth (user)</td><td>300 / 60 s</td></tr><tr><td><code>apps-catalog</code> (priority 20)</td><td><code>/api/v1/apps</code>, <code>/api/v1/apps/*</code></td><td>registry-service</td><td>forward-auth (user)</td><td>300 / 60 s</td></tr></tbody></table></div>
 <p>The limit key is the client IP (<code>remote_addr</code>), counted in Redis; every route has its own counter. Locally all clients share one Docker IP; behind a production proxy the real client IP must be configured (see the known limitations in docs/SETUP.md section 12).</p>
 <h2 id="endpoints">Endpoints</h2>
 <details class="endpoint" id="ep-user-get-me">
@@ -1002,6 +1002,51 @@ Content-Type: application/json
 ]</code></pre>
 <h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th>Error code</th><th>When it happens</th></tr></thead><tbody><tr><td><strong>403</strong></td><td><code>account_suspended</code> / <code>account_deleted</code></td><td>My account is not ACTIVE.</td></tr></tbody></table></div>
 <h4>How to use it</h4><ul><li>Tapping an app opens its menu sheet (<code>GET .../permissions</code>) where each switch can be turned off, or Disconnect can be pressed.</li></ul>
+</div></details>
+<details class="endpoint" id="ep-user-launch">
+<summary><span class="method m-post">POST</span><span class="path">/api/v1/me/apps/{app}/launch</span><span class="sum">Open a mini app: launch token, URL and permission states</span></summary>
+<div class="body"><dl class="meta"><dt>Audience</dt><dd>signed-in end user (the super app, when the user opens a mini app)</dd><dt>Client path</dt><dd><code>/api/v1/me/apps/{app}/launch</code> through the gateway; <code>{app}</code> is the app's id or slug</dd><dt>Internal path</dt><dd>same path on user-service (which asks notification-service to sign: <code>POST /internal/launch-tokens</code>)</dd><dt>Auth</dt><dd><code>Authorization: Bearer $TOKEN</code> (Kratos session token), checked by the gateway's forward-auth.</dd><dt>Rate limit</dt><dd>60 per 60 s per client IP (gateway route <code>me-launch</code>); over the limit the gateway answers <code>429</code></dd><dt>Implemented in</dt><dd><code>services/user-service/.../launch/LaunchController.java</code>; signer <code>services/notification-service/.../auth/LaunchTokenController.java</code></dd></dl>
+<h4>Purpose</h4><p>Opening a mini app. <strong>No dialog.</strong> The server mints the user's pseudonymous id for this app (first time only), reconnects it if the user had disconnected (<code>user.basic</code> needs no dialog), asks for a five-minute RS256 launch token signed with the Adera key and returns it with the URL to load and the user's current state per permission. The mini app's backend verifies the token against <code>/.well-known/jwks.json</code> (runnable examples in the partner guide) and learns who is calling: <code>sub</code> is the pseudonymous id, never the real user id. <code>scopes</code> are only a hint; every data call re-checks consent.</p>
+<h4>Request parameters</h4><div class="table-wrap"><table><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why it exists</th></tr></thead><tbody><tr><td><code>app</code></td><td>path</td><td>string</td><td>yes</td><td>app id (UUID) or slug; the app must be LIVE</td><td>Which mini app is opened.</td></tr></tbody></table></div>
+<h4>Example (seeded user Demo Hana, app demo-ride; the token is shortened)</h4>
+<pre><code>curl -s -X POST "$GATEWAY/api/v1/me/apps/demo-ride/launch" \
+  -H "Authorization: Bearer $TOKEN"</code></pre>
+<pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+
+{
+  "launchToken": "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6ImFk...",
+  "expiresInSeconds": 300,
+  "url": "https://www.zayride.com?launch=eyJhbGciOiJSUzI1NiIs...",
+  "consents": [
+    {
+      "capability": "location.fine",
+      "state": "NOT_ASKED"
+    },
+    {
+      "capability": "notify.inapp",
+      "state": "GRANTED"
+    },
+    {
+      "capability": "notify.sms",
+      "state": "GRANTED"
+    },
+    {
+      "capability": "pay.request",
+      "state": "NOT_ASKED"
+    },
+    {
+      "capability": "user.basic",
+      "state": "GRANTED"
+    },
+    {
+      "capability": "user.full_name",
+      "state": "NOT_ASKED"
+    }
+  ]
+}</code></pre>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th>Error code</th><th>When it happens</th></tr></thead><tbody><tr><td><strong>404</strong></td><td><code>not_found</code></td><td>No such app, or a DRAFT.</td></tr><tr><td><strong>403</strong></td><td><code>app_not_live</code></td><td>PAUSED or KILLED.</td></tr><tr><td><strong>403</strong></td><td><code>account_suspended</code> / <code>account_deleted</code></td><td>The account is not ACTIVE.</td></tr><tr><td><strong>503</strong></td><td><code>service_unavailable</code></td><td>registry-service or the signer in notification-service could not be reached.</td></tr></tbody></table></div>
+<h4>How to use it</h4><ul><li><code>url</code> is the app's registered entry URL with <code>launch=&lt;token&gt;</code> added (<code>?</code> or <code>&amp;</code>); <code>null</code> when staff registered no URL.</li><li><code>consents</code> lists every capability staff granted the app with this user's state (<code>NOT_ASKED</code>, <code>GRANTED</code>, <code>DENIED</code>, <code>BLOCKED</code>), in the registry's alphabetical order; it never shows a dialog.</li><li>The token lives 5 minutes (<code>expiresInSeconds</code>). Call launch again whenever the mini app is opened; do not cache a token.</li><li>Decoded token (see section 14): header <code>{"alg":"RS256","typ":"JWT","kid":"..."}</code>; claims <code>iss</code> <code>adera</code>, <code>aud</code> the app id, <code>sub</code> the pseudonymous id, <code>env</code> <code>dev</code> or <code>prod</code>, <code>scopes</code>, <code>iat</code>, <code>exp</code>, <code>jti</code>.</li></ul>
 </div></details>
 <details class="endpoint" id="ep-user-get-notifications">
 <summary><span class="method m-get">GET</span><span class="path">/api/v1/me/notifications</span><span class="sum">List my inbox (bell menu)</span></summary>

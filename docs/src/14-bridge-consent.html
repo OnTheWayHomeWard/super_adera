@@ -67,7 +67,7 @@
 <h1>14. Mini app bridge and user consent (agreed design)</h1>
 <p class="lead">How a mini app gets data about a user and from the device, how the user decides what it may have, and how we stop it from taking more. Permissions are asked <strong>at the moment of need, one at a time, like Android</strong>, not all at launch. Design agreed on 2026-11-04; implementation starts from this page. Every endpoint and sample below is the intended shape; once a step is built, its real requests and responses replace the illustrations (marked as such on each step).</p>
 
-<div class="callout warn"><span class="label">Status</span><p>Agreed, build in progress (section 10 lists the steps and which are built). Decisions taken are in section 11. Built so far: step 1 (purpose per capability), step 2 (the consent endpoints in user-service) and step 3 (counts per capability in the backoffice) and step 4 (notify gate, mute as consent).</p></div>
+<div class="callout warn"><span class="label">Status</span><p>Agreed, build in progress (section 10 lists the steps and which are built). Decisions taken are in section 11. Built so far: step 1 (purpose per capability), step 2 (the consent endpoints in user-service) and step 3 (counts per capability in the backoffice) and step 4 (notify gate, mute as consent) and step 5 (launch token, partner profile).</p></div>
 
 <section><h2 id="short">1. The short answer</h2>
 <ul>
@@ -109,22 +109,69 @@
 <h3>Location</h3>
 <p>The phone asks the user for its own location permission the first time (the system dialog). Our consent is a separate yes. The bridge only gives a reading if both are yes, and otherwise returns <code>denied</code> or <code>blocked</code> without telling the mini app which of the two said no. If the mini app's backend needs the position, the mini app frontend sends it; we do not store positions on our servers.</p></section>
 
-<section><h2 id="launch">4. Launching a mini app: the launch token</h2>
-<p>Opening a mini app creates a short session. The super app asks the backend for a launch token and loads the mini app URL (the one registered in the backoffice) with the token. The token is a signed JWT using the same Adera signing key as callbacks; partners already fetch the public key at <code>/.well-known/jwks.json</code>.</p>
+<section><h2 id="launch">4. Launching a mini app: the launch token <span class="badge built">built 2026-11-04</span></h2>
+<p>Opening a mini app creates a short session. The super app asks the backend for a launch token and loads the mini app URL (the one registered in the backoffice) with the token. The token is a signed JWT using the same Adera signing key as callbacks and responses; partners already fetch the public key at <code>/.well-known/jwks.json</code>. <strong>The private key stays in notification-service</strong>: user-service decides who gets a token and with which scopes, then asks notification-service (<code>POST /internal/launch-tokens</code>, internal secret) to sign it.</p>
 <pre><code>POST /api/v1/me/apps/demo-ride/launch
 Authorization: Bearer &lt;user session&gt;
 
 200
 {
-  "launchToken": "eyJhbGciOiJSUzI1NiIsImtpZCI6...",
+  "launchToken": "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6ImFk...",
   "expiresInSeconds": 300,
-  "url": "https://ride.example.com/app?launch=eyJhbGciOi...",
+  "url": "https://www.zayride.com?launch=eyJhbGciOiJSUzI1NiIs...",
   "consents": [
-    {"capability": "user.basic",     "state": "GRANTED"},
-    {"capability": "location.fine",  "state": "NOT_ASKED"}   (a state only; no dialog is shown at launch)
+    {
+      "capability": "location.fine",
+      "state": "NOT_ASKED"
+    },
+    {
+      "capability": "notify.inapp",
+      "state": "GRANTED"
+    },
+    {
+      "capability": "notify.sms",
+      "state": "GRANTED"
+    },
+    {
+      "capability": "pay.request",
+      "state": "NOT_ASKED"
+    },
+    {
+      "capability": "user.basic",
+      "state": "GRANTED"
+    },
+    {
+      "capability": "user.full_name",
+      "state": "NOT_ASKED"
+    }
   ]
 }</code></pre>
-<p>Decoded token (claims): <code>iss</code> Adera, <code>aud</code> the app's id, <code>sub</code> the pseudonymous id <code>u_p_...</code> (never the real user id), <code>env</code> dev or prod, <code>scopes</code> the capabilities the user allowed <em>at this moment</em>, <code>exp</code> five minutes ahead. The mini app backend uses it to know who is calling, then calls Adera with its own signed requests for the data. Scopes in the token are only a hint for the mini app: Adera re-checks consent on every data call, so a revoked permission stops working even with a live token.</p></section>
+<p>Real capture (seeded user Demo Hana, app demo-ride, DEV; token shortened). Decoded header and claims of that token:</p>
+<pre class="out"><code>header
+{
+  "alg": "RS256",
+  "typ": "JWT",
+  "kid": "adera-sig-202610"
+}
+
+claims
+{
+  "iss": "adera",
+  "aud": "4e831b72-a33b-4d93-a7ba-65e19b9dbd0a",
+  "sub": "u_p_5496f0de1378750142d148c9ea19b2c9",
+  "env": "dev",
+  "scopes": [
+    "notify.inapp",
+    "notify.sms",
+    "user.basic"
+  ],
+  "iat": 1793824051,
+  "exp": 1793824351,
+  "jti": "d73f34b8-021e-420f-9f57-4fe89757e898"
+}</code></pre>
+<p>Claims: <code>iss</code> <code>adera</code>, <code>aud</code> the app's id, <code>sub</code> the pseudonymous id <code>u_p_...</code> (never the real user id; it is the id to use in <code>/v1/users/{sub}/profile</code>), <code>env</code> <code>dev</code> or <code>prod</code>, <code>scopes</code> the capabilities the user allowed at this moment (here the staff-granted ones the user allowed: the pseudonymous id and the two notification channels), <code>exp</code> five minutes ahead (<code>exp - iat = 300</code>), <code>jti</code> a random id. Scopes in the token are only a hint for the mini app: Adera re-checks consent on every data call, so a revoked permission stops working even with a live token.</p>
+<p>The mini app's backend verifies it with the public key (checked for this very token with <code>openssl dgst -sha256 -verify</code> against the key built from the JWKS: "Verified OK"; runnable Python and Node examples <code>verify_launch_token.py</code> and <code>verify-launch-token.js</code> are in the partner guide, tested against this stack: a changed signature gives <code>InvalidSignature</code> / "bad signature", a token for another app is refused with "this token is for another app").</p>
+</section>
 
 <section><h2 id="consent">5. Permission states and what we store</h2>
 <p>Each (user, app, capability) is in one of four states:</p>
@@ -213,8 +260,8 @@ HTTP 200 OK   capabilities:
 <tr><td><code>PUT /api/v1/me/apps/{app}/permissions/{capability}</code> <span class="badge built">built</span></td><td>The menu switch: sets GRANTED or DENIED, resets the count, unblocks</td><td>Super app, menu sheet</td></tr>
 <tr><td><code>DELETE /api/v1/me/apps/{app}/permissions</code> <span class="badge built">built</span></td><td>Disconnect: everything to DENIED, count 0, and a <code>user.disconnected</code> callback to the partner</td><td>Super app</td></tr>
 <tr><td><code>GET /api/v1/me/permissions</code> <span class="badge built">built</span></td><td>Settings screen: every app that holds at least one permission, with what it can see</td><td>Super app</td></tr>
-<tr><td><code>POST /api/v1/me/apps/{app}/launch</code></td><td>Launch token (section 4)</td><td>Super app</td></tr>
-<tr><td><code>GET /v1/users/{alias}/profile</code> (partner API)</td><td>Only the fields the user allowed, nothing else</td><td>Mini app backend, signed</td></tr>
+<tr><td><code>POST /api/v1/me/apps/{app}/launch</code> <span class="badge built">built</span></td><td>Launch token (section 4)</td><td>Super app</td></tr>
+<tr><td><code>GET /v1/users/{alias}/profile</code> (partner API) <span class="badge built">built</span></td><td>Only the fields the user allowed, nothing else</td><td>Mini app backend, signed</td></tr>
 <tr><td><code>GET /admin/api/v1/apps/{id}/permissions</code> <span class="badge built">built</span></td><td>Backoffice: per capability, counts of granted, denied and blocked users (counts only, no list)</td><td>Staff</td></tr>
 </tbody></table></div>
 
@@ -538,20 +585,83 @@ notify.sms NOT_ASKED&gt;GRANTED DIALOG</code></pre>
     }
   ]
 }</code></pre>
-<h3>What the mini app's backend sees</h3>
-<pre><code>GET /v1/users/u_p_8f3c.../profile          (signed with ADERA-SIG-1)
+<h3>What the mini app's backend sees <span class="badge built">real, step 5 built</span></h3>
+<p>Captured on 2026-11-04 through the gateway with the seeded partner key of demo-ride (ADERA-SIG-1), user Demo Hana, DEV. The answer carries Adera's signature headers (<code>X-Adera-Key-Id</code>, <code>X-Adera-Timestamp</code>, <code>X-Adera-Signature</code>), verified by the partner clients. <strong>Decision on the 403:</strong> without a <code>fields</code> parameter the endpoint returns whatever the user allowed (an alias with only <code>user.basic</code> is a normal 200: the scenario's step 4); a backend that NEEDS a permission says so with <code>?fields=user.full_name,...</code> and gets this section's <code>403 consent_required</code> when it is not allowed. The whole profile is refused (<code>403</code>, capability <code>user.basic</code>) only after Disconnect.</p>
+<pre><code>GET /v1/users/u_p_5496f0de1378750142d148c9ea19b2c9/profile          (signed with ADERA-SIG-1)
 
-200
-{
-  "alias": "u_p_8f3c...",
-  "granted": ["user.basic", "user.full_name"],
-  "fullName": "Hana Tesfaye"
+200  {
+  "alias": "u_p_5496f0de1378750142d148c9ea19b2c9",
+  "granted": [
+    "user.basic"
+  ]
 }
 
-(after the user turns user.full_name off in the menu)
-403
-{"error": "consent_required", "capability": "user.full_name", "state": "DENIED"}</code></pre>
-<p>Fields the user did not allow are not returned as null. They are absent, so the mini app cannot tell "no data" from "not allowed" except through <code>granted</code>. A mini app backend that needs a permission must have had its frontend request it first: the backend can never trigger a dialog.</p></section>
+(the user turns user.full_name on in the menu)
+
+200  {
+  "alias": "u_p_5496f0de1378750142d148c9ea19b2c9",
+  "granted": [
+    "user.basic",
+    "user.full_name"
+  ],
+  "fullName": "Demo Hana Tesfaye"
+}
+
+(the user turns user.full_name off in the menu; the backend needs it)
+GET /v1/users/u_p_5496f0de1378750142d148c9ea19b2c9/profile?fields=user.full_name
+
+403  {
+  "error": "consent_required",
+  "capability": "user.full_name",
+  "state": "DENIED"
+}
+
+(the same, without asking for the name)
+
+200  {
+  "alias": "u_p_5496f0de1378750142d148c9ea19b2c9",
+  "granted": [
+    "user.basic"
+  ]
+}
+
+(the user taps Disconnect)
+
+403  {
+  "error": "consent_required",
+  "capability": "user.basic",
+  "state": "DENIED"
+}
+
+(the user opens the app again: launch reconnects user.basic)
+
+200  {
+  "alias": "u_p_5496f0de1378750142d148c9ea19b2c9",
+  "granted": [
+    "user.basic"
+  ]
+}
+
+GET /v1/users/{alias}/profile?fields=user.contact      (demo-ride was never granted user.contact)
+
+403  {
+  "error": "capability_not_granted",
+  "capability": "user.contact"
+}</code></pre>
+<p>demo-food holds name, contact and address; for a user who allowed all three and signed up with an email only (no phone, no saved place) the answer is:</p>
+<pre class="out"><code>200  {
+  "alias": "u_p_0221b6aa2c859fa03869ed5534a97823",
+  "granted": [
+    "user.basic",
+    "user.full_name",
+    "user.contact",
+    "user.address"
+  ],
+  "fullName": "Demo Hana Tesfaye",
+  "email": "demo.hana@example.com"
+}</code></pre>
+<p>Fields the user did not allow are not returned as null. They are absent, so the mini app cannot tell "no data" from "not allowed" except through <code>granted</code>. A mini app backend that needs a permission must have had its frontend request it first: the backend can never trigger a dialog. Each read is logged without the values (table <code>profile_access</code>).</p>
+</section>
 
 <section><h2 id="scenario">7. Scenario: Demo Ride, start to finish</h2>
 <ol>
@@ -643,7 +753,7 @@ PUT /api/v1/me/apps/{appId}/preferences   {"muteSms": false}
 <li><strong>Built 2026-11-04.</strong> user-service: <code>app_consent</code>, <code>consent_event</code>, the request, answer, menu, list and disconnect endpoints with the state rules of section 5. Tests, docs.</li>
 <li><strong>Built 2026-11-04.</strong> Backoffice: counts per capability on the app page.</li>
 <li><strong>Built 2026-11-04.</strong> notify.* gate in the notification path, and mute converted to consent.</li>
-<li>Launch token and the partner <code>/profile</code> endpoint.</li>
+<li><strong>Built 2026-11-04.</strong> Launch token and the partner <code>/profile</code> endpoint.</li>
 <li>Callbacks <code>user.consent_changed</code> and <code>user.disconnected</code>.</li>
 <li>The bridge specification for the super app team: method list, message format, origin rule, error codes. Written last, because it is a thin layer over steps 1 to 6.</li>
 </ol>
@@ -677,6 +787,9 @@ PUT /api/v1/me/apps/{appId}/preferences   {"muteSms": false}
 <li><strong>Step 4, mute endpoints.</strong> <code>GET/PUT /api/v1/me/apps/{appId}/preferences</code> keep their shape and gain <code>states</code>. <code>muteX</code> is true for DENIED and BLOCKED; <code>muteX: true</code> sets DENIED (count 0) and <code>false</code> sets GRANTED (the menu switch, source MENU), also for a channel staff did not grant (the answer stays inert). A user who never answered shows "not muted" but is refused until they allow it: default-deny. This is a breaking change for old clients that assumed muted = false means messages flow; documented, no real users.</li>
 <li><strong>Step 4, synthetic users.</strong> <code>u_p_test_ok</code>, <code>_unreachable</code> and <code>_muted</code> behave as before. Three new ones, <code>u_p_test_noconsent</code>, <code>_denied</code> and <code>_blocked</code>, show the consent gate in DEV.</li>
 <li><strong>Step 4, seed data.</strong> A seeded user allows every channel of the apps they use except the ones they muted (<code>seed_scenarios.py</code>, step <code>notifyconsent</code>); the e2e scripts grant consent through the same endpoints before sending.</li>
+<li><strong>Step 5, who signs.</strong> The launch token is signed by notification-service (it holds the one Adera signing key, loaded from Infisical) through an internal endpoint; user-service never sees the private key. The partner signature check for <code>/v1/**</code> lives in notification-service too, so the profile endpoint is served there and reads the user's data from user-service by an internal call (user data stays owned by user-service, which releases only what is GRANTED).</li>
+<li><strong>Step 5, the profile.</strong> <code>?fields=</code> (optional) is the partner saying what it needs: a missing one is <code>403 consent_required</code> naming it (the page's sample). Without it, whatever is allowed is returned. <code>user.basic</code> not granted (disconnected) is a 403 for the whole profile. A capability the app was never granted is <code>403 capability_not_granted</code> (checked first). Unknown, foreign, deleted and suspended aliases are all <code>422 user_unreachable</code> (like sends). <code>user.address</code> returns <code>{countryCode, region, city}</code> from the profile's saved place: the platform has no street address, and coordinates are never released. <code>user.contact</code> returns <code>phone</code> and <code>email</code> separately, each only if the user has it. Synthetic users answer in DEV (<code>u_p_test_ok</code> with fake data; the consent-state ones as for notifications) and are refused in PROD.</li>
+<li><strong>Step 5, launch details.</strong> <code>iss</code> is the string <code>adera</code>; <code>env</code> is the deployment's (<code>dev</code>/<code>prod</code>); <code>consents</code> in the response lists every capability staff granted with the user's state in the registry's alphabetical order (not the page's illustrative order); <code>url</code> is <code>null</code> when no entry URL is registered; the call reconnects a disconnected <code>user.basic</code> (event source <code>LAUNCH</code>) and nothing else. Rate limit 60 per minute per address (route <code>me-launch</code>).</li>
 </ul></section>
 
 <div class="pager"><a class="prev" href="13-sample-data.html"><small>Previous</small>13. Sample data</a><a class="next" href="../index.html"><small>Back to</small>Home / contents</a></div>
