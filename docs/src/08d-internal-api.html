@@ -471,7 +471,7 @@ Content-Type: text/plain; charset=utf-8
 <dt>Rate limit</dt><dd>none (no gateway in the path)</dd>
 <dt>Implemented in</dt><dd><code>services/registry-service/.../internal/InternalController.java#context</code></dd>
 </dl>
-<h4>Purpose</h4><p>One call that tells the delivery side everything about an app for this deployment's environment (<code>ADERA_ENV</code>, always used): status, whether it is <code>usable</code> (DEV works for any app that is not KILLED, so partners can integrate before going live; PROD only when the app status is LIVE), the granted capabilities, the per-channel limits and the allowed server addresses (CIDRs) of that environment. The other environment's addresses are stored but never returned.</p>
+<h4>Purpose</h4><p>One call that tells the delivery side everything about an app for this deployment's environment (<code>ADERA_ENV</code>, always used): status, whether it is <code>usable</code> (DEV works for any app that is not KILLED, so partners can integrate before going live; PROD only when the app status is LIVE), the granted capabilities (<code>grantedCapabilities</code>: just the keys; <code>permissions</code>: each with its dialog <code>label</code>, the staff-approved <code>purpose</code> per language, and the catalog <code>defaultPurpose</code> used when no purpose was approved), the per-channel limits and the allowed server addresses (CIDRs) of that environment. The other environment's addresses are stored but never returned.</p>
 <h4>Request parameters</h4><div class="table-wrap"><table><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why it exists</th></tr></thead><tbody><tr><td><code>appId</code></td><td>path</td><td>UUID</td><td>yes</td><td>uuid</td><td>The app.</td></tr><tr><td><code>environment</code></td><td>query</td><td>string</td><td>no</td><td><code>DEV</code> or <code>PROD</code> (case-insensitive); must equal this deployment's environment</td><td>Optional. Asking for the other environment is refused with <code>403 wrong_environment</code>, so a caller cannot read the other environment's settings by mistake.</td></tr></tbody></table></div>
 <h4>DEV deployment (usable)</h4>
 <pre><code>curl -s "http://127.0.0.1:8087/internal/apps/&lt;app uuid&gt;/context?environment=DEV" -H "X-Internal-Secret: $INTERNAL_SECRET"</code></pre>
@@ -479,28 +479,88 @@ Content-Type: text/plain; charset=utf-8
 Content-Type: application/json
 
 {
-  "appId": "fc32bca2-89a9-4426-b834-aad34a3eebbe",
-  "slug": "docs-demo-2015",
+  "appId": "&lt;app uuid&gt;",
+  "slug": "demo-ride",
   "status": "LIVE",
   "environment": "DEV",
   "usable": true,
   "denyReason": null,
   "grantedCapabilities": [
-    "location.coarse",
-    "notify.inapp"
+    "location.fine",
+    "notify.inapp",
+    "notify.sms",
+    "pay.request",
+    "user.basic",
+    "user.full_name"
+  ],
+  "permissions": [
+    {
+      "capability": "location.fine",
+      "label": "Your precise location",
+      "purpose": {
+        "am": "ለእርስዎ ቅርብ የሆነውን አሽከርካሪ ለማግኘት",
+        "en": "To find the closest driver to you"
+      },
+      "defaultPurpose": "Use your exact position while the app is open."
+    },
+    {
+      "capability": "notify.inapp",
+      "label": "Notifications in Adera",
+      "purpose": {},
+      "defaultPurpose": "Send you messages inside Adera."
+    },
+    {
+      "capability": "notify.sms",
+      "label": "Text messages (SMS)",
+      "purpose": {},
+      "defaultPurpose": "Send you text messages."
+    },
+    {
+      "capability": "pay.request",
+      "label": "Payments",
+      "purpose": {
+        "am": "ለትዕዛዝዎ ክፍያ ለመጠየቅ",
+        "en": "To ask you to pay for your order"
+      },
+      "defaultPurpose": "Ask you to confirm a payment."
+    },
+    {
+      "capability": "user.basic",
+      "label": "Your Adera id",
+      "purpose": {},
+      "defaultPurpose": "Recognise you in the app without learning who you are."
+    },
+    {
+      "capability": "user.full_name",
+      "label": "Your name",
+      "purpose": {
+        "am": "በስምዎ ለመጥራት",
+        "en": "To address you by name"
+      },
+      "defaultPurpose": "Greet you by name."
+    }
   ],
   "notificationLimits": [
     {
       "channel": "IN_APP",
-      "maxPerUserPerDay": 20,
-      "maxPerDay": 1000,
+      "maxPerUserPerDay": 50,
+      "maxPerDay": 50000,
+      "maxDistinctUsersPerDay": 50000,
+      "maxTotal": null
+    },
+    {
+      "channel": "SMS",
+      "maxPerUserPerDay": 6,
+      "maxPerDay": 2000,
       "maxDistinctUsersPerDay": 1000,
-      "maxTotal": 10000
+      "maxTotal": 20000
     }
   ],
   "allowedCidrs": [
     "127.0.0.1/32",
-    "172.16.0.0/12"
+    "172.16.0.0/12",
+    "192.168.0.0/16",
+    "10.0.0.0/8"
   ]
 }</code></pre><p class="masked">The allowed CIDRs were set for this test (loopback and the Docker range); a single address is normalised to &lt;code&gt;/32&lt;/code&gt;.</p>
 <h4>The other environment (refused)</h4>

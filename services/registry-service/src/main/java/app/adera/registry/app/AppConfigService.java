@@ -23,6 +23,10 @@ public class AppConfigService {
 
 	static final Set<String> CHANNELS = Set.of("SMS", "EMAIL", "IN_APP");
 	static final Set<String> CURRENCIES = Set.of("ETB", "USD");
+	/** The purpose is one short sentence a user reads in a dialog. */
+	static final int MIN_PURPOSE = 10;
+	static final int MAX_PURPOSE = 160;
+	private static final java.util.regex.Pattern LINK = java.util.regex.Pattern.compile("(?i)(https?:|ftp:|mailto:|www\\.|://)");
 	static final Set<String> STATES = Set.of("GRANTED", "DENIED", "SUSPENDED");
 
 	private final AppConfigRepository config;
@@ -52,7 +56,7 @@ public class AppConfigService {
 		Capability capability = Capability.byKey(key).orElseThrow(() -> new Errors.ValidationFailed("capability", "unknown capability '" + key + "'"));
 		Map<String, String> errors = new LinkedHashMap<>();
 		for (String k : body.keySet()) {
-			if (!k.equals("state") && !k.equals("reason")) {
+			if (!k.equals("state") && !k.equals("purpose") && !k.equals("reason")) {
 				errors.put(k, "unknown field");
 			}
 		}
@@ -60,35 +64,67 @@ public class AppConfigService {
 		if (!STATES.contains(state)) {
 			errors.put("state", "must be GRANTED, DENIED or SUSPENDED");
 		}
-		Map<String, String> reason = new LinkedHashMap<>();
-		if (body.get("reason") instanceof Map<?, ?> r) {
+		// "reason" is the old name of "purpose", still accepted as an alias
+		if (body.containsKey("purpose") && body.containsKey("reason")) {
+			errors.put("purpose", "send either purpose or its old name reason, not both");
+		}
+		Object rawPurpose = body.containsKey("purpose") ? body.get("purpose") : body.get("reason");
+		Map<String, String> purpose = new LinkedHashMap<>();
+		if (rawPurpose instanceof Map<?, ?> r) {
 			r.forEach((lang, text) -> {
 				if (!AppPatch.LANGS.contains(String.valueOf(lang))) {
-					errors.put("reason", "unsupported language '" + lang + "' (use en, am, om)");
+					errors.put("purpose", "unsupported language '" + lang + "' (use en, am, om)");
 				}
 				else if (text != null && !String.valueOf(text).isBlank()) {
-					reason.put(String.valueOf(lang), String.valueOf(text).strip());
+					String t = String.valueOf(text).strip();
+					String problem = purposeProblem(t);
+					if (problem != null) {
+						errors.put("purpose", lang + ": " + problem);
+					}
+					purpose.put(String.valueOf(lang), t);
 				}
 			});
 		}
-		else if (body.get("reason") != null) {
-			errors.put("reason", "must be an object like {\"en\": \"...\"}");
+		else if (rawPurpose != null) {
+			errors.put("purpose", "must be an object like {\"en\": \"Find a driver near you.\"}");
 		}
-		if (state.equals("GRANTED") && capability.reasonRequired()) {
-			String en = reason.getOrDefault("en", "");
-			if (en.length() < 10) {
-				errors.put("reason", "required for " + key + ": a plain-language English reason (min 10 chars) shown to users, e.g. 'To show technicians near you'");
+		if (state.equals("GRANTED") && capability.purposeRequired() && !errors.containsKey("purpose")) {
+			String en = purpose.getOrDefault("en", "");
+			if (en.length() < MIN_PURPOSE) {
+				errors.put("purpose", "required for " + key + ": a plain-language English sentence (min " + MIN_PURPOSE + " chars) shown to users, e.g. 'Find a driver near you.'");
 			}
 		}
 		if (!errors.isEmpty()) {
 			throw new Errors.ValidationFailed(errors);
 		}
 		Instant now = clock.instant();
-		config.upsertCapability(appId, key, state, reason, actor == null ? null : actor.id(), now);
+		AppConfigRepository.CapabilityRow before = config.capabilities(appId).stream().filter(c -> c.capability().equals(key)).findFirst().orElse(null);
+		config.upsertCapability(appId, key, state, purpose, actor == null ? null : actor.id(), now);
 		if (state.equals("GRANTED") && capability.limitChannel() != null) {
 			config.insertLimitIfAbsent(appId, defaultLimit(capability.limitChannel()), now);
 		}
-		audit.record(actor, "capability.set", "mini_app", appId.toString(), Map.of("capability", key, "state", state));
+		// What the user will be told is part of the record: the new text and what it replaced.
+		Map<String, Object> meta = new LinkedHashMap<>();
+		meta.put("capability", key);
+		meta.put("state", state);
+		meta.put("purpose", purpose);
+		meta.put("previousState", before == null ? null : before.state());
+		meta.put("previousPurpose", before == null ? null : before.purpose());
+		audit.record(actor, "capability.set", "mini_app", appId.toString(), meta);
+	}
+
+	/** Null when fine, else what is wrong (one sentence, no links, no line breaks, at most 160 characters). */
+	static String purposeProblem(String text) {
+		if (text.length() > MAX_PURPOSE) {
+			return "at most " + MAX_PURPOSE + " characters (one sentence)";
+		}
+		if (text.indexOf('\n') >= 0 || text.indexOf('\r') >= 0) {
+			return "must be one line (one sentence)";
+		}
+		if (LINK.matcher(text).find()) {
+			return "must not contain a link";
+		}
+		return null;
 	}
 
 	@Transactional

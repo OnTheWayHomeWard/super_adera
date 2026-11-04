@@ -16,7 +16,7 @@ import tools.jackson.databind.json.JsonMapper;
 @Repository
 public class AppConfigRepository {
 
-	public record CapabilityRow(String capability, String state, Map<String, Object> reason, Instant updatedAt) {
+	public record CapabilityRow(String capability, String state, Map<String, Object> purpose, Instant updatedAt) {
 	}
 
 	public record LimitRow(String channel, Integer maxPerUserPerDay, Integer maxPerDay, Integer maxDistinctUsersPerDay, Long maxTotal) {
@@ -38,20 +38,20 @@ public class AppConfigRepository {
 
 	// ---- capabilities
 	public List<CapabilityRow> capabilities(UUID appId) {
-		return jdbc.sql("SELECT capability, state, reason::text AS reason, updated_at FROM app_capability WHERE app_id = :id ORDER BY capability")
+		return jdbc.sql("SELECT capability, state, purpose::text AS purpose, updated_at FROM app_capability WHERE app_id = :id ORDER BY capability")
 			.param("id", appId)
-			.query((rs, n) -> new CapabilityRow(rs.getString("capability"), rs.getString("state"), map(rs, "reason"),
+			.query((rs, n) -> new CapabilityRow(rs.getString("capability"), rs.getString("state"), map(rs, "purpose"),
 					rs.getTimestamp("updated_at").toInstant()))
 			.list();
 	}
 
-	public void upsertCapability(UUID appId, String capability, String state, Map<String, String> reason, UUID by, Instant now) {
+	public void upsertCapability(UUID appId, String capability, String state, Map<String, String> purpose, UUID by, Instant now) {
 		jdbc.sql("""
-				INSERT INTO app_capability (app_id, capability, state, reason, updated_by, updated_at)
-				VALUES (:id, :cap, :state, CAST(:reason AS jsonb), :by, :now)
+				INSERT INTO app_capability (app_id, capability, state, purpose, updated_by, updated_at)
+				VALUES (:id, :cap, :state, CAST(:purpose AS jsonb), :by, :now)
 				ON CONFLICT (app_id, capability) DO UPDATE
-				SET state = :state, reason = CAST(:reason AS jsonb), updated_by = :by, updated_at = :now""")
-			.param("id", appId).param("cap", capability).param("state", state).param("reason", json(reason))
+				SET state = :state, purpose = CAST(:purpose AS jsonb), updated_by = :by, updated_at = :now""")
+			.param("id", appId).param("cap", capability).param("state", state).param("purpose", json(purpose))
 			.param("by", by).param("now", java.sql.Timestamp.from(now)).update();
 	}
 

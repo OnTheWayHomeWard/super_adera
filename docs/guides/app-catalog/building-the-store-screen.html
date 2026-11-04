@@ -43,7 +43,7 @@
 <pre><code>// ---- types (mirror the JSON) ----
 type Lang = "en" | "am" | "om";
 type I18n = Partial&lt;Record&lt;Lang, string&gt;&gt;;
-interface Permission { capability: string; description: string; reason: I18n }
+interface Permission { capability: string; label: string; description: string; purpose: I18n }
 interface MiniApp {
   id: string; slug: string; name: I18n; description: I18n;
   logoUrl: string | null; brandColor: string | null;
@@ -119,7 +119,7 @@ async function saveReview(app: string, rating: number, comment: string | null) {
 <ul><li>Catalog: in-memory plus disk, show-then-refresh, refresh every 5 to 15 minutes while browsing and on pull-to-refresh.</li><li>Detail: fetch on every store-page open.</li><li>Images: cache by URL without query string; never persist <code>logoUrl</code> beyond about 50 minutes.</li><li>Reviews: do not persist; fetch on open.</li><li>Language and market: from the profile; re-read after the user changes them and re-filter.</li></ul>
 <h2 id="design">Design notes</h2>
 <ul>
-<li>Treat <strong>every</strong> text from the API as untrusted plain text (names, descriptions, reasons, comments, publisher fields): no HTML or Markdown rendering, and handle very long strings and right-to-left or Ethiopic script.</li>
+<li>Treat <strong>every</strong> text from the API as untrusted plain text (names, descriptions, purposes, comments, publisher fields): no HTML or Markdown rendering, and handle very long strings and right-to-left or Ethiopic script.</li>
 <li>Do not assume a tile has everything: <code>brandColor</code>, <code>logoUrl</code>, <code>entryUrl</code>, <code>website</code> and <code>supportPhone</code> may be null; description may be empty.</li>
 <li>Use <code>slug</code> for deep links and routes, <code>id</code> where an API needs the UUID.</li>
 <li>Do not offer "Open" as a launch inside the super app yet (see below). If you offer "Open website", use the system browser and <code>entryUrl</code>, and pass no user data.</li>

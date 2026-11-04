@@ -813,7 +813,7 @@ X-Request-Id: 940be2b3-464f-452a-ba4b-e86e01884eba
 <dt>Rate limit</dt><dd>300 per 60 s per client IP (gateway route <code>apps-catalog</code>); over the limit the gateway answers <code>429</code></dd>
 <dt>Implemented in</dt><dd><code>services/registry-service/src/main/java/app/adera/registry/app/AppPublicController.java#list</code></dd>
 </dl>
-<h4>Purpose</h4><p>The catalog: every LIVE mini app, ordered by <code>priority</code> (lower first). Each entry carries what the user needs to decide to open it, including the list of permissions the app was granted and the plain-language reason staff recorded.</p>
+<h4>Purpose</h4><p>The catalog: every LIVE mini app, ordered by <code>priority</code> (lower first). Each entry carries what the user needs to decide to open it, including the list of permissions the app was granted and the plain-language purpose sentence staff approved for each.</p>
 <h4>Request parameters</h4><div class="table-wrap"><table><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why it exists</th></tr></thead><tbody><tr><td><code>market</code></td><td>query</td><td>string</td><td>no</td><td>ET or US (case-insensitive); other values return an empty list</td><td>Show only apps available in the user's market.</td></tr></tbody></table></div>
 <h4>Example request</h4>
 <pre><code>curl -s "$GATEWAY/api/v1/apps" \
@@ -856,15 +856,17 @@ X-Request-Id: 2555d0fb-c1de-47d9-b472-79a0925a3962
     "permissions": [
       {
         "capability": "location.coarse",
+        "label": "Your approximate location",
         "description": "City-level location",
-        "reason": {
+        "purpose": {
           "en": "To show technicians near you"
         }
       },
       {
         "capability": "notify.inapp",
+        "label": "Notifications in Adera",
         "description": "Send in-app notifications (inbox + push) to users",
-        "reason": {}
+        "purpose": {}
       }
     ]
   }
@@ -880,7 +882,7 @@ X-Request-Id: 189f7332-af52-4e52-8145-24e0817942c7
 
 []</code></pre>
 <h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th>Error code</th><th>When it happens</th></tr></thead><tbody><tr><td><strong>401</strong></td><td><code>(empty body)</code></td><td>Missing, expired, revoked or malformed session token. Produced by the gateway's forward-auth step (user-service <code>/internal/auth/verify</code> answers 401, the body is empty). A session of an account that has an authenticator app but only completed the first step (<code>aal1</code>) is also a 401 here.</td></tr><tr><td><strong>429</strong></td><td><code>(HTML page)</code></td><td>Gateway rate limit exceeded. The body is APISIX's HTML page, not JSON; the response carries <code>X-RateLimit-*</code> headers (see <a href="08f-operational.html#gateway-behaviour">8f</a>).</td></tr><tr><td><strong>503</strong></td><td><code>identity_service_unavailable</code></td><td>Kratos could not be reached while the gateway asked who the token belongs to (forward-auth is sent to user-service, which answers 503 instead of a misleading 401).</td></tr></tbody></table></div>
-<h4>How to use it</h4><ul><li><code>permissions[].reason</code> is an object keyed by language and is empty for capabilities that need no reason (<code>user.basic</code>, <code>notify.*</code>).</li><li><code>logoUrl</code> is a 60-minute signed link, like avatars.</li></ul>
+<h4>How to use it</h4><ul><li><code>permissions[].purpose</code> (formerly <code>reason</code>) is one sentence per language and is empty for capabilities that need none (<code>user.basic</code>, <code>notify.*</code>); <code>permissions[].label</code> is the English dialog headline.</li><li><code>logoUrl</code> is a 60-minute signed link, like avatars.</li></ul>
 </div></details>
 <details class="endpoint" id="ep-apps-get-detail">
 <summary><span class="method m-get">GET</span><span class="path">/api/v1/apps/{idOrSlug}</span><span class="sum">Read one mini app</span></summary>
@@ -934,15 +936,17 @@ X-Request-Id: 8bb404a0-ed17-47f3-87db-8f93bdb7ff2b
   "permissions": [
     {
       "capability": "location.coarse",
+      "label": "Your approximate location",
       "description": "City-level location",
-      "reason": {
+      "purpose": {
         "en": "To show technicians near you"
       }
     },
     {
       "capability": "notify.inapp",
+      "label": "Notifications in Adera",
       "description": "Send in-app notifications (inbox + push) to users",
-      "reason": {}
+      "purpose": {}
     }
   ]
 }</code></pre><p class="masked">Values masked: signed logo URL parts.</p>

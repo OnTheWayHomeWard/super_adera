@@ -240,9 +240,9 @@ class RegistryApiTests {
 
 		// sensitive capability: a plain-language reason is mandatory
 		mvc.perform(as(put("/admin/api/v1/apps/{id}/capabilities/user.full_name", id), Role.ADMIN).contentType(MediaType.APPLICATION_JSON).content("{\"state\":\"GRANTED\"}"))
-			.andExpect(status().isBadRequest()).andExpect(jsonPath("$.fields.reason").exists());
+			.andExpect(status().isBadRequest()).andExpect(jsonPath("$.fields.purpose").exists());
 		mvc.perform(as(put("/admin/api/v1/apps/{id}/capabilities/user.full_name", id), Role.ADMIN).contentType(MediaType.APPLICATION_JSON)
-			.content(json(Map.of("state", "GRANTED", "reason", Map.of("en", "So the technician can greet you by name")))))
+			.content(json(Map.of("state", "GRANTED", "purpose", Map.of("en", "So the technician can greet you by name")))))
 			.andExpect(status().isOk());
 		mvc.perform(as(put("/admin/api/v1/apps/{id}/capabilities/bogus.thing", id), Role.ADMIN).contentType(MediaType.APPLICATION_JSON).content("{\"state\":\"GRANTED\"}"))
 			.andExpect(status().isBadRequest());
@@ -399,7 +399,7 @@ class RegistryApiTests {
 		UUID first = liveApp(10);
 		UUID draft = createApp(slug());
 		mvc.perform(as(put("/admin/api/v1/apps/{id}/capabilities/location.coarse", first), Role.ADMIN).contentType(MediaType.APPLICATION_JSON)
-			.content(json(Map.of("state", "GRANTED", "reason", Map.of("en", "To show places near you")))));
+			.content(json(Map.of("state", "GRANTED", "purpose", Map.of("en", "To show places near you")))));
 		mvc.perform(as(put("/admin/api/v1/apps/{id}/capabilities/pay.request", first), Role.ADMIN).contentType(MediaType.APPLICATION_JSON)
 			.content(json(Map.of("state", "DENIED"))));
 
@@ -412,7 +412,8 @@ class RegistryApiTests {
 		String detail = mvc.perform(asUser(get("/api/v1/apps/{s}", slug), UUID.randomUUID())).andExpect(status().isOk())
 			.andExpect(jsonPath("$.permissions.length()").value(1))
 			.andExpect(jsonPath("$.permissions[0].capability").value("location.coarse"))
-			.andExpect(jsonPath("$.permissions[0].reason.en").value("To show places near you"))
+			.andExpect(jsonPath("$.permissions[0].label").value("Your approximate location"))
+			.andExpect(jsonPath("$.permissions[0].purpose.en").value("To show places near you"))
 			.andExpect(jsonPath("$.logoUrl").exists())
 			.andReturn().getResponse().getContentAsString();
 		assertThat(detail).doesNotContain("allowedOrigins").doesNotContain("createdBy").doesNotContain("extra");

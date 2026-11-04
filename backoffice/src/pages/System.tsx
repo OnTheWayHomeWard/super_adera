@@ -119,7 +119,7 @@ export function SystemPage() {
                   columns={[
                     { title: "Capability", render: (_, c) => <Mono>{c.key}</Mono> },
                     { title: "Description", dataIndex: "description" },
-                    { title: "Reason required to grant", render: (_, c) => (c.reasonRequired ? "yes" : "no") },
+                    { title: "Purpose required to grant", render: (_, c) => (c.purposeRequired ? "yes" : "no") },
                   ]}
                 />
               </div>

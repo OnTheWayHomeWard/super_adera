@@ -55,8 +55,8 @@
 </ul>
 
 <h2 id="capabilities">The capability catalog</h2>
-<p>Staff grant or deny these per app (<code>PUT /admin/api/v1/apps/{id}/capabilities/{key}</code>, states <code>GRANTED</code>, <code>DENIED</code>, <code>SUSPENDED</code>). "Reason" means staff must write a plain-language reason (shown to users in the future consent sheet) to grant it.</p>
-<div class="table-wrap"><table><thead><tr><th>Key</th><th>Description</th><th>Reason required</th><th>Effect today</th></tr></thead><tbody>
+<p>Staff grant or deny these per app (<code>PUT /admin/api/v1/apps/{id}/capabilities/{key}</code>, states <code>GRANTED</code>, <code>DENIED</code>, <code>SUSPENDED</code>). "Purpose" means staff must write a plain-language one-sentence purpose (shown to users in the permission dialog) to grant it.</p>
+<div class="table-wrap"><table><thead><tr><th>Key</th><th>Description</th><th>Purpose required</th><th>Effect today</th></tr></thead><tbody>
 <tr><td><code>notify.inapp</code></td><td>Send in-app notifications (inbox + push)</td><td>no</td><td><span class="badge built">works</span>, needs a limit row (created with defaults)</td></tr>
 <tr><td><code>notify.sms</code></td><td>Send SMS (costs money; capped)</td><td>no</td><td><span class="badge built">works</span>, limits as above</td></tr>
 <tr><td><code>notify.email</code></td><td>Send email</td><td>no</td><td><span class="badge built">works</span></td></tr>

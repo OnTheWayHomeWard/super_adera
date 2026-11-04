@@ -7,6 +7,7 @@ import java.util.Map;
 import java.util.UUID;
 
 import app.adera.registry.app.AppConfigRepository;
+import app.adera.registry.app.Capability;
 import app.adera.registry.app.MiniApp;
 import app.adera.registry.app.MiniAppRepository;
 import app.adera.registry.common.Environment;
@@ -37,9 +38,14 @@ public class InternalController {
 			boolean activeHere, String deploymentEnvironment) {
 	}
 
+	/** A granted capability as the permission dialog needs it. {@code purpose} is the staff-approved sentence per language
+	 * (empty when none was approved: then the dialog says {@code defaultPurpose}). */
+	public record GrantedPermission(String capability, String label, Map<String, Object> purpose, String defaultPurpose) {
+	}
+
 	/** Everything the delivery side needs to decide about one request from one app in one environment. */
 	public record AppContext(UUID appId, String slug, String status, String environment, boolean usable, String denyReason,
-			List<String> grantedCapabilities, List<AppConfigRepository.LimitRow> notificationLimits, List<String> allowedCidrs) {
+			List<String> grantedCapabilities, List<GrantedPermission> permissions, List<AppConfigRepository.LimitRow> notificationLimits, List<String> allowedCidrs) {
 	}
 
 	private static final java.util.regex.Pattern ACTION = java.util.regex.Pattern.compile("^[a-z][a-z0-9_.-]{1,60}$");
@@ -84,10 +90,15 @@ public class InternalController {
 		MiniApp app = apps.findById(appId).orElseThrow(() -> new Errors.NotFound("mini app"));
 		boolean usable = env == Environment.DEV ? app.getStatus() != MiniApp.Status.KILLED : app.getStatus() == MiniApp.Status.LIVE;
 		String deny = usable ? null : "app_" + app.getStatus().name().toLowerCase();
-		List<String> granted = config.capabilities(appId).stream().filter(c -> c.state().equals("GRANTED")).map(AppConfigRepository.CapabilityRow::capability).toList();
+		List<AppConfigRepository.CapabilityRow> grantedRows = config.capabilities(appId).stream().filter(c -> c.state().equals("GRANTED")).toList();
+		List<String> granted = grantedRows.stream().map(AppConfigRepository.CapabilityRow::capability).toList();
+		List<GrantedPermission> permissions = grantedRows.stream().map(c -> {
+			Capability cap = Capability.byKey(c.capability()).orElse(null);
+			return new GrantedPermission(c.capability(), cap == null ? c.capability() : cap.label(), c.purpose(), cap == null ? "" : cap.defaultPurpose());
+		}).toList();
 		List<String> cidrs = config.environments(appId).stream().filter(e -> e.environment().equals(env.name())).findFirst()
 			.map(AppConfigRepository.EnvironmentRow::allowedCidrs).orElse(List.of());
-		return new AppContext(appId, app.getSlug(), app.getStatus().name(), env.name(), usable, deny, granted, config.limits(appId), cidrs);
+		return new AppContext(appId, app.getSlug(), app.getStatus().name(), env.name(), usable, deny, granted, permissions, config.limits(appId), cidrs);
 	}
 
 	/** Does this app exist, and in which status? (user-service checks ids it is given: 404 for an unknown app.) */

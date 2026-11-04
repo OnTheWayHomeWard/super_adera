@@ -12,6 +12,14 @@ describe("audit details", () => {
       "currencies ETB, USD, hold allowed, amount 100 to no maximum",
     );
   });
+  it("shows a capability change with the purpose users will read and what it replaced", () => {
+    expect(
+      summariseAudit("capability.set", { capability: "location.fine", state: "GRANTED", purpose: { en: "Find the closest driver." }, previousState: "GRANTED", previousPurpose: { en: "Find a driver near you." } }),
+    ).toBe('location.fine: GRANTED, purpose "Find the closest driver." (was GRANTED, "Find a driver near you.")');
+    expect(summariseAudit("capability.set", { capability: "notify.sms", state: "GRANTED", purpose: {}, previousState: null, previousPurpose: null })).toBe("notify.sms: GRANTED, no purpose text (new)");
+    // entries written before the purpose was recorded still read well
+    expect(summariseAudit("capability.set", { capability: "notify.sms", state: "SUSPENDED" })).toBe("notify.sms: SUSPENDED");
+  });
   it("falls back to key=value and shortens long text", () => {
     expect(summariseAudit("app.status", { from: "DRAFT", to: "LIVE" })).toBe("from=DRAFT to=LIVE");
     expect(summariseAudit("x", { a: "y".repeat(200) }).endsWith("...")).toBe(true);

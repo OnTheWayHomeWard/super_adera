@@ -39,10 +39,10 @@
 <li><strong>Do the work on the cached list</strong>; do not call the server for each keystroke. Code: <a href="building-the-store-screen.html#client-code">Building the store screen</a>.</li>
 </ul>
 <h2 id="languages">Pick a language and fall back</h2>
-<p><code>name</code>, <code>description</code> and each permission <code>reason</code> are maps such as <code>{"en": "Food Delivery", "am": "ምግብ አቅርቦት"}</code>. Rules verified in code and data:</p>
+<p><code>name</code>, <code>description</code> and each permission <code>purpose</code> are maps such as <code>{"en": "Food Delivery", "am": "ምግብ አቅርቦት"}</code>. Rules verified in code and data:</p>
 <ul>
 <li><code>name.en</code> always exists (staff cannot save an app without an English name).</li>
-<li><code>description</code> has <strong>no</strong> such guarantee: it can be <code>{}</code> or lack <code>en</code>. A permission <code>reason</code> is <code>{}</code> for capabilities that need no explanation.</li>
+<li><code>description</code> has <strong>no</strong> such guarantee: it can be <code>{}</code> or lack <code>en</code>. A permission <code>purpose</code> is <code>{}</code> for capabilities that need no explanation.</li>
 <li>A missing language is <strong>absent</strong>, never an empty string.</li>
 <li>Supported codes are exactly <code>en</code>, <code>am</code>, <code>om</code>. In the seeded data every app has <code>en</code> and <code>am</code>; <code>om</code> is rare.</li>
 </ul>
@@ -110,23 +110,27 @@ X-RateLimit-Reset: 60
     "permissions": [
       {
         "capability": "notify.email",
+        "label": "Email",
         "description": "Send email to users",
-        "reason": {}
+        "purpose": {}
       },
       {
         "capability": "notify.inapp",
+        "label": "Notifications in Adera",
         "description": "Send in-app notifications (inbox + push) to users",
-        "reason": {}
+        "purpose": {}
       },
       {
         "capability": "notify.sms",
+        "label": "Text messages (SMS)",
         "description": "Send SMS to users (costs money; capped)",
-        "reason": {}
+        "purpose": {}
       },
       {
         "capability": "user.basic",
+        "label": "Your Adera id",
         "description": "Pseudonymous id and display name",
-        "reason": {}
+        "purpose": {}
       }
     ]
   }

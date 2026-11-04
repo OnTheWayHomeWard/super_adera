@@ -24,7 +24,7 @@
 <h2 id="overview">Overview</h2>
 <p>The "public view" of a mini app is everything a user may know about it: what it is, who runs it, how to reach support, how well it is rated and what it is allowed to do. It is the same JSON object in the catalog list and in <code>GET /api/v1/apps/{idOrSlug}</code>. Anything operational is left out on purpose (list below).</p>
 <h2 id="fields">Every field</h2>
-<div class="table-wrap"><table><thead><tr><th>Field</th><th>Type</th><th>Meaning and how to use it</th></tr></thead><tbody><tr><td><code>id</code></td><td>string (UUID)</td><td>The app's permanent id. Use it for the preferences endpoints (they take only the UUID) and as a stable key.</td></tr><tr><td><code>slug</code></td><td>string</td><td>Permanent short name, 2 to 40 chars of <code>a-z 0-9 -</code>. Use in deep links such as <code>adera://apps/demo-ride</code> (your scheme) and in any <code>{idOrSlug}</code> path.</td></tr><tr><td><code>name</code></td><td>object lang to string</td><td>Display name, max 100 characters per language. <code>en</code> always present; <code>am</code>, <code>om</code> optional.</td></tr><tr><td><code>description</code></td><td>object lang to string</td><td>Short description, max 1000 characters per language. May be <code>{}</code>; may lack <code>en</code>.</td></tr><tr><td><code>logoUrl</code></td><td>string or null</td><td>Time-limited download link for the logo image (PNG). Staff cannot put an app LIVE without a logo, but they can remove it afterwards, so code defensively and show a placeholder tile when it is <code>null</code>. See <a href="#logo">Logo</a>.</td></tr><tr><td><code>brandColor</code></td><td>string or null</td><td>Accent colour as <code>#RRGGBB</code> (upper-case hex), for tile backgrounds, headers, buttons on the store page. Optional: staff may leave it unset, so keep a default accent.</td></tr><tr><td><code>categories</code></td><td>array of string</td><td>0 to 10 lower-case words (<code>food</code>, <code>tools</code>...). Free-form, not a fixed list.</td></tr><tr><td><code>markets</code></td><td>array of string</td><td>Where the app is offered: <code>ET</code>, <code>US</code>. Never empty (defaults to <code>["ET"]</code>).</td></tr><tr><td><code>publisher</code></td><td>object</td><td>Who runs the app: <code>name</code> (display name), <code>legalName</code> (registered company name), <code>supportEmail</code>, <code>supportPhone</code>, <code>website</code>. Every key is always present; each can be <code>null</code> (staff cannot put an app LIVE without a support email, but can clear it later, so do not assume it is there). See <a href="#publisher">Publisher and support</a>.</td></tr><tr><td><code>entryUrl</code></td><td>string or null</td><td>The https address of the mini app's start page. Today: show it as the "Open" target / website link; <strong>do not embed or auto-open it expecting a user-data handover</strong> (see <a href="#entry">Entry URL</a>).</td></tr><tr><td><code>ratingAvg</code></td><td>number</td><td>Average of the visible reviews, rounded to 2 decimals (<code>3.3</code>, <code>5.0</code>). <code>0.0</code> when there are none.</td></tr><tr><td><code>ratingCount</code></td><td>integer</td><td>Number of visible reviews (hidden ones are not counted).</td></tr><tr><td><code>permissions</code></td><td>array of object</td><td>What staff have granted this app. Each: <code>capability</code> (key), <code>description</code> (English only), <code>reason</code> (object lang to string, may be <code>{}</code>). Sorted alphabetically by key. See <a href="capabilities-and-permissions.html">Capabilities and permissions</a>.</td></tr></tbody></table></div>
+<div class="table-wrap"><table><thead><tr><th>Field</th><th>Type</th><th>Meaning and how to use it</th></tr></thead><tbody><tr><td><code>id</code></td><td>string (UUID)</td><td>The app's permanent id. Use it for the preferences endpoints (they take only the UUID) and as a stable key.</td></tr><tr><td><code>slug</code></td><td>string</td><td>Permanent short name, 2 to 40 chars of <code>a-z 0-9 -</code>. Use in deep links such as <code>adera://apps/demo-ride</code> (your scheme) and in any <code>{idOrSlug}</code> path.</td></tr><tr><td><code>name</code></td><td>object lang to string</td><td>Display name, max 100 characters per language. <code>en</code> always present; <code>am</code>, <code>om</code> optional.</td></tr><tr><td><code>description</code></td><td>object lang to string</td><td>Short description, max 1000 characters per language. May be <code>{}</code>; may lack <code>en</code>.</td></tr><tr><td><code>logoUrl</code></td><td>string or null</td><td>Time-limited download link for the logo image (PNG). Staff cannot put an app LIVE without a logo, but they can remove it afterwards, so code defensively and show a placeholder tile when it is <code>null</code>. See <a href="#logo">Logo</a>.</td></tr><tr><td><code>brandColor</code></td><td>string or null</td><td>Accent colour as <code>#RRGGBB</code> (upper-case hex), for tile backgrounds, headers, buttons on the store page. Optional: staff may leave it unset, so keep a default accent.</td></tr><tr><td><code>categories</code></td><td>array of string</td><td>0 to 10 lower-case words (<code>food</code>, <code>tools</code>...). Free-form, not a fixed list.</td></tr><tr><td><code>markets</code></td><td>array of string</td><td>Where the app is offered: <code>ET</code>, <code>US</code>. Never empty (defaults to <code>["ET"]</code>).</td></tr><tr><td><code>publisher</code></td><td>object</td><td>Who runs the app: <code>name</code> (display name), <code>legalName</code> (registered company name), <code>supportEmail</code>, <code>supportPhone</code>, <code>website</code>. Every key is always present; each can be <code>null</code> (staff cannot put an app LIVE without a support email, but can clear it later, so do not assume it is there). See <a href="#publisher">Publisher and support</a>.</td></tr><tr><td><code>entryUrl</code></td><td>string or null</td><td>The https address of the mini app's start page. Today: show it as the "Open" target / website link; <strong>do not embed or auto-open it expecting a user-data handover</strong> (see <a href="#entry">Entry URL</a>).</td></tr><tr><td><code>ratingAvg</code></td><td>number</td><td>Average of the visible reviews, rounded to 2 decimals (<code>3.3</code>, <code>5.0</code>). <code>0.0</code> when there are none.</td></tr><tr><td><code>ratingCount</code></td><td>integer</td><td>Number of visible reviews (hidden ones are not counted).</td></tr><tr><td><code>permissions</code></td><td>array of object</td><td>What staff have granted this app. Each: <code>capability</code> (key), <code>label</code> (English dialog headline), <code>description</code> (English only), <code>purpose</code> (one staff-approved sentence, object lang to string, may be <code>{}</code>; formerly called <code>reason</code>). Sorted alphabetically by key. See <a href="capabilities-and-permissions.html">Capabilities and permissions</a>.</td></tr></tbody></table></div>
 <h2 id="hidden">What users never get</h2>
 <p>Staff see a richer object (the "admin view"). These parts are intentionally absent from the public view, so do not look for them and do not ask backend colleagues to "just add" them without a product reason:</p>
 <div class="table-wrap"><table><thead><tr><th>Field staff can see</th><th>Why users do not get it</th></tr></thead><tbody><tr><td><code>status</code></td><td>Users only ever get LIVE apps, so the field would always say LIVE.</td></tr><tr><td><code>priority</code></td><td>Internal ordering knob; the effect is already in the array order.</td></tr><tr><td><code>allowedOrigins</code></td><td>Web origins the mini app may be loaded from or talk to. It is a security setting for the (not yet built) launcher, not something to display.</td></tr><tr><td><code>extra</code></td><td>Free-form JSON staff keep on the app (up to 16 KB). Internal.</td></tr><tr><td><code>logoImageId</code></td><td>Internal object id (the same id is visible inside <code>logoUrl</code>'s path).</td></tr><tr><td><code>createdAt</code>, <code>updatedAt</code></td><td>Not part of the public contract. There is no "last updated" to show.</td></tr><tr><td>Capabilities that are DENIED or SUSPENDED, with their reasons</td><td>Users see only what the app can do, never what it was refused.</td></tr><tr><td>Payment settings (allowed currencies, hold, min/max amount)</td><td>Operational limits for the payment feature, which is not built.</td></tr><tr><td>Notification limits (per user per day etc.)</td><td>Operational. Users cannot see how many messages an app may send.</td></tr><tr><td>Partner keys, allowed server addresses (environments)</td><td>Partner-side security material.</td></tr></tbody></table></div>
@@ -104,39 +104,45 @@ X-RateLimit-Remaining: 298
   "permissions": [
     {
       "capability": "location.fine",
+      "label": "Your precise location",
       "description": "Precise location, foreground only",
-      "reason": {
+      "purpose": {
         "am": "ለእርስዎ ቅርብ የሆነውን አሽከርካሪ ለማግኘት",
         "en": "To find the closest driver to you"
       }
     },
     {
       "capability": "notify.inapp",
+      "label": "Notifications in Adera",
       "description": "Send in-app notifications (inbox + push) to users",
-      "reason": {}
+      "purpose": {}
     },
     {
       "capability": "notify.sms",
+      "label": "Text messages (SMS)",
       "description": "Send SMS to users (costs money; capped)",
-      "reason": {}
+      "purpose": {}
     },
     {
       "capability": "pay.request",
+      "label": "Payments",
       "description": "Ask the user to pay (currencies and limits in payment settings)",
-      "reason": {
+      "purpose": {
         "am": "ለትዕዛዝዎ ክፍያ ለመጠየቅ",
         "en": "To ask you to pay for your order"
       }
     },
     {
       "capability": "user.basic",
+      "label": "Your Adera id",
       "description": "Pseudonymous id and display name",
-      "reason": {}
+      "purpose": {}
     },
     {
       "capability": "user.full_name",
+      "label": "Your name",
       "description": "The user's first and last name",
-      "reason": {
+      "purpose": {
         "am": "በስምዎ ለመጥራት",
         "en": "To address you by name"
       }

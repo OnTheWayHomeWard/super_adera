@@ -59,7 +59,7 @@ export interface KeyView {
 export interface CapabilityRow {
   capability: string;
   state: "GRANTED" | "DENIED" | "SUSPENDED";
-  reason: I18n | null;
+  purpose: I18n | null;
   updatedAt: string;
 }
 
@@ -95,7 +95,9 @@ export interface AppDetail {
 export interface CapabilityInfo {
   key: string;
   description: string;
-  reasonRequired: boolean;
+  label: string;
+  defaultPurpose: string;
+  purposeRequired: boolean;
 }
 
 export interface TemplateParam {

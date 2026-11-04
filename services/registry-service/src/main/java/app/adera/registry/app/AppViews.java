@@ -31,7 +31,7 @@ public final class AppViews {
 	}
 
 	/** What a signed-in user may see about a LIVE app: no internals, only what it is and what it may access. */
-	public record Permission(String capability, String description, Map<String, Object> reason) {
+	public record Permission(String capability, String label, String description, Map<String, Object> purpose) {
 	}
 
 	public record PublicApp(UUID id, String slug, Map<String, String> name, Map<String, String> description, String logoUrl,

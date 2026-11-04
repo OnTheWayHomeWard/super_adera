@@ -102,7 +102,7 @@ public class AppAdminController {
 	@GetMapping("/capabilities")
 	public List<Map<String, Object>> capabilities() {
 		return Arrays.stream(Capability.values())
-			.map(c -> Map.<String, Object>of("key", c.key(), "description", c.description(), "reasonRequired", c.reasonRequired()))
+			.map(c -> Map.<String, Object>of("key", c.key(), "description", c.description(), "label", c.label(), "defaultPurpose", c.defaultPurpose(), "purposeRequired", c.purposeRequired()))
 			.toList();
 	}
 

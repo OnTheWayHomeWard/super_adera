@@ -12,6 +12,17 @@ export function summariseAudit(action: string, meta: Record<string, unknown>): s
     const range = `${meta.minAmountMinor ?? "no minimum"} to ${meta.maxAmountMinor ?? "no maximum"}`;
     return `currencies ${currencies || "none"}, hold ${meta.allowHold ? "allowed" : "off"}, amount ${range}`;
   }
+  if (action === "capability.set") {
+    const say = (p: unknown): string => {
+      const o = (p ?? {}) as Record<string, string>;
+      return o.en ? `"${o.en}"` : "no purpose text";
+    };
+    // entries written before 2026-11-04 carry only capability and state
+    if (!("purpose" in meta)) return `${String(meta.capability)}: ${String(meta.state)}`;
+    const was = meta.previousState ? `was ${String(meta.previousState)}, ${say(meta.previousPurpose)}` : "new";
+    const now = say(meta.purpose);
+    return `${String(meta.capability)}: ${String(meta.state)}, ${now === "no purpose text" ? now : `purpose ${now}`} (${was})`;
+  }
   const text = Object.entries(meta)
     .map(([k, v]) => `${k}=${typeof v === "object" ? JSON.stringify(v) : String(v)}`)
     .join(" ");

@@ -314,31 +314,31 @@ X-Request-Id: 5aed5998-43ac-4e6e-88f2-816c265ed65a
     {
       "capability": "location.fine",
       "state": "DENIED",
-      "reason": {},
+      "purpose": {},
       "updatedAt": "2026-10-25T06:06:09.288142Z"
     },
     {
       "capability": "notify.email",
       "state": "GRANTED",
-      "reason": {},
+      "purpose": {},
       "updatedAt": "2026-10-25T06:07:43.407121Z"
     },
     {
       "capability": "notify.inapp",
       "state": "GRANTED",
-      "reason": {},
+      "purpose": {},
       "updatedAt": "2026-10-25T06:06:08.909384Z"
     },
     {
       "capability": "notify.sms",
       "state": "GRANTED",
-      "reason": {},
+      "purpose": {},
       "updatedAt": "2026-10-25T06:07:43.309330Z"
     },
     {
       "capability": "user.full_name",
       "state": "GRANTED",
-      "reason": {
+      "purpose": {
         "am": "ቴክኒሻኖች እርስዎን እንዲያውቁ",
         "en": "To show technicians who you are"
       },
@@ -695,7 +695,7 @@ HTTP 413  {"error": "file_too_large"}</code></pre>
 <section><h2 id="config">Capabilities, payment settings, limits, addresses</h2>
 <details class="endpoint" id="ep-staff-get-capabilities"><summary><span class="method m-get">GET</span><span class="path">/admin/api/v1/capabilities</span><span class="sum">The catalog of capabilities an app can be given</span></summary><div class="body">
 <dl class="meta"><dt>Audience</dt><dd>Adera staff (the dashboard)</dd><dt>Client path</dt><dd><code>/admin/api/v1/capabilities</code> through the gateway</dd><dt>Internal path</dt><dd>same path on registry-service :8080 (the gateway does not rewrite it)</dd><dt>Auth</dt><dd><code>Authorization: Bearer $TOKEN</code>, a Kratos session token of an <strong>aal2</strong> staff session. The gateway checks it and adds <code>X-Staff-Id</code>, <code>X-Staff-Role</code>, <code>X-Gateway-Secret</code>. Minimum role: <strong>VIEWER</strong>.</dd><dt>Rate limit</dt><dd>300 per 60 s per client IP (gateway route <code>admin-api</code>)</dd><dt>Implemented in</dt><dd><code>services/registry-service/src/main/java/app/adera/registry/app/Capability.java</code></dd></dl>
-<h4>Purpose</h4><p>The fixed list of things an app can ask for, with a plain description, and whether a user-facing reason is required when granting it. The dashboard uses it to draw the permission switches.</p>
+<h4>Purpose</h4><p>The fixed list of things an app can ask for, with a plain description, the user-facing dialog headline (<code>label</code>), the default dialog sentence (<code>defaultPurpose</code>) and whether a purpose sentence is required when granting it. The dashboard uses it to draw the permission switches.</p>
 <h4>Request parameters</h4><p>None.</p>
 <h4>Example request</h4><pre><code>curl -sS -i -X GET "$BASE/admin/api/v1/capabilities" \
   -H "Authorization: Bearer $TOKEN"</code></pre>
@@ -705,58 +705,78 @@ X-Request-Id: d0730211-30fc-4d70-b222-281731e2108f
 
 [
   {
-    "reasonRequired": false,
+    "label": "Your Adera id",
+    "purposeRequired": false,
+    "defaultPurpose": "Recognise you in the app without learning who you are.",
     "description": "Pseudonymous id and display name",
     "key": "user.basic"
   },
   {
-    "reasonRequired": true,
+    "label": "Your name",
+    "purposeRequired": true,
+    "defaultPurpose": "Greet you by name.",
     "description": "The user's first and last name",
     "key": "user.full_name"
   },
   {
-    "reasonRequired": true,
+    "label": "Your phone number and email",
+    "purposeRequired": true,
+    "defaultPurpose": "Contact you about your use of the app.",
     "description": "The user's phone number and email",
     "key": "user.contact"
   },
   {
-    "reasonRequired": true,
+    "label": "Your saved address",
+    "purposeRequired": true,
+    "defaultPurpose": "Fill in your address for you.",
     "description": "One saved address the user picks",
     "key": "user.address"
   },
   {
-    "reasonRequired": true,
+    "label": "Your approximate location",
+    "purposeRequired": true,
+    "defaultPurpose": "Show results near you.",
     "description": "City-level location",
     "key": "location.coarse"
   },
   {
-    "reasonRequired": true,
+    "label": "Your precise location",
+    "purposeRequired": true,
+    "defaultPurpose": "Use your exact position while the app is open.",
     "description": "Precise location, foreground only",
     "key": "location.fine"
   },
   {
-    "reasonRequired": true,
+    "label": "Payments",
+    "purposeRequired": true,
+    "defaultPurpose": "Ask you to confirm a payment.",
     "description": "Ask the user to pay (currencies and limits in payment settings)",
     "key": "pay.request"
   },
   {
-    "reasonRequired": false,
+    "label": "Notifications in Adera",
+    "purposeRequired": false,
+    "defaultPurpose": "Send you messages inside Adera.",
     "description": "Send in-app notifications (inbox + push) to users",
     "key": "notify.inapp"
   },
   {
-    "reasonRequired": false,
+    "label": "Text messages (SMS)",
+    "purposeRequired": false,
+    "defaultPurpose": "Send you text messages.",
     "description": "Send SMS to users (costs money; capped)",
     "key": "notify.sms"
   },
   {
-    "reasonRequired": false,
+    "label": "Email",
+    "purposeRequired": false,
+    "defaultPurpose": "Send you emails.",
     "description": "Send email to users",
     "key": "notify.email"
   }
 ]</code></pre>
 <h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th><code>error</code></th><th>When it happens</th></tr></thead><tbody><tr><td>200</td><td>-</td><td>OK.</td></tr><tr><td>401</td><td><code>unauthorized</code></td><td>No <code>Authorization</code> header, or an invalid, expired or revoked session token. Returned by the gateway's forward-auth (from registry-service).</td></tr><tr><td>403</td><td><code>mfa_required</code></td><td>The session is only aal1 (emailed code only), or Kratos refuses it because an authenticator app is enrolled but not used in this session. Do the authenticator step.</td></tr><tr><td>403</td><td><code>not_staff</code></td><td>A valid session, but the person is not an ACTIVE staff member (customers get this).</td></tr></tbody></table></div>
-<h4>How to use it</h4><ul><li><code>reasonRequired: true</code> means granting needs an English reason of at least 10 characters, shown verbatim to users in the consent sheet.</li><li>Full table with limits: <a href="10-reference.html#capabilities">capability catalog</a>.</li></ul>
+<h4>How to use it</h4><ul><li><code>purposeRequired: true</code> means granting needs an English purpose of at least 10 characters (at most 160, one line, no link), shown verbatim to users in the permission dialog. Without a purpose the dialog uses <code>defaultPurpose</code>.</li><li>Full table with limits: <a href="10-reference.html#capabilities">capability catalog</a>.</li></ul>
 </div></details>
 <details class="endpoint" id="ep-staff-put-apps-id-capabilities"><summary><span class="method m-put">PUT</span><span class="path">/admin/api/v1/apps/{appId}/capabilities/{capability}</span><span class="sum">Grant, deny or suspend one capability</span></summary><div class="body">
 <dl class="meta"><dt>Audience</dt><dd>Adera staff (the dashboard)</dd><dt>Client path</dt><dd><code>/admin/api/v1/apps/{appId}/capabilities/{capability}</code> through the gateway</dd><dt>Internal path</dt><dd>same path on registry-service :8080 (the gateway does not rewrite it)</dd><dt>Auth</dt><dd><code>Authorization: Bearer $TOKEN</code>, a Kratos session token of an <strong>aal2</strong> staff session. The gateway checks it and adds <code>X-Staff-Id</code>, <code>X-Staff-Role</code>, <code>X-Gateway-Secret</code>. Minimum role: <strong>ADMIN</strong>.</dd><dt>Rate limit</dt><dd>300 per 60 s per client IP (gateway route <code>admin-api</code>)</dd><dt>Implemented in</dt><dd><code>services/registry-service/src/main/java/app/adera/registry/app/AppConfigService.java (setCapability)</code></dd></dl>
@@ -765,7 +785,7 @@ X-Request-Id: d0730211-30fc-4d70-b222-281731e2108f
 <h4>Example request</h4><pre><code>curl -sS -i -X PUT "$BASE/admin/api/v1/apps/$APP/capabilities/user.full_name" \
   -H "Authorization: Bearer $TOKEN" \
   -H 'Content-Type: application/json' \
-  -d '{"state": "GRANTED", "reason": {"en": "To show technicians who you are", "am": "ቴክኒሻኖች እርስዎን እንዲያውቁ"}}'</code></pre>
+  -d '{"state": "GRANTED", "purpose": {"en": "To show technicians who you are", "am": "ቴክኒሻኖች እርስዎን እንዲያውቁ"}}'</code></pre>
 <h4>Example response</h4><pre class="out"><code>HTTP/1.1 200 OK
 Content-Type: application/json
 X-Request-Id: 02edb14c-3437-48a9-996e-b9a62afc6822
@@ -818,25 +838,25 @@ X-Request-Id: 02edb14c-3437-48a9-996e-b9a62afc6822
     {
       "capability": "notify.email",
       "state": "GRANTED",
-      "reason": {},
+      "purpose": {},
       "updatedAt": "2026-10-25T06:06:08.815348Z"
     },
     {
       "capability": "notify.inapp",
       "state": "GRANTED",
-      "reason": {},
+      "purpose": {},
       "updatedAt": "2026-10-25T06:06:08.909384Z"
     },
     {
       "capability": "notify.sms",
       "state": "GRANTED",
-      "reason": {},
+      "purpose": {},
       "updatedAt": "2026-10-25T06:06:08.667412Z"
     },
     {
       "capability": "user.full_name",
       "state": "GRANTED",
-      "reason": {
+      "purpose": {
         "am": "ቴክኒሻኖች እርስዎን እንዲያውቁ",
         "en": "To show technicians who you are"
       },
@@ -879,10 +899,13 @@ X-Request-Id: 02edb14c-3437-48a9-996e-b9a62afc6822
   ],
   "keys": []
 }</code></pre>
-<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th><code>error</code></th><th>When it happens</th></tr></thead><tbody><tr><td>200</td><td>-</td><td>OK. The body is the full app detail (same as GET /apps/{appId}).</td></tr><tr><td>400</td><td><code>validation_failed</code></td><td>Unknown capability, bad state, a reason in an unsupported language, a missing or too-short English reason, unknown field.</td></tr><tr><td>403</td><td><code>insufficient_role</code></td><td>VIEWER.</td></tr><tr><td>404</td><td><code>not_found</code></td><td>No such app.</td></tr><tr><td>401</td><td><code>unauthorized</code></td><td>No <code>Authorization</code> header, or an invalid, expired or revoked session token. Returned by the gateway's forward-auth (from registry-service).</td></tr><tr><td>403</td><td><code>mfa_required</code></td><td>The session is only aal1 (emailed code only), or Kratos refuses it because an authenticator app is enrolled but not used in this session. Do the authenticator step.</td></tr><tr><td>403</td><td><code>not_staff</code></td><td>A valid session, but the person is not an ACTIVE staff member (customers get this).</td></tr></tbody></table></div>
-<h4>Real error responses</h4><pre class="out nocopy"><code>Reason required but missing:
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th><code>error</code></th><th>When it happens</th></tr></thead><tbody><tr><td>200</td><td>-</td><td>OK. The body is the full app detail (same as GET /apps/{appId}).</td></tr><tr><td>400</td><td><code>validation_failed</code></td><td>Unknown capability, bad state, a purpose in an unsupported language, a missing or too-short English purpose, a purpose over 160 characters, with a line break or a link, unknown field.</td></tr><tr><td>403</td><td><code>insufficient_role</code></td><td>VIEWER.</td></tr><tr><td>404</td><td><code>not_found</code></td><td>No such app.</td></tr><tr><td>401</td><td><code>unauthorized</code></td><td>No <code>Authorization</code> header, or an invalid, expired or revoked session token. Returned by the gateway's forward-auth (from registry-service).</td></tr><tr><td>403</td><td><code>mfa_required</code></td><td>The session is only aal1 (emailed code only), or Kratos refuses it because an authenticator app is enrolled but not used in this session. Do the authenticator step.</td></tr><tr><td>403</td><td><code>not_staff</code></td><td>A valid session, but the person is not an ACTIVE staff member (customers get this).</td></tr></tbody></table></div>
+<h4>Real error responses</h4><pre class="out nocopy"><code>Purpose required but missing:
 request body: {"state": "GRANTED"}
-HTTP 400  {"error": "validation_failed", "fields": {"reason": "required for user.full_name: a plain-language English reason (min 10 chars) shown to users, e.g. 'To show technicians near you'"}}</code></pre>
+HTTP 400  {"error": "validation_failed", "fields": {"purpose": "required for location.fine: a plain-language English sentence (min 10 chars) shown to users, e.g. 'Find a driver near you.'"}}</code></pre>
+<pre class="out nocopy"><code>Purpose with a link:
+request body: {"state": "GRANTED", "purpose": {"en": "See https://evil.example for details"}}
+HTTP 400  {"error": "validation_failed", "fields": {"purpose": "en: must not contain a link"}}</code></pre>
 <pre class="out nocopy"><code>Unknown capability:
 request body: {"state": "GRANTED"}
 HTTP 400  {"error": "validation_failed", "fields": {"capability": "unknown capability 'user.shoe_size'"}}</code></pre>

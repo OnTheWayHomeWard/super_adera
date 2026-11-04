@@ -146,7 +146,7 @@ for spec in APPS:
     for cap, state in spec["caps"].items():
         body = {"state": state}
         if cap in R:
-            body["reason"] = R[cap]
+            body["purpose"] = R[cap]
         call("PUT", f"/apps/{app_id}/capabilities/{cap}", body)
     for channel, limit in spec["limits"].items():
         call("PUT", f"/apps/{app_id}/notification-limits/{channel}", limit)

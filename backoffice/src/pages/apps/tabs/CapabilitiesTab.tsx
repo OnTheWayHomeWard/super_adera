@@ -13,13 +13,13 @@ interface Row {
 
 interface FormValues {
   state: "GRANTED" | "DENIED" | "SUSPENDED";
-  reasonEn?: string;
-  reasonAm?: string;
-  reasonOm?: string;
+  purposeEn?: string;
+  purposeAm?: string;
+  purposeOm?: string;
 }
 
 const STATE_HELP: Record<string, string> = {
-  GRANTED: "The app may use this. The user still has to consent when the bridge is built.",
+  GRANTED: "The app may use this. The user is asked at the moment of need and decides per capability.",
   DENIED: "The app asked or could ask for it and was refused.",
   SUSPENDED: "Was granted, now switched off (for example while investigating). Reversible by granting again.",
 };
@@ -33,7 +33,7 @@ export function CapabilitiesTab({ detail, reload }: TabProps) {
   return (
     <div>
       <Typography.Paragraph type="secondary">
-        What this app may ask for. A reason is shown verbatim to users, so it must be plain language; it is required to grant the capabilities marked below.
+        What this app may ask for. The purpose is one plain sentence shown verbatim to users in the permission dialog (for example "Find a driver near you."), so it is reviewed here with the grant. It is required to grant the capabilities marked below; without one the dialog shows the default text. No links, at most 160 characters. Every change is on the audit tab.
         Granting a notification channel also creates default limits for it (see the limits tab).
       </Typography.Paragraph>
       <ErrorAlert error={catalog.error} />
@@ -46,15 +46,15 @@ export function CapabilitiesTab({ detail, reload }: TabProps) {
         columns={[
           { title: "Capability", render: (_, r) => <code>{r.info.key}</code> },
           { title: "What it allows", render: (_, r) => r.info.description },
-          { title: "Reason required", width: 110, render: (_, r) => (r.info.reasonRequired ? "yes (to grant)" : "no") },
+          { title: "Purpose required", width: 110, render: (_, r) => (r.info.purposeRequired ? "yes (to grant)" : "no") },
           { title: "State", render: (_, r) => (r.row ? <StatusTag value={r.row.state} /> : <span style={{ opacity: 0.6 }}>not set</span>) },
           {
-            title: "Reason shown to users",
+            title: "Purpose shown to users",
             render: (_, r) =>
-              r.row?.reason && Object.keys(r.row.reason).length
-                ? LANGS.filter((l) => r.row?.reason?.[l]).map((l) => (
+              r.row?.purpose && Object.keys(r.row.purpose).length
+                ? LANGS.filter((l) => r.row?.purpose?.[l]).map((l) => (
                     <div key={l}>
-                      <b>{l}</b>: {r.row?.reason?.[l]}
+                      <b>{l}</b>: {r.row?.purpose?.[l]}
                     </div>
                   ))
                 : "-",
@@ -82,22 +82,22 @@ function CapabilityModal({ appId, row, onClose, onSaved }: { appId: string; row:
   const [error, setError] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
   const state = Form.useWatch("state", form) ?? row.row?.state ?? "GRANTED";
-  const needReason = state === "GRANTED" && row.info.reasonRequired;
+  const needPurpose = state === "GRANTED" && row.info.purposeRequired;
 
   const submit = async (values: FormValues) => {
-    const reason: I18n = {};
-    if (values.reasonEn?.trim()) reason.en = values.reasonEn.trim();
-    if (values.reasonAm?.trim()) reason.am = values.reasonAm.trim();
-    if (values.reasonOm?.trim()) reason.om = values.reasonOm.trim();
+    const purpose: I18n = {};
+    if (values.purposeEn?.trim()) purpose.en = values.purposeEn.trim();
+    if (values.purposeAm?.trim()) purpose.am = values.purposeAm.trim();
+    if (values.purposeOm?.trim()) purpose.om = values.purposeOm.trim();
     setBusy(true);
     setError(null);
     try {
-      await api(`apps/${appId}/capabilities/${encodeURIComponent(row.info.key)}`, { method: "PUT", body: { state: values.state, reason } });
+      await api(`apps/${appId}/capabilities/${encodeURIComponent(row.info.key)}`, { method: "PUT", body: { state: values.state, purpose } });
       await onSaved();
       onClose();
     } catch (e) {
       setError(e);
-      applyApiError(form, e, { reason: "reasonEn" });
+      applyApiError(form, e, { purpose: "purposeEn" });
     } finally {
       setBusy(false);
     }
@@ -113,29 +113,29 @@ function CapabilityModal({ appId, row, onClose, onSaved }: { appId: string; row:
         onFinish={submit}
         initialValues={{
           state: row.row?.state ?? "GRANTED",
-          reasonEn: row.row?.reason?.en ?? "",
-          reasonAm: row.row?.reason?.am ?? "",
-          reasonOm: row.row?.reason?.om ?? "",
+          purposeEn: row.row?.purpose?.en ?? "",
+          purposeAm: row.row?.purpose?.am ?? "",
+          purposeOm: row.row?.purpose?.om ?? "",
         }}
       >
         <Form.Item label="State" name="state">
           <Radio.Group options={["GRANTED", "DENIED", "SUSPENDED"]} />
         </Form.Item>
         <Typography.Paragraph type="secondary">{STATE_HELP[state]}</Typography.Paragraph>
-        {needReason && <Alert type="info" showIcon style={{ marginBottom: 12 }} message="A plain-language English reason (at least 10 characters) is required, for example: To show technicians near you." />}
+        {needPurpose && <Alert type="info" showIcon style={{ marginBottom: 12 }} message="A plain-language English sentence (at least 10 characters) is required, for example: Find a driver near you." />}
         <Form.Item
-          label="Reason - English"
-          name="reasonEn"
-          rules={needReason ? [{ required: true, min: 10, message: "At least 10 characters in English" }] : []}
+          label="Purpose - English"
+          name="purposeEn"
+          rules={needPurpose ? [{ required: true, min: 10, message: "At least 10 characters in English" }] : []}
         >
-          <Input.TextArea rows={2} maxLength={300} />
+          <Input.TextArea rows={2} maxLength={160} showCount />
         </Form.Item>
         <Space style={{ width: "100%" }} direction="vertical">
-          <Form.Item label="Reason - Amharic (optional)" name="reasonAm" style={{ marginBottom: 8 }}>
-            <Input.TextArea rows={2} maxLength={300} />
+          <Form.Item label="Purpose - Amharic (optional)" name="purposeAm" style={{ marginBottom: 8 }}>
+            <Input.TextArea rows={2} maxLength={160} showCount />
           </Form.Item>
-          <Form.Item label="Reason - Afaan Oromoo (optional)" name="reasonOm" style={{ marginBottom: 0 }}>
-            <Input.TextArea rows={2} maxLength={300} />
+          <Form.Item label="Purpose - Afaan Oromoo (optional)" name="purposeOm" style={{ marginBottom: 0 }}>
+            <Input.TextArea rows={2} maxLength={160} showCount />
           </Form.Item>
         </Space>
       </Form>

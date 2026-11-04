@@ -166,20 +166,20 @@
 
 <!-- ============================================================= -->
 <h2 id="capabilities">Capability catalog and default limits</h2>
-<p>Capabilities are what staff may <em>allow</em> a mini app to ask for (<code>Capability</code> enum in registry-service; list at <code>GET /admin/api/v1/capabilities</code>). Granting is the admin gate; the per-user consent gate arrives with the frontend bridge (not built). Each app-capability pair has a state <code>GRANTED</code>, <code>DENIED</code> or <code>SUSPENDED</code>. A capability marked <em>reason required</em> cannot be granted without an English reason of at least 10 characters, which is shown to users verbatim in the consent sheet.</p>
+<p>Capabilities are what staff may <em>allow</em> a mini app to ask for (<code>Capability</code> enum in registry-service; list at <code>GET /admin/api/v1/capabilities</code>). Granting is the admin gate; the per-user consent gate arrives with the frontend bridge (not built). Each app-capability pair has a state <code>GRANTED</code>, <code>DENIED</code> or <code>SUSPENDED</code>. A capability marked <em>purpose required</em> cannot be granted without an English purpose sentence of at least 10 characters (at most 160, one line, no link), which is shown to users verbatim in the permission dialog. A grant without a purpose is allowed for the others; the dialog then uses the catalog's default text.</p>
 <div class="table-wrap"><table>
-<thead><tr><th>Key</th><th>Description</th><th>Reason required</th><th>Unlocks channel</th></tr></thead>
+<thead><tr><th>Key</th><th>Description</th><th>Purpose required</th><th>Dialog label</th><th>Default dialog sentence</th><th>Unlocks channel</th></tr></thead>
 <tbody>
-<tr><td><code>user.basic</code></td><td>Pseudonymous id and display name</td><td>no</td><td>none</td></tr>
-<tr><td><code>user.full_name</code></td><td>The user's first and last name</td><td>yes</td><td>none</td></tr>
-<tr><td><code>user.contact</code></td><td>The user's phone number and email</td><td>yes</td><td>none</td></tr>
-<tr><td><code>user.address</code></td><td>One saved address the user picks</td><td>yes</td><td>none</td></tr>
-<tr><td><code>location.coarse</code></td><td>City-level location</td><td>yes</td><td>none</td></tr>
-<tr><td><code>location.fine</code></td><td>Precise location, foreground only</td><td>yes</td><td>none</td></tr>
-<tr><td><code>pay.request</code></td><td>Ask the user to pay (currencies and limits in payment settings)</td><td>yes</td><td>none</td></tr>
-<tr><td><code>notify.inapp</code></td><td>Send in-app notifications (inbox + push)</td><td>no</td><td><code>IN_APP</code></td></tr>
-<tr><td><code>notify.sms</code></td><td>Send SMS (costs money; capped)</td><td>no</td><td><code>SMS</code></td></tr>
-<tr><td><code>notify.email</code></td><td>Send email</td><td>no</td><td><code>EMAIL</code></td></tr>
+<tr><td><code>user.basic</code></td><td>Pseudonymous id and display name</td><td>no</td><td>Your Adera id</td><td>Recognise you in the app without learning who you are.</td><td>none</td></tr>
+<tr><td><code>user.full_name</code></td><td>The user's first and last name</td><td>yes</td><td>Your name</td><td>Greet you by name.</td><td>none</td></tr>
+<tr><td><code>user.contact</code></td><td>The user's phone number and email</td><td>yes</td><td>Your phone number and email</td><td>Contact you about your use of the app.</td><td>none</td></tr>
+<tr><td><code>user.address</code></td><td>One saved address the user picks</td><td>yes</td><td>Your saved address</td><td>Fill in your address for you.</td><td>none</td></tr>
+<tr><td><code>location.coarse</code></td><td>City-level location</td><td>yes</td><td>Your approximate location</td><td>Show results near you.</td><td>none</td></tr>
+<tr><td><code>location.fine</code></td><td>Precise location, foreground only</td><td>yes</td><td>Your precise location</td><td>Use your exact position while the app is open.</td><td>none</td></tr>
+<tr><td><code>pay.request</code></td><td>Ask the user to pay (currencies and limits in payment settings)</td><td>yes</td><td>Payments</td><td>Ask you to confirm a payment.</td><td>none</td></tr>
+<tr><td><code>notify.inapp</code></td><td>Send in-app notifications (inbox + push)</td><td>no</td><td>Notifications in Adera</td><td>Send you messages inside Adera.</td><td><code>IN_APP</code></td></tr>
+<tr><td><code>notify.sms</code></td><td>Send SMS (costs money; capped)</td><td>no</td><td>Text messages (SMS)</td><td>Send you text messages.</td><td><code>SMS</code></td></tr>
+<tr><td><code>notify.email</code></td><td>Send email</td><td>no</td><td>Email</td><td>Send you emails.</td><td><code>EMAIL</code></td></tr>
 </tbody></table></div>
 <p>Only the three <code>notify.*</code> capabilities are enforced by code today (notification-service). The others are stored and shown in the public catalog as permissions but nothing consumes them yet (the frontend bridge and payments are <a href="#not-built">not built</a>).</p>
 
@@ -369,7 +369,7 @@
 <tr><td><code>too_many_active_keys</code></td><td>409</td><td>Registering or generating a sixth ACTIVE key in an environment; <code>max</code> is 5.</td></tr>
 <tr><td><code>cannot_demote_self</code></td><td>409</td><td>A super admin lowering or disabling themselves.</td></tr>
 <tr><td><code>last_super_admin</code></td><td>409</td><td>Removing or disabling the last active super admin.</td></tr>
-<tr><td><code>validation_failed</code></td><td>400</td><td>App fields (slug format, English name required, brand colour <code>#RRGGBB</code>, markets, categories, languages, priority 0 to 100000, URLs https, <code>extra</code> size), capability (unknown key, bad state, missing or short English reason), limits (not whole numbers &gt;= 0 or null), environment (bad name, bad CIDR, more than 50, <code>/0</code> on PROD), payment settings (currencies, min greater than max), keys (private key sent, not PEM, under 2048 bits, expiry in the past, label over 100), logo file problems, review rating not 1 to 5, report reason, status values, staff email/role/status.</td></tr>
+<tr><td><code>validation_failed</code></td><td>400</td><td>App fields (slug format, English name required, brand colour <code>#RRGGBB</code>, markets, categories, languages, priority 0 to 100000, URLs https, <code>extra</code> size), capability (unknown key, bad state, missing or short English purpose, a purpose that is too long, multi-line or has a link), limits (not whole numbers &gt;= 0 or null), environment (bad name, bad CIDR, more than 50, <code>/0</code> on PROD), payment settings (currencies, min greater than max), keys (private key sent, not PEM, under 2048 bits, expiry in the past, label over 100), logo file problems, review rating not 1 to 5, report reason, status values, staff email/role/status.</td></tr>
 <tr><td><code>identity_service_unavailable</code></td><td>503</td><td>Also when creating/updating a staff identity in Kratos fails (including Kratos rejecting a duplicate), not only when it is down.</td></tr>
 </tbody></table></div>
 

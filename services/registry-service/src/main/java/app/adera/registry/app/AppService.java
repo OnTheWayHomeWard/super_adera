@@ -201,7 +201,8 @@ public class AppService {
 		List<AppViews.Permission> permissions = config.capabilities(a.getId()).stream()
 			.filter(c -> c.state().equals("GRANTED"))
 			.map(c -> new AppViews.Permission(c.capability(),
-					Capability.byKey(c.capability()).map(Capability::description).orElse(""), c.reason()))
+					Capability.byKey(c.capability()).map(Capability::label).orElse(c.capability()),
+					Capability.byKey(c.capability()).map(Capability::description).orElse(""), c.purpose()))
 			.toList();
 		return new AppViews.PublicApp(a.getId(), a.getSlug(), a.getName(), a.getDescription(), logoUrl(a), a.getBrandColor(),
 				a.getCategories(), a.getMarkets(),

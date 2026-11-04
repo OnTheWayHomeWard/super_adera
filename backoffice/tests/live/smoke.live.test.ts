@@ -154,13 +154,13 @@ describe("3. mini apps", () => {
   });
 
   it("capabilities: reason required, grant, suspend, deny", async () => {
-    const catalog = await api<{ key: string; reasonRequired: boolean }[]>("capabilities");
+    const catalog = await api<{ key: string; purposeRequired: boolean }[]>("capabilities");
     expect(catalog.length).toBeGreaterThanOrEqual(10);
-    const noReason = await errorOf(api(`apps/${appId}/capabilities/location.coarse`, { method: "PUT", body: { state: "GRANTED", reason: {} } }));
-    expect(noReason.fields.reason).toMatch(/required/);
-    log(`grant without reason -> ${noReason.fields.reason.slice(0, 60)}...`);
+    const noReason = await errorOf(api(`apps/${appId}/capabilities/location.coarse`, { method: "PUT", body: { state: "GRANTED", purpose: {} } }));
+    expect(noReason.fields.purpose).toMatch(/required/);
+    log(`grant without reason -> ${noReason.fields.purpose.slice(0, 60)}...`);
     for (const state of ["GRANTED", "SUSPENDED", "DENIED"]) {
-      const d = await api<AppDetail>(`apps/${appId}/capabilities/location.coarse`, { method: "PUT", body: { state, reason: { en: "To show technicians near you", am: "ለማሳየት" } } });
+      const d = await api<AppDetail>(`apps/${appId}/capabilities/location.coarse`, { method: "PUT", body: { state, purpose: { en: "To show technicians near you", am: "ለማሳየት" } } });
       expect(d.capabilities.find((c) => c.capability === "location.coarse")?.state).toBe(state);
     }
     await api(`apps/${appId}/capabilities/notify.inapp`, { method: "PUT", body: { state: "GRANTED" } });

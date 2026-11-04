@@ -67,7 +67,7 @@
 <h1>14. Mini app bridge and user consent (agreed design)</h1>
 <p class="lead">How a mini app gets data about a user and from the device, how the user decides what it may have, and how we stop it from taking more. Permissions are asked <strong>at the moment of need, one at a time, like Android</strong>, not all at launch. Design agreed on 2026-11-04; implementation starts from this page. Every endpoint and sample below is the intended shape; once a step is built, its real requests and responses replace the illustrations (marked as such on each step).</p>
 
-<div class="callout warn"><span class="label">Status</span><p>Agreed, build in progress (section 10 lists the steps). Decisions taken are in section 11.</p></div>
+<div class="callout warn"><span class="label">Status</span><p>Agreed, build in progress (section 10 lists the steps and which are built). Decisions taken are in section 11. Built so far: step 1 (purpose per capability).</p></div>
 
 <section><h2 id="short">1. The short answer</h2>
 <ul>
@@ -146,7 +146,61 @@ Authorization: Bearer &lt;user session&gt;
 <tr><td><code>consent_event</code></td><td>user id, app id, capability, from state, to state, at, source</td><td>Append only. Proof that the user agreed and when.</td></tr>
 </tbody></table></div>
 <p>The menu sheet lists only capabilities that are currently granted to the app (gate 1). If staff remove a capability its row stays but is inert and no longer listed. If staff grant a new one, nothing happens until the mini app asks for it.</p>
-<p>Per-capability text lives in the registry next to the grant: <code>purpose</code> (one sentence, shown in the dialog). Staff review the text with the grant, so a partner cannot show "to improve your experience" for a location request. There is no <code>required</code> flag: the mini app decides whether it can work without a permission.</p></section>
+<h3>Built (step 1): the purpose sentence, as it works today</h3>
+<p>The text was already stored next to the grant under the name <code>reason</code>; it is now called <code>purpose</code> everywhere (database column renamed by migration <code>V7__capability_purpose.sql</code>; the old request field name <code>reason</code> is still accepted as an alias). It is one sentence per language (<code>en</code>, <code>am</code>, <code>om</code>), at most 160 characters, one line, no link, and required in English (10 characters or more) for the capabilities whose catalog entry says <code>purposeRequired: true</code>. <strong>Decision:</strong> a grant without a purpose is allowed for the other capabilities (<code>user.basic</code>, <code>notify.*</code>); the dialog then shows the catalog's default sentence (<code>defaultPurpose</code>), so no dialog is ever empty. Each capability also has a catalog <code>label</code> (the dialog headline), returned by <code>GET /admin/api/v1/capabilities</code> and in the public catalog permissions. Other services read label, purpose and default from registry-service in the <code>permissions</code> field of <code>GET /internal/apps/{appId}/context</code> (only GRANTED capabilities are listed there).</p>
+<p>Real exchange from the dev stack (a throwaway app, deleted afterwards). A grant without the required purpose, with a link, and then a good one, then a changed one:</p>
+<pre class="out"><code>PUT /admin/api/v1/apps/$APP_ID/capabilities/location.fine   {"state": "GRANTED"}
+
+HTTP 400 Bad Request
+
+{
+  "error": "validation_failed",
+  "fields": {
+    "purpose": "required for location.fine: a plain-language English sentence (min 10 chars) shown to users, e.g. 'Find a driver near you.'"
+  }
+}
+
+PUT ...   {"state": "GRANTED", "purpose": {"en": "See https://evil.example for details"}}
+
+HTTP 400 Bad Request
+
+{
+  "error": "validation_failed",
+  "fields": {
+    "purpose": "en: must not contain a link"
+  }
+}
+
+PUT ...   {"state": "GRANTED", "purpose": {"en": "Find the closest driver."}}
+
+HTTP 200 OK   capabilities:
+[
+  {
+    "capability": "location.fine",
+    "state": "GRANTED",
+    "purpose": {
+      "en": "Find the closest driver."
+    },
+    "updatedAt": "2026-11-04T18:37:19.029074Z"
+  }
+]</code></pre><p>The audit tab of the app (backoffice) and <code>GET /admin/api/v1/audit?appId=...&amp;action=capability.set</code> show every change with the text users were told and the text it replaced:</p><pre class="out"><code>{
+  "action": "capability.set",
+  "actorRole": "ADMIN",
+  "targetType": "mini_app",
+  "meta": {
+    "state": "GRANTED",
+    "purpose": {
+      "en": "Find the closest driver."
+    },
+    "capability": "location.fine",
+    "previousState": "GRANTED",
+    "previousPurpose": {
+      "am": "ቅርብ ሹፌር ለማግኘት።",
+      "en": "Find a driver near you."
+    }
+  },
+  "at": "2026-11-04T18:37:19.031587Z"
+}</code></pre><p>Per-capability text lives in the registry next to the grant: <code>purpose</code> (one sentence, shown in the dialog). Staff review the text with the grant, so a partner cannot show "to improve your experience" for a location request. There is no <code>required</code> flag: the mini app decides whether it can work without a permission.</p></section>
 
 <section><h2 id="endpoints">6. Endpoints</h2>
 <p>All user endpoints use the existing gateway route for signed-in users. They live under <code>/me/apps/{app}</code>, so they do not collide with the public catalog's <code>/apps/{app}/permissions</code> (what an app is allowed to use, visible to anyone). <code>{app}</code> is the id or slug.</p>
@@ -268,7 +322,7 @@ POST .../notify.sms/request      (not granted to this app by staff)
 
 <section><h2 id="build">10. Build order</h2>
 <ol>
-<li>Registry: <code>purpose</code> per granted capability, with backoffice field and audit.</li>
+<li><strong>Built 2026-11-04.</strong> Registry: <code>purpose</code> per granted capability, with backoffice field and audit.</li>
 <li>user-service: <code>app_consent</code>, <code>consent_event</code>, the request, answer, menu, list and disconnect endpoints with the state rules of section 5. Tests, docs.</li>
 <li>Backoffice: counts per capability on the app page.</li>
 <li>notify.* gate in the notification path, and mute converted to consent.</li>
