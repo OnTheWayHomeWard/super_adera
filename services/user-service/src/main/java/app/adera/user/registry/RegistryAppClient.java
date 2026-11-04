@@ -3,6 +3,7 @@ package app.adera.user.registry;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
@@ -23,6 +24,14 @@ import org.springframework.web.client.RestClientException;
  */
 @Component
 public class RegistryAppClient {
+
+	/** A capability granted to the app, as the permission dialog needs it. {@code purpose} maps language to the approved sentence. */
+	public record GrantedPermission(String capability, String label, Map<String, String> purpose, String defaultPurpose) {
+	}
+
+	/** The app as the consent endpoints see it, read fresh (no cache: a removed capability or a pause must bite at once). */
+	public record AppInfo(UUID appId, String slug, Map<String, String> name, String status, List<GrantedPermission> permissions) {
+	}
 
 	private static final Duration TTL = Duration.ofSeconds(60);
 
@@ -71,6 +80,40 @@ public class RegistryAppClient {
 		}
 		catch (RestClientException e) {
 			throw new ApiException(503, "service_unavailable");
+		}
+	}
+
+	/** The app by id or slug with its granted capabilities. Empty when it does not exist. Never cached. */
+	public Optional<AppInfo> app(String idOrSlug) {
+		try {
+			return Optional.ofNullable(registry.get().uri("/internal/apps/{id}/permissions", idOrSlug).headers(this::secret).retrieve().body(AppInfo.class));
+		}
+		catch (HttpClientErrorException.NotFound e) {
+			return Optional.empty();
+		}
+		catch (RestClientException e) {
+			throw new ApiException(503, "service_unavailable");
+		}
+	}
+
+	/** Several apps at once (unknown ids are simply missing from the answer). */
+	public List<AppInfo> apps(java.util.Collection<UUID> ids) {
+		if (ids.isEmpty()) {
+			return List.of();
+		}
+		try {
+			String joined = ids.stream().map(UUID::toString).collect(java.util.stream.Collectors.joining(","));
+			AppInfo[] body = registry.get().uri(u -> u.path("/internal/apps").queryParam("ids", joined).build()).headers(this::secret).retrieve().body(AppInfo[].class);
+			return body == null ? List.of() : List.of(body);
+		}
+		catch (RestClientException e) {
+			throw new ApiException(503, "service_unavailable");
+		}
+	}
+
+	private void secret(org.springframework.http.HttpHeaders h) {
+		if (!internalSecret.isEmpty()) {
+			h.set("X-Internal-Secret", internalSecret);
 		}
 	}
 

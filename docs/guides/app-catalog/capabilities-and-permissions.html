@@ -15,7 +15,7 @@
 </header>
 <div class="layout">
 <nav class="sidebar" aria-label="Pages">
-<h4>Mini-app catalog</h4><ul><li><a href="index.html">Overview</a></li><li><a href="list-apps.html">List the mini apps</a></li><li><a href="app-details.html">App details</a></li><li><a href="capabilities-and-permissions.html" class="current">Capabilities and permissions</a></li><li><a href="reviews-and-ratings.html">Reviews and ratings</a></li><li><a href="reporting.html">Reporting an app</a></li><li><a href="mute-preferences.html">Mute preferences</a></li><li><a href="building-the-store-screen.html">Building the store screen</a></li><li><a href="errors.html">Error codes</a></li><li><a href="known-issues.html">Known issues</a></li></ul>
+<h4>Mini-app catalog</h4><ul><li><a href="index.html">Overview</a></li><li><a href="list-apps.html">List the mini apps</a></li><li><a href="app-details.html">App details</a></li><li><a href="capabilities-and-permissions.html" class="current">Capabilities and permissions</a></li><li><a href="reviews-and-ratings.html">Reviews and ratings</a></li><li><a href="reporting.html">Reporting an app</a></li><li><a href="mute-preferences.html">Mute preferences</a></li><li><a href="permissions-and-consent.html">Permissions and consent</a></li><li><a href="building-the-store-screen.html">Building the store screen</a></li><li><a href="errors.html">Error codes</a></li><li><a href="known-issues.html">Known issues</a></li></ul>
 </nav>
 <main>
 <h1>Capabilities and permissions</h1>
@@ -56,14 +56,14 @@
 <li>Title from <em>your</em> localised string for the key (fallback: <code>description</code>); second line is <code>purpose</code> chosen with the language fallback in <a href="list-apps.html#languages">List the mini apps</a> (user language, then <code>en</code>, then any). If there is no purpose, show only the title.</li>
 <li>Unknown future key: do not hide it. Show the English <code>description</code> in a neutral row. A new capability that the user cannot see is a trust problem.</li>
 <li>If <code>permissions</code> is empty: say "This app does not ask for any permissions."</li>
-<li>Do not render these as toggles. The user cannot grant or revoke a capability today (the consent step is not built). Use a read-only list. When consent exists, this is where the toggles will go.</li>
+<li>On the store page, render this list read-only: it shows what the app <em>may</em> ask for. The user's own answers (and the toggles) live in the app's menu sheet and the settings screen, built from the permission endpoints (<a href="permissions-and-consent.html">Permissions and consent</a>).</li>
 <li>On the tile in the list, at most show a small summary ("Uses location, payments") derived from the same array. Do not show all rows there.</li>
 </ul>
 <h2 id="limits-for-users">What is not shown, and why</h2>
 <p>Notification limits, payment settings and the denied/suspended states are internal. A user-facing "this app can send you at most 3 texts a day" would be a promise the client cannot back with data, because the limits are not in the user API.</p>
 <h2 id="not-built">Not built yet</h2>
 <ul>
-<li>The frontend bridge that lets a mini app request a capability at runtime, and the consent prompt with per-user, per-capability grant and revoke (no endpoint stores a user's consent).</li>
+<li>The frontend bridge itself (the JavaScript a mini app calls) and enforcement of the user's answer on data and notification calls. The consent endpoints exist and store the user's answers (see <a href="permissions-and-consent.html">Permissions and consent</a>); the gates that read them come in later steps.</li>
 <li>Any service that enforces <code>user.*</code>, <code>location.*</code> or <code>pay.request</code>: no user data goes to apps; no payment service; no stored postal address for <code>user.address</code>.</li>
 <li>A public flow that creates the per-app pseudonymous id (it can only be created by an internal call today).</li>
 <li>Showing denied or suspended capabilities, or per-capability limits, to users.</li>

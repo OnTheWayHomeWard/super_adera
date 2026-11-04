@@ -460,6 +460,137 @@ Content-Type: text/plain; charset=utf-8
 </dl>
 <h4>Purpose</h4><p>Cheap existence check. Answers 200 <code>{"appId": "...", "slug": "...", "status": "LIVE"}</code> (status DRAFT, LIVE, PAUSED or KILLED) or 404 <code>{"error":"not_found"}</code>. user-service remembers a known app for 60 seconds and never remembers a 404; if this call fails it answers its own caller with 503 <code>service_unavailable</code>.</p>
 </div></details>
+<details class="endpoint" id="ep-int-get-app-permissions">
+<summary><span class="method m-get">GET</span><span class="path">/internal/apps/{idOrSlug}/permissions</span><span class="sum">An app (by id or slug) with what staff granted it</span></summary>
+<div class="body"><dl class="meta"><dt>Audience</dt><dd>other services (user-service consent endpoints); never end users or partners</dd><dt>Client path</dt><dd><strong>none</strong>: not routed by the gateway</dd><dt>Internal path</dt><dd><code>http://registry-service:8080/internal/apps/{idOrSlug}/permissions</code></dd><dt>Called by</dt><dd>user-service <code>RegistryAppClient.app</code> on every consent call (not cached: a pause or a removed grant must bite at once)</dd><dt>Auth</dt><dd><code>X-Internal-Secret: $INTERNAL_SECRET</code></dd><dt>Implemented in</dt><dd><code>services/registry-service/.../internal/InternalController.java</code></dd></dl>
+<h4>Purpose</h4><p>The consent endpoints need the app's id, status and the capabilities granted to it, each with the dialog <code>label</code>, the staff-approved <code>purpose</code> per language and the catalog <code>defaultPurpose</code>. Only <code>GRANTED</code> capabilities are listed. <code>{idOrSlug}</code> is a UUID or a slug.</p>
+<h4>Example (the seeded app demo-market)</h4>
+<pre><code>curl -s http://127.0.0.1:8087/internal/apps/demo-market/permissions -H "X-Internal-Secret: $INTERNAL_SECRET"</code></pre>
+<pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+
+{
+  "appId": "&lt;app uuid&gt;",
+  "slug": "demo-market",
+  "name": {
+    "am": "ገበያ",
+    "en": "Marketplace"
+  },
+  "status": "LIVE",
+  "permissions": [
+    {
+      "capability": "notify.email",
+      "label": "Email",
+      "purpose": {},
+      "defaultPurpose": "Send you emails."
+    },
+    {
+      "capability": "notify.inapp",
+      "label": "Notifications in Adera",
+      "purpose": {},
+      "defaultPurpose": "Send you messages inside Adera."
+    },
+    {
+      "capability": "notify.sms",
+      "label": "Text messages (SMS)",
+      "purpose": {},
+      "defaultPurpose": "Send you text messages."
+    },
+    {
+      "capability": "user.basic",
+      "label": "Your Adera id",
+      "purpose": {},
+      "defaultPurpose": "Recognise you in the app without learning who you are."
+    },
+    {
+      "capability": "user.contact",
+      "label": "Your phone number and email",
+      "purpose": {
+        "am": "ስለ ትዕዛዝዎ ለማነጋገር",
+        "en": "To reach you about your order"
+      },
+      "defaultPurpose": "Contact you about your use of the app."
+    }
+  ]
+}</code></pre>
+<h4>Unknown app</h4>
+<pre><code>curl -s http://127.0.0.1:8087/internal/apps/nope/permissions -H "X-Internal-Secret: $INTERNAL_SECRET"</code></pre>
+<pre class="out"><code>HTTP/1.1 404 Not Found
+Content-Type: application/json
+
+{
+  "error": "not_found"
+}</code></pre>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th>Error code</th><th>When it happens</th></tr></thead><tbody><tr><td><strong>401</strong></td><td><code>unauthorized</code></td><td>Secret missing or wrong.</td></tr><tr><td><strong>404</strong></td><td><code>not_found</code></td><td>No app with that id or slug.</td></tr></tbody></table></div>
+</div></details>
+<details class="endpoint" id="ep-int-get-apps-by-ids">
+<summary><span class="method m-get">GET</span><span class="path">/internal/apps?ids=a,b,c</span><span class="sum">Several apps at once, with their granted capabilities</span></summary>
+<div class="body"><dl class="meta"><dt>Audience</dt><dd>other services (user-service consent endpoints); never end users or partners</dd><dt>Client path</dt><dd><strong>none</strong>: not routed by the gateway</dd><dt>Internal path</dt><dd><code>http://registry-service:8080/internal/apps?ids=...</code></dd><dt>Called by</dt><dd>user-service (the settings overview <code>GET /api/v1/me/permissions</code>)</dd><dt>Auth</dt><dd><code>X-Internal-Secret: $INTERNAL_SECRET</code></dd><dt>Implemented in</dt><dd><code>services/registry-service/.../internal/InternalController.java</code></dd></dl>
+<h4>Purpose</h4><p>The same object as the call above for up to 100 ids in one request (unknown ids are skipped, duplicates ignored). Used so the settings screen costs one internal call, not one per app. An empty <code>ids</code> gives an empty list.</p>
+<h4>Example</h4>
+<pre><code>curl -s "http://127.0.0.1:8087/internal/apps?ids=&lt;app uuid&gt;" -H "X-Internal-Secret: $INTERNAL_SECRET"</code></pre>
+<pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+
+[
+  {
+    "appId": "&lt;app uuid&gt;",
+    "slug": "demo-market",
+    "name": {
+      "am": "ገበያ",
+      "en": "Marketplace"
+    },
+    "status": "LIVE",
+    "permissions": [
+      {
+        "capability": "notify.email",
+        "label": "Email",
+        "purpose": {},
+        "defaultPurpose": "Send you emails."
+      },
+      {
+        "capability": "notify.inapp",
+        "label": "Notifications in Adera",
+        "purpose": {},
+        "defaultPurpose": "Send you messages inside Adera."
+      },
+      {
+        "capability": "notify.sms",
+        "label": "Text messages (SMS)",
+        "purpose": {},
+        "defaultPurpose": "Send you text messages."
+      },
+      {
+        "capability": "user.basic",
+        "label": "Your Adera id",
+        "purpose": {},
+        "defaultPurpose": "Recognise you in the app without learning who you are."
+      },
+      {
+        "capability": "user.contact",
+        "label": "Your phone number and email",
+        "purpose": {
+          "am": "ስለ ትዕዛዝዎ ለማነጋገር",
+          "en": "To reach you about your order"
+        },
+        "defaultPurpose": "Contact you about your use of the app."
+      }
+    ]
+  }
+]</code></pre>
+<h4>A value that is not a UUID</h4>
+<pre><code>curl -s "http://127.0.0.1:8087/internal/apps?ids=zzz" -H "X-Internal-Secret: $INTERNAL_SECRET"</code></pre>
+<pre class="out"><code>HTTP/1.1 400 Bad Request
+Content-Type: application/json
+
+{
+  "error": "validation_failed",
+  "fields": {
+    "ids": "must be a comma-separated list of app ids"
+  }
+}</code></pre>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th>Error code</th><th>When it happens</th></tr></thead><tbody><tr><td><strong>400</strong></td><td><code>validation_failed</code></td><td>An id is not a UUID.</td></tr><tr><td><strong>401</strong></td><td><code>unauthorized</code></td><td>Secret missing or wrong.</td></tr></tbody></table></div>
+</div></details>
 <details class="endpoint" id="ep-int-get-app-context">
 <summary><span class="method m-get">GET</span><span class="path">/internal/apps/{appId}/context</span><span class="sum">What may this app do in this deployment's environment?</span></summary>
 <div class="body"><dl class="meta">

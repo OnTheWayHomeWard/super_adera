@@ -210,7 +210,7 @@ FROM courier_messages ORDER BY created_at DESC LIMIT 2;
 <div class="callout"><span class="label">Note</span><p>Kratos keeps flow, code and courier rows after use; it has a cleanup command (<code>kratos cleanup sql</code>) that we do not schedule yet. Expect these tables to grow in production (not verified at scale). The numeric courier <code>type</code>/<code>status</code> codes are Kratos' own enums; the values above (2 = SMS, status 2 = sent) were inferred from the data, not from Kratos' source.</p></div>
 
 <h2 id="db-users">Database <code>users</code> (user-service)</h2>
-<p>Schema: <code>services/user-service/src/main/resources/db/migration/V1__users_and_devices.sql</code> and <code>V2__aliases_and_preferences.sql</code>. All four tables are empty in the dev stack right now, so every example below is an <span class="badge partial">illustrative example</span> (made up, but valid against the real constraints).</p>
+<p>Schema: <code>services/user-service/src/main/resources/db/migration/V1__users_and_devices.sql</code> <code>V2__aliases_and_preferences.sql</code> and <code>V3__app_consent.sql</code> (the two consent tables below have real captured rows). The older tables are empty in the dev stack right now, so every example below is an <span class="badge partial">illustrative example</span> (made up, but valid against the real constraints).</p>
 
 <h3 id="users-app_user"><code>app_user</code></h3>
 <p><strong>Purpose:</strong> the full person record. <strong>Why:</strong> Kratos knows only "email or phone"; the app needs a name, language, avatar, location and room for fields nobody planned. Keeping this out of Kratos means profile changes never touch the login system. <strong>Written by:</strong> user-service (<code>UserRepository</code>): the Kratos registration hook creates the row, <code>PATCH /api/v1/me</code> edits it, <code>GET /me</code> creates it if the hook was lost. <strong>Read by:</strong> user-service only; other services get what they need through internal endpoints (alias resolution, contact lookup).</p>
@@ -282,6 +282,24 @@ user_id 7c1e4a52-3b0d-4f6e-9a1b-2d5f8e9c0a11</code></pre>
 </tbody></table></div>
 <p><span class="badge partial">illustrative example</span></p>
 <pre class="out"><code>user_id 7c1e4a52-...  app_id 2398a5ca-...  mute_in_app f  mute_sms t  mute_email f  updated_at 2026-10-25 10:02:11+00</code></pre>
+
+<h3 id="users-consent"><code>app_consent</code></h3>
+<p><strong>Purpose:</strong> what a user answered for each capability of each mini app (gate 2 of the bridge design, <a href="14-bridge-consent.html">section 14</a>). <strong>Why:</strong> staff decide what an app MAY ask for; this table records what the user ALLOWED, and enforces "two refusals block, only the menu unblocks" on the server. One current row per user, app and capability; no row means <code>NOT_ASKED</code>. <strong>Written by:</strong> user-service (<code>ConsentService</code>, migration <code>V3__app_consent.sql</code>). <strong>Read by:</strong> user-service; the notification, profile and callback steps read it through internal calls.</p>
+<div class="table-wrap"><table><thead><tr><th>Column</th><th>Type</th><th>Notes</th></tr></thead><tbody>
+<tr><td><code>user_id</code>, <code>app_id</code>, <code>capability</code></td><td>uuid, uuid, varchar(40); composite PK</td><td>user FK cascade; app id from registry; capability key such as <code>location.fine</code>.</td></tr>
+<tr><td><code>state</code></td><td>varchar(10)</td><td><code>NOT_ASKED</code> (a row exists only to hold an open dialog ticket), <code>GRANTED</code>, <code>DENIED</code>, <code>BLOCKED</code>.</td></tr>
+<tr><td><code>denial_count</code></td><td>int</td><td>Consecutive refusals; the second one blocks. Reset by a yes, by the menu switch and by Disconnect.</td></tr>
+<tr><td><code>decided_at</code>, <code>source</code></td><td>timestamptz, varchar(16)</td><td>When and how: <code>DIALOG</code>, <code>MENU</code>, <code>DISCONNECT</code> (later <code>MUTE</code>). Null until decided.</td></tr>
+<tr><td><code>prompt_id</code>, <code>prompt_expires_at</code></td><td>varchar(40), timestamptz</td><td>The one-time dialog ticket (<code>pr_</code> + 24 hex, valid 5 minutes) while a dialog is open; cleared by any answer, menu change or disconnect.</td></tr>
+</tbody></table></div>
+<p>The pseudonymous id <code>user.basic</code> needs no dialog: it is reported <code>GRANTED</code> without a row, and a <code>DENIED</code> row means the user disconnected.</p>
+<h3 id="users-consent-event"><code>consent_event</code></h3>
+<p><strong>Purpose:</strong> append-only proof of what the user agreed to and when. <strong>Why:</strong> a consent that can be overwritten proves nothing; this keeps every change (<code>from_state</code> to <code>to_state</code>, <code>at</code>, <code>source</code>) so "did she agree on that day?" can be answered. Columns: <code>id</code> bigserial PK, <code>user_id</code> (FK cascade), <code>app_id</code>, <code>capability</code>, <code>from_state</code>, <code>to_state</code>, <code>at</code>, <code>source</code>. Written in the same transaction as the change.</p>
+<p><span class="badge built">real rows</span> (the seeded user Demo Hana in the dev stack, during the live check, removed afterwards):</p>
+<pre class="out"><code>location.fine NOT_ASKED&gt;DENIED DIALOG
+location.fine DENIED&gt;BLOCKED DIALOG
+location.fine BLOCKED&gt;GRANTED MENU
+notify.sms NOT_ASKED&gt;GRANTED DIALOG</code></pre>
 
 <h2 id="db-notification">Database <code>notification</code> (notification-service)</h2>
 <p>Schema: <code>V1__send_log.sql</code> (login codes) <code>V2__partner_platform.sql</code> (partner platform) and <code>V3__environments_dev_prod.sql</code> (renames TEST/LIVE to DEV/PROD in <code>notification</code>, <code>usage_daily</code>, <code>usage_total</code> and queued callback payloads; adds the CHECK constraints). Two different jobs share this database: (1) the Kratos courier path, which logs every code delivery (verification, recovery, staff sign-in) in <code>send_log</code>; (2) the partner platform, which has templates, notifications, attempts, inbox, callbacks and usage counters. Only <code>send_log</code> has rows in the dev stack; the others show <span class="badge partial">illustrative example</span> rows.</p>

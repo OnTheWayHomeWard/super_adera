@@ -63,7 +63,7 @@
 </nav>
 <main>
 <h1>8a. End-user API</h1>
-<p class="lead">What the Flutter app calls with a session token: profile, location, avatar, devices, logout, per-app mute, the notification inbox and the mini-app catalog. 23 endpoints.</p>
+<p class="lead">What the Flutter app calls with a session token: profile, location, avatar, devices, logout, per-app mute, per-app permissions (consent), the notification inbox and the mini-app catalog. 29 endpoints.</p>
 <div class="callout"><span class="label">Conventions on this page</span>
 <p>All paths are relative to the gateway, <code>$GATEWAY</code> = <code>http://127.0.0.1:9080</code> in dev. <code>$TOKEN</code> is the Kratos <code>session_token</code> returned by sign-up or login (<a href="08e-kratos-flows.html">8e</a>); <code>$APP_ID</code> and <code>$ITEM_ID</code> are UUIDs taken from earlier answers. Examples were captured on <strong>2026-10-25</strong> against the dev stack (console SMS, Mailpit) with a throwaway user and a throwaway LIVE mini app, both deleted afterwards; phone numbers and signed-URL secrets are masked.</p>
 <p>Error bodies from our services are <code>{"error":"&lt;code&gt;","fields":{...}}</code> (<code>fields</code> only for validation). Two things do not follow that shape: errors produced by the gateway (empty <code>401</code>, HTML <code>429</code>, <code>404 {"error_msg":"404 Route Not Found"}</code>) and Kratos' own errors. Framework errors (<code>415</code>, a bad UUID in a path, unknown route, wrong method) use it since 2026-10-26: <code>unsupported_media_type</code>, <code>invalid_request</code>, <code>not_found</code>, <code>method_not_allowed</code>.</p></div>
@@ -76,7 +76,7 @@
 </ol>
 <p>Why: Kratos' <code>whoami</code> returns the identity in its body, not in headers, and services should not each implement session checking. One small translator endpoint keeps every service simple. Spoofing check: a request with a forged <code>X-User-Id</code> still returned the caller's own profile (the gateway overwrote the header; verified by <code>tests/e2e/journey.py</code>).</p>
 <h2 id="route-table">Gateway routes behind this page</h2>
-<div class="table-wrap"><table><thead><tr><th>Gateway route id</th><th>Paths</th><th>Upstream</th><th>Auth</th><th>Limit</th></tr></thead><tbody><tr><td><code>me-avatar</code> (priority 30)</td><td><code>/api/v1/me/avatar</code></td><td>user-service</td><td>forward-auth (user)</td><td>20 / 60 s</td></tr><tr><td><code>me-notifications</code> (priority 30)</td><td><code>/api/v1/me/notifications</code>, <code>/api/v1/me/notifications/*</code></td><td>notification-service</td><td>forward-auth (user)</td><td>300 / 60 s</td></tr><tr><td><code>me</code> (priority 20)</td><td><code>/api/v1/me</code>, <code>/api/v1/me/*</code></td><td>user-service</td><td>forward-auth (user)</td><td>300 / 60 s</td></tr><tr><td><code>apps-catalog</code> (priority 20)</td><td><code>/api/v1/apps</code>, <code>/api/v1/apps/*</code></td><td>registry-service</td><td>forward-auth (user)</td><td>300 / 60 s</td></tr></tbody></table></div>
+<div class="table-wrap"><table><thead><tr><th>Gateway route id</th><th>Paths</th><th>Upstream</th><th>Auth</th><th>Limit</th></tr></thead><tbody><tr><td><code>me-permission-request</code> (priority 30)</td><td><code>POST /api/v1/me/apps/{app}/permissions/{capability}/request</code> (matched by regular expression)</td><td>user-service</td><td>forward-auth (user)</td><td>30 / 60 s</td></tr><tr><td><code>me-avatar</code> (priority 30)</td><td><code>/api/v1/me/avatar</code></td><td>user-service</td><td>forward-auth (user)</td><td>20 / 60 s</td></tr><tr><td><code>me-notifications</code> (priority 30)</td><td><code>/api/v1/me/notifications</code>, <code>/api/v1/me/notifications/*</code></td><td>notification-service</td><td>forward-auth (user)</td><td>300 / 60 s</td></tr><tr><td><code>me</code> (priority 20)</td><td><code>/api/v1/me</code>, <code>/api/v1/me/*</code></td><td>user-service</td><td>forward-auth (user)</td><td>300 / 60 s</td></tr><tr><td><code>apps-catalog</code> (priority 20)</td><td><code>/api/v1/apps</code>, <code>/api/v1/apps/*</code></td><td>registry-service</td><td>forward-auth (user)</td><td>300 / 60 s</td></tr></tbody></table></div>
 <p>The limit key is the client IP (<code>remote_addr</code>), counted in Redis; every route has its own counter. Locally all clients share one Docker IP; behind a production proxy the real client IP must be configured (see the known limitations in docs/SETUP.md section 12).</p>
 <h2 id="endpoints">Endpoints</h2>
 <details class="endpoint" id="ep-user-get-me">
@@ -640,6 +640,357 @@ X-Request-Id: 46a26360-a677-4a63-abda-75946f441e8d
 }</code></pre>
 <h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th>Error code</th><th>When it happens</th></tr></thead><tbody><tr><td><strong>404</strong></td><td><code>not_found</code></td><td>The app does not exist or is not LIVE (checked with registry-service).</td></tr><tr><td><strong>503</strong></td><td><code>service_unavailable</code></td><td>registry-service could not be reached for that check.</td></tr><tr><td><strong>400</strong></td><td><code>validation_failed</code></td><td>Unknown key (<code>"unknown field"</code>) or a non-boolean value (<code>"must be true or false"</code>); the first problem found is reported.</td></tr><tr><td><strong>400</strong></td><td><code>invalid_json</code></td><td>Not valid JSON.</td></tr><tr><td><strong>400</strong></td><td><code>invalid_request</code></td><td><code>appId</code> is not a UUID.</td></tr><tr><td><strong>401</strong></td><td><code>(empty body)</code></td><td>Missing, expired, revoked or malformed session token. Produced by the gateway's forward-auth step (user-service <code>/internal/auth/verify</code> answers 401, the body is empty). A session of an account that has an authenticator app but only completed the first step (<code>aal1</code>) is also a 401 here.</td></tr><tr><td><strong>429</strong></td><td><code>(HTML page)</code></td><td>Gateway rate limit exceeded. The body is APISIX's HTML page, not JSON; the response carries <code>X-RateLimit-*</code> headers (see <a href="08f-operational.html#gateway-behaviour">8f</a>).</td></tr><tr><td><strong>503</strong></td><td><code>identity_service_unavailable</code></td><td>Kratos could not be reached while the gateway asked who the token belongs to (forward-auth is sent to user-service, which answers 503 instead of a misleading 401).</td></tr></tbody></table></div>
 <h4>How to use it</h4><ul><li>The partner never learns about muting: its request returns <code>200</code> with status <code>SUPPRESSED</code> (<a href="08c-partner-api.html">8c</a>).</li></ul>
+</div></details>
+<h3 id="permissions">Permissions per mini app (consent)</h3>
+<p>Built 2026-11-04 (step 2 of the bridge design, <a href="14-bridge-consent.html">section 14</a>). The state machine: <code>NOT_ASKED</code> -> dialog -> <code>GRANTED</code> or <code>DENIED</code>; a second consecutive refusal makes it <code>BLOCKED</code>; only the menu switch unblocks. Examples captured on <strong>2026-11-04</strong> with the seeded user Demo Hana and the seeded app <code>demo-ride</code>, then removed again.</p>
+<details class="endpoint" id="ep-user-get-permissions">
+<summary><span class="method m-get">GET</span><span class="path">/api/v1/me/apps/{app}/permissions</span><span class="sum">List a mini app's permissions with my state</span></summary>
+<div class="body"><dl class="meta"><dt>Audience</dt><dd>signed-in end user (the super app; a mini app asks through the bridge)</dd><dt>Client path</dt><dd><code>/api/v1/me/apps/{app}/permissions</code> through the gateway, base <code>$GATEWAY</code>. <code>{app}</code> is the app's id or its slug</dd><dt>Internal path</dt><dd>same path on user-service (the gateway does not rewrite it)</dd><dt>Auth</dt><dd><code>Authorization: Bearer $TOKEN</code> (Kratos session token), checked by the gateway's forward-auth.</dd><dt>Rate limit</dt><dd>300 per 60 s per client IP (gateway route <code>me</code>); over the limit the gateway answers <code>429</code></dd><dt>Implemented in</dt><dd><code>services/user-service/src/main/java/app/adera/user/consent/ConsentController.java, ConsentService.java</code></dd></dl>
+<h4>Purpose</h4><p>The menu sheet of a mini app: every capability staff granted the app, with the dialog headline (<code>label</code>), the approved one-sentence <code>purpose</code> in my language (English, then the catalog default, when there is none), and MY state: <code>NOT_ASKED</code>, <code>GRANTED</code>, <code>DENIED</code> or <code>BLOCKED</code>. Never shows a dialog. <code>user.basic</code> (the pseudonymous id) needs no dialog and is reported <code>GRANTED</code> until I disconnect.</p>
+<h4>Request parameters</h4><div class="table-wrap"><table><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why it exists</th></tr></thead><tbody><tr><td><code>app</code></td><td>path</td><td>string</td><td>yes</td><td>app id (UUID) or slug</td><td>Which mini app. Slugs are what links and the bridge use.</td></tr></tbody></table></div>
+<h4>Example</h4>
+<pre><code>curl -s -X GET "$GATEWAY/api/v1/me/apps/demo-ride/permissions" \
+  -H "Authorization: Bearer $TOKEN"</code></pre>
+<pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+
+[
+  {
+    "capability": "location.fine",
+    "label": "Your precise location",
+    "purpose": "To find the closest driver to you",
+    "state": "NOT_ASKED",
+    "denialCount": 0,
+    "canAskAgain": true,
+    "decidedAt": null
+  },
+  {
+    "capability": "notify.inapp",
+    "label": "Notifications in Adera",
+    "purpose": "Send you messages inside Adera.",
+    "state": "NOT_ASKED",
+    "denialCount": 0,
+    "canAskAgain": true,
+    "decidedAt": null
+  },
+  {
+    "capability": "notify.sms",
+    "label": "Text messages (SMS)",
+    "purpose": "Send you text messages.",
+    "state": "NOT_ASKED",
+    "denialCount": 0,
+    "canAskAgain": true,
+    "decidedAt": null
+  },
+  {
+    "capability": "pay.request",
+    "label": "Payments",
+    "purpose": "To ask you to pay for your order",
+    "state": "NOT_ASKED",
+    "denialCount": 0,
+    "canAskAgain": true,
+    "decidedAt": null
+  },
+  {
+    "capability": "user.basic",
+    "label": "Your Adera id",
+    "purpose": "Recognise you in the app without learning who you are.",
+    "state": "GRANTED",
+    "denialCount": 0,
+    "canAskAgain": false,
+    "decidedAt": null
+  },
+  {
+    "capability": "user.full_name",
+    "label": "Your name",
+    "purpose": "To address you by name",
+    "state": "NOT_ASKED",
+    "denialCount": 0,
+    "canAskAgain": true,
+    "decidedAt": null
+  }
+]</code></pre>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th>Error code</th><th>When it happens</th></tr></thead><tbody><tr><td><strong>200</strong></td><td>-</td><td>OK.</td></tr><tr><td><strong>404</strong></td><td><code>not_found</code></td><td>No such app, or it is a DRAFT.</td></tr><tr><td><strong>403</strong></td><td><code>app_not_live</code></td><td>The app is PAUSED or KILLED.</td></tr><tr><td><strong>403</strong></td><td><code>account_suspended</code> / <code>account_deleted</code></td><td>My account is not ACTIVE.</td></tr><tr><td><strong>503</strong></td><td><code>service_unavailable</code></td><td>registry-service could not be reached.</td></tr></tbody></table></div>
+<h4>How to use it</h4><ul><li><code>canAskAgain</code> is true when a dialog would be shown on the next request (<code>NOT_ASKED</code> or <code>DENIED</code>), false for <code>GRANTED</code> and <code>BLOCKED</code>.</li><li>Capabilities staff removed are not listed; an earlier answer is kept but inert, and applies again if staff grant the capability again.</li><li>The list is read from registry-service on every call, so pausing an app or removing a grant bites at once.</li></ul>
+</div></details>
+<details class="endpoint" id="ep-user-request-permission">
+<summary><span class="method m-post">POST</span><span class="path">/api/v1/me/apps/{app}/permissions/{capability}/request</span><span class="sum">The mini app needs a permission now (may return a dialog ticket)</span></summary>
+<div class="body"><dl class="meta"><dt>Audience</dt><dd>signed-in end user (the super app; a mini app asks through the bridge)</dd><dt>Client path</dt><dd><code>/api/v1/me/apps/{app}/permissions/{capability}/request</code> through the gateway, base <code>$GATEWAY</code>. <code>{app}</code> is the app's id or its slug</dd><dt>Internal path</dt><dd>same path on user-service (the gateway does not rewrite it)</dd><dt>Auth</dt><dd><code>Authorization: Bearer $TOKEN</code> (Kratos session token), checked by the gateway's forward-auth.</dd><dt>Rate limit</dt><dd>30 per 60 s per client IP (gateway route <code>me-permission-request</code>, stricter than <code>me</code>: each call can open a dialog); over the limit the gateway answers <code>429</code></dd><dt>Implemented in</dt><dd><code>services/user-service/src/main/java/app/adera/user/consent/ConsentController.java, ConsentService.java</code></dd></dl>
+<h4>Purpose</h4><p>Called by the super app when the mini app calls <code>requestPermission</code>. Opening a mini app shows nothing; the dialog appears only here, at the moment of need. The answer is the state, and ONLY when a dialog is allowed (<code>NOT_ASKED</code> or <code>DENIED</code>) a one-time <code>prompt</code> with the approved text. <code>GRANTED</code> and <code>BLOCKED</code> return <code>prompt: null</code>; a capability staff did not grant returns <code>NOT_AVAILABLE</code> at once. A new request replaces an older open ticket.</p>
+<h4>Request parameters</h4><div class="table-wrap"><table><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why it exists</th></tr></thead><tbody><tr><td><code>app</code></td><td>path</td><td>string</td><td>yes</td><td>app id (UUID) or slug</td><td>Which mini app. Slugs are what links and the bridge use.</td></tr><tr><td><code>capability</code></td><td>path</td><td>string</td><td>yes</td><td>a capability key such as <code>location.fine</code> (lowercase letters, digits, <code>_</code> and <code>.</code>)</td><td>Which permission; the app must have been granted it by staff.</td></tr></tbody></table></div>
+<h4>First request: a dialog is allowed</h4>
+<pre><code>curl -s -X POST "$GATEWAY/api/v1/me/apps/demo-ride/permissions/location.fine/request" \
+  -H "Authorization: Bearer $TOKEN"</code></pre>
+<pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+
+{
+  "capability": "location.fine",
+  "state": "NOT_ASKED",
+  "prompt": {
+    "promptId": "pr_3a1d75a74dc96f24689851c2",
+    "expiresInSeconds": 300,
+    "label": "Your precise location",
+    "purpose": "To find the closest driver to you"
+  }
+}</code></pre>
+<h4>Second request after one refusal (DENIED): one more dialog is allowed</h4>
+<pre><code>curl -s -X POST "$GATEWAY/api/v1/me/apps/demo-ride/permissions/location.fine/request" \
+  -H "Authorization: Bearer $TOKEN"</code></pre>
+<pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+
+{
+  "capability": "location.fine",
+  "state": "DENIED",
+  "prompt": {
+    "promptId": "pr_ce183e3a77bf9efad2402bf9",
+    "expiresInSeconds": 300,
+    "label": "Your precise location",
+    "purpose": "To find the closest driver to you"
+  }
+}</code></pre>
+<h4>After two refusals (BLOCKED): never a dialog</h4>
+<pre><code>curl -s -X POST "$GATEWAY/api/v1/me/apps/demo-ride/permissions/location.fine/request" \
+  -H "Authorization: Bearer $TOKEN"</code></pre>
+<pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+
+{
+  "capability": "location.fine",
+  "state": "BLOCKED",
+  "prompt": null
+}</code></pre>
+<h4>A capability staff did not grant to this app</h4>
+<pre><code>curl -s -X POST "$GATEWAY/api/v1/me/apps/demo-ride/permissions/user.contact/request" \
+  -H "Authorization: Bearer $TOKEN"</code></pre>
+<pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+
+{
+  "capability": "user.contact",
+  "state": "NOT_AVAILABLE",
+  "prompt": null
+}</code></pre>
+<h4>user.basic needs no dialog</h4>
+<pre><code>curl -s -X POST "$GATEWAY/api/v1/me/apps/demo-ride/permissions/user.basic/request" \
+  -H "Authorization: Bearer $TOKEN"</code></pre>
+<pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+
+{
+  "capability": "user.basic",
+  "state": "GRANTED",
+  "prompt": null
+}</code></pre>
+<h4>Not a capability key</h4>
+<pre><code>curl -s -X POST "$GATEWAY/api/v1/me/apps/demo-ride/permissions/Not%20A%20Key/request" \
+  -H "Authorization: Bearer $TOKEN"</code></pre>
+<pre class="out"><code>HTTP/1.1 400 Bad Request
+Content-Type: application/json
+
+{
+  "error": "validation_failed",
+  "fields": {
+    "capability": "is not a capability key like location.fine"
+  }
+}</code></pre>
+<h4>A PAUSED app</h4>
+<pre><code>curl -s -X POST "$GATEWAY/api/v1/me/apps/demo-paused/permissions/user.basic/request" \
+  -H "Authorization: Bearer $TOKEN"</code></pre>
+<pre class="out"><code>HTTP/1.1 403 Forbidden
+Content-Type: application/json
+
+{
+  "error": "app_not_live"
+}</code></pre>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th>Error code</th><th>When it happens</th></tr></thead><tbody><tr><td><strong>404</strong></td><td><code>not_found</code></td><td>No such app, or a DRAFT.</td></tr><tr><td><strong>403</strong></td><td><code>app_not_live</code></td><td>PAUSED or KILLED.</td></tr><tr><td><strong>400</strong></td><td><code>validation_failed</code></td><td><code>fields.capability</code>: not a capability key.</td></tr><tr><td><strong>403</strong></td><td><code>account_suspended</code> / <code>account_deleted</code></td><td>My account is not ACTIVE.</td></tr><tr><td><strong>429</strong></td><td>(gateway, empty body)</td><td>More than 30 requests per minute from one address.</td></tr></tbody></table></div>
+<h4>How to use it</h4><ul><li>Show the dialog only if <code>prompt</code> is not null, using <code>label</code> and <code>purpose</code> verbatim (they are staff-approved; the mini app cannot change them), then send the answer with the <code>promptId</code>.</li><li>The ticket lives 5 minutes (<code>expiresInSeconds</code>) and works once.</li><li>The mini app should explain itself before asking a second time (state <code>DENIED</code>): a second refusal blocks for good.</li></ul>
+</div></details>
+<details class="endpoint" id="ep-user-answer-permission">
+<summary><span class="method m-put">PUT</span><span class="path">/api/v1/me/apps/{app}/permissions/{capability}/answer</span><span class="sum">The user's answer in the dialog</span></summary>
+<div class="body"><dl class="meta"><dt>Audience</dt><dd>signed-in end user (the super app; a mini app asks through the bridge)</dd><dt>Client path</dt><dd><code>/api/v1/me/apps/{app}/permissions/{capability}/answer</code> through the gateway, base <code>$GATEWAY</code>. <code>{app}</code> is the app's id or its slug</dd><dt>Internal path</dt><dd>same path on user-service (the gateway does not rewrite it)</dd><dt>Auth</dt><dd><code>Authorization: Bearer $TOKEN</code> (Kratos session token), checked by the gateway's forward-auth.</dd><dt>Rate limit</dt><dd>300 per 60 s per client IP (gateway route <code>me</code>); over the limit the gateway answers <code>429</code></dd><dt>Implemented in</dt><dd><code>services/user-service/src/main/java/app/adera/user/consent/ConsentController.java, ConsentService.java</code></dd></dl>
+<h4>Purpose</h4><p>Records the dialog's answer. It is accepted only with the one-time <code>promptId</code> returned by the request call for this user, app and capability, within 5 minutes, once. Yes sets <code>GRANTED</code> (denial count 0). The first no sets <code>DENIED</code> (count 1), the second consecutive no sets <code>BLOCKED</code> (count 2).</p>
+<h4>Request parameters</h4><div class="table-wrap"><table><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why it exists</th></tr></thead><tbody><tr><td><code>app</code></td><td>path</td><td>string</td><td>yes</td><td>app id (UUID) or slug</td><td>Which mini app. Slugs are what links and the bridge use.</td></tr><tr><td><code>capability</code></td><td>path</td><td>string</td><td>yes</td><td>a capability key such as <code>location.fine</code> (lowercase letters, digits, <code>_</code> and <code>.</code>)</td><td>Which permission; the app must have been granted it by staff.</td></tr><tr><td><code>promptId</code></td><td>body</td><td>string</td><td>yes</td><td>the id from the request call</td><td>Proves a dialog was really shown; the server issues it, so a bridge cannot invent an answer.</td></tr><tr><td><code>answer</code></td><td>body</td><td>string</td><td>yes</td><td><code>GRANTED</code> or <code>DENIED</code></td><td>What the user chose.</td></tr></tbody></table></div>
+<h4>The first refusal</h4>
+<pre><code>curl -s -X PUT "$GATEWAY/api/v1/me/apps/demo-ride/permissions/location.fine/answer" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"promptId": "pr_3a1d...", "answer": "DENIED"}'</code></pre>
+<pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+
+{
+  "capability": "location.fine",
+  "state": "DENIED",
+  "denialCount": 1,
+  "canAskAgain": true
+}</code></pre>
+<h4>The second refusal</h4>
+<pre><code>curl -s -X PUT "$GATEWAY/api/v1/me/apps/demo-ride/permissions/location.fine/answer" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"promptId": "pr_ce18...", "answer": "DENIED"}'</code></pre>
+<pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+
+{
+  "capability": "location.fine",
+  "state": "BLOCKED",
+  "denialCount": 2,
+  "canAskAgain": false
+}</code></pre>
+<h4>Replaying the ticket</h4>
+<pre><code>curl -s -X PUT "$GATEWAY/api/v1/me/apps/demo-ride/permissions/location.fine/answer" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"promptId": "pr_3a1d...", "answer": "GRANTED"}'</code></pre>
+<pre class="out"><code>HTTP/1.1 409 Conflict
+Content-Type: application/json
+
+{
+  "error": "prompt_invalid"
+}</code></pre>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th>Error code</th><th>When it happens</th></tr></thead><tbody><tr><td><strong>409</strong></td><td><code>prompt_invalid</code></td><td>No open ticket, a different ticket, already used, or the ticket belongs to another app, capability or user.</td></tr><tr><td><strong>409</strong></td><td><code>prompt_expired</code></td><td>The ticket is older than 5 minutes (it is then discarded; ask again).</td></tr><tr><td><strong>403</strong></td><td><code>capability_not_granted</code></td><td>Staff did not grant the capability to this app (or removed it).</td></tr><tr><td><strong>400</strong></td><td><code>validation_failed</code></td><td>Missing <code>promptId</code>, bad <code>answer</code>, unknown field.</td></tr><tr><td><strong>404</strong></td><td><code>not_found</code></td><td>No such app, or a DRAFT.</td></tr><tr><td><strong>403</strong></td><td><code>app_not_live</code></td><td>PAUSED or KILLED.</td></tr></tbody></table></div>
+<h4>How to use it</h4><ul><li><code>canAskAgain</code> is true only for <code>DENIED</code>.</li><li>Every answer appends a row to <code>consent_event</code> (proof of what the user chose and when).</li></ul>
+</div></details>
+<details class="endpoint" id="ep-user-menu-permission">
+<summary><span class="method m-put">PUT</span><span class="path">/api/v1/me/apps/{app}/permissions/{capability}</span><span class="sum">Menu switch: allow or deny, also unblocks</span></summary>
+<div class="body"><dl class="meta"><dt>Audience</dt><dd>signed-in end user (the super app; a mini app asks through the bridge)</dd><dt>Client path</dt><dd><code>/api/v1/me/apps/{app}/permissions/{capability}</code> through the gateway, base <code>$GATEWAY</code>. <code>{app}</code> is the app's id or its slug</dd><dt>Internal path</dt><dd>same path on user-service (the gateway does not rewrite it)</dd><dt>Auth</dt><dd><code>Authorization: Bearer $TOKEN</code> (Kratos session token), checked by the gateway's forward-auth.</dd><dt>Rate limit</dt><dd>300 per 60 s per client IP (gateway route <code>me</code>); over the limit the gateway answers <code>429</code></dd><dt>Implemented in</dt><dd><code>services/user-service/src/main/java/app/adera/user/consent/ConsentController.java, ConsentService.java</code></dd></dl>
+<h4>Purpose</h4><p>The switch in the mini app's top menu. It always works, needs no ticket, resets the denial count and is the ONLY way out of <code>BLOCKED</code>. On sets <code>GRANTED</code>; off sets <code>DENIED</code> with count 0 (so the mini app may ask again later). Any open dialog ticket is closed.</p>
+<h4>Request parameters</h4><div class="table-wrap"><table><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why it exists</th></tr></thead><tbody><tr><td><code>app</code></td><td>path</td><td>string</td><td>yes</td><td>app id (UUID) or slug</td><td>Which mini app. Slugs are what links and the bridge use.</td></tr><tr><td><code>capability</code></td><td>path</td><td>string</td><td>yes</td><td>a capability key such as <code>location.fine</code> (lowercase letters, digits, <code>_</code> and <code>.</code>)</td><td>Which permission; the app must have been granted it by staff.</td></tr><tr><td><code>state</code></td><td>body</td><td>string</td><td>yes</td><td><code>GRANTED</code> or <code>DENIED</code></td><td>The switch position.</td></tr></tbody></table></div>
+<h4>Switch on a blocked permission</h4>
+<pre><code>curl -s -X PUT "$GATEWAY/api/v1/me/apps/demo-ride/permissions/location.fine" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"state": "GRANTED"}'</code></pre>
+<pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+
+{
+  "capability": "location.fine",
+  "state": "GRANTED",
+  "denialCount": 0,
+  "decidedAt": "2026-11-04T18:51:54.347095308Z"
+}</code></pre>
+<h4>A state the menu cannot set</h4>
+<pre><code>curl -s -X PUT "$GATEWAY/api/v1/me/apps/demo-ride/permissions/location.fine" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"state": "BLOCKED"}'</code></pre>
+<pre class="out"><code>HTTP/1.1 400 Bad Request
+Content-Type: application/json
+
+{
+  "error": "validation_failed",
+  "fields": {
+    "state": "must be GRANTED or DENIED"
+  }
+}</code></pre>
+<h4>user.basic cannot be switched off (use Disconnect)</h4>
+<pre><code>curl -s -X PUT "$GATEWAY/api/v1/me/apps/demo-ride/permissions/user.basic" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"state": "DENIED"}'</code></pre>
+<pre class="out"><code>HTTP/1.1 409 Conflict
+Content-Type: application/json
+
+{
+  "error": "use_disconnect"
+}</code></pre>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th>Error code</th><th>When it happens</th></tr></thead><tbody><tr><td><strong>403</strong></td><td><code>capability_not_granted</code></td><td>Not granted to this app by staff.</td></tr><tr><td><strong>409</strong></td><td><code>use_disconnect</code></td><td><code>user.basic</code> cannot be denied on its own.</td></tr><tr><td><strong>400</strong></td><td><code>validation_failed</code></td><td>Bad or missing <code>state</code>, unknown field.</td></tr><tr><td><strong>404</strong></td><td><code>not_found</code></td><td>No such app, or a DRAFT.</td></tr><tr><td><strong>403</strong></td><td><code>app_not_live</code></td><td>PAUSED or KILLED.</td></tr></tbody></table></div>
+<h4>How to use it</h4><ul><li>The menu sheet should be built from <code>GET .../permissions</code>: one switch per row, on when <code>GRANTED</code>.</li><li>A user who switches <code>user.basic</code> on again after a disconnect reconnects the app.</li></ul>
+</div></details>
+<details class="endpoint" id="ep-user-disconnect">
+<summary><span class="method m-delete">DELETE</span><span class="path">/api/v1/me/apps/{app}/permissions</span><span class="sum">Disconnect: take everything back</span></summary>
+<div class="body"><dl class="meta"><dt>Audience</dt><dd>signed-in end user (the super app; a mini app asks through the bridge)</dd><dt>Client path</dt><dd><code>/api/v1/me/apps/{app}/permissions</code> through the gateway, base <code>$GATEWAY</code>. <code>{app}</code> is the app's id or its slug</dd><dt>Internal path</dt><dd>same path on user-service (the gateway does not rewrite it)</dd><dt>Auth</dt><dd><code>Authorization: Bearer $TOKEN</code> (Kratos session token), checked by the gateway's forward-auth.</dd><dt>Rate limit</dt><dd>300 per 60 s per client IP (gateway route <code>me</code>); over the limit the gateway answers <code>429</code></dd><dt>Implemented in</dt><dd><code>services/user-service/src/main/java/app/adera/user/consent/ConsentController.java, ConsentService.java</code></dd></dl>
+<h4>Purpose</h4><p>The "Disconnect" button. Every permission I gave the app becomes <code>DENIED</code> with count 0 (a <code>BLOCKED</code> one too), <code>user.basic</code> included, and any open dialog ticket is closed. Never-asked permissions stay <code>NOT_ASKED</code>. Repeatable: with nothing left to change it answers 200 with an empty <code>changed</code>. Works on PAUSED and KILLED apps too (I must always be able to leave); a DRAFT or unknown app is 404. A later step also sends the partner a <code>user.disconnected</code> callback.</p>
+<h4>Request parameters</h4><div class="table-wrap"><table><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why it exists</th></tr></thead><tbody><tr><td><code>app</code></td><td>path</td><td>string</td><td>yes</td><td>app id (UUID) or slug</td><td>Which mini app. Slugs are what links and the bridge use.</td></tr></tbody></table></div>
+<h4>Disconnect</h4>
+<pre><code>curl -s -X DELETE "$GATEWAY/api/v1/me/apps/demo-ride/permissions" \
+  -H "Authorization: Bearer $TOKEN"</code></pre>
+<pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+
+{
+  "disconnected": true,
+  "changed": [
+    {
+      "capability": "location.fine",
+      "from": "GRANTED",
+      "to": "DENIED"
+    },
+    {
+      "capability": "notify.sms",
+      "from": "GRANTED",
+      "to": "DENIED"
+    },
+    {
+      "capability": "user.basic",
+      "from": "GRANTED",
+      "to": "DENIED"
+    }
+  ]
+}</code></pre>
+<h4>The list afterwards (location.fine is DENIED, may be asked again)</h4>
+<pre><code>curl -s -X GET "$GATEWAY/api/v1/me/apps/demo-ride/permissions" \
+  -H "Authorization: Bearer $TOKEN"</code></pre>
+<pre class="out"><code>HTTP/1.1 200 OK (location.fine: state DENIED, denialCount 0, canAskAgain true; user.basic: DENIED)</code></pre>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th>Error code</th><th>When it happens</th></tr></thead><tbody><tr><td><strong>404</strong></td><td><code>not_found</code></td><td>No such app, or a DRAFT.</td></tr><tr><td><strong>403</strong></td><td><code>account_suspended</code> / <code>account_deleted</code></td><td>My account is not ACTIVE.</td></tr></tbody></table></div>
+<h4>How to use it</h4><ul><li>Opening the mini app again reconnects <code>user.basic</code> (launch token, built in a later step); the others must be answered again.</li></ul>
+</div></details>
+<details class="endpoint" id="ep-user-all-permissions">
+<summary><span class="method m-get">GET</span><span class="path">/api/v1/me/permissions</span><span class="sum">Settings screen: which apps can see what</span></summary>
+<div class="body"><dl class="meta"><dt>Audience</dt><dd>signed-in end user (the super app; a mini app asks through the bridge)</dd><dt>Client path</dt><dd><code>/api/v1/me/permissions</code> through the gateway, base <code>$GATEWAY</code>. <code>{app}</code> is the app's id or its slug</dd><dt>Internal path</dt><dd>same path on user-service (the gateway does not rewrite it)</dd><dt>Auth</dt><dd><code>Authorization: Bearer $TOKEN</code> (Kratos session token), checked by the gateway's forward-auth.</dd><dt>Rate limit</dt><dd>300 per 60 s per client IP (gateway route <code>me</code>); over the limit the gateway answers <code>429</code></dd><dt>Implemented in</dt><dd><code>services/user-service/src/main/java/app/adera/user/consent/ConsentController.java, ConsentService.java</code></dd></dl>
+<h4>Purpose</h4><p>Every app where I currently allow something (at least one <code>GRANTED</code> permission), with only the permissions that are still granted to the app by staff and that I allowed. An app I fully disconnected from, or where I only refused, is not listed.</p>
+<h4>Example (after allowing location and SMS for Ride Hailing)</h4>
+<pre><code>curl -s -X GET "$GATEWAY/api/v1/me/permissions" \
+  -H "Authorization: Bearer $TOKEN"</code></pre>
+<pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+
+[
+  {
+    "appId": "4e831b72-...",
+    "slug": "demo-ride",
+    "name": {
+      "am": "የመኪና ጥሪ",
+      "en": "Ride Hailing"
+    },
+    "status": "LIVE",
+    "permissions": [
+      {
+        "capability": "location.fine",
+        "label": "Your precise location",
+        "purpose": "To find the closest driver to you",
+        "state": "GRANTED",
+        "denialCount": 0,
+        "canAskAgain": false,
+        "decidedAt": "2026-11-04T18:51:54.347095Z"
+      },
+      {
+        "capability": "notify.sms",
+        "label": "Text messages (SMS)",
+        "purpose": "Send you text messages.",
+        "state": "GRANTED",
+        "denialCount": 0,
+        "canAskAgain": false,
+        "decidedAt": "2026-11-04T18:51:54.717533Z"
+      },
+      {
+        "capability": "user.basic",
+        "label": "Your Adera id",
+        "purpose": "Recognise you in the app without learning who you are.",
+        "state": "GRANTED",
+        "denialCount": 0,
+        "canAskAgain": false,
+        "decidedAt": null
+      }
+    ]
+  }
+]</code></pre>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th>Error code</th><th>When it happens</th></tr></thead><tbody><tr><td><strong>403</strong></td><td><code>account_suspended</code> / <code>account_deleted</code></td><td>My account is not ACTIVE.</td></tr></tbody></table></div>
+<h4>How to use it</h4><ul><li>Tapping an app opens its menu sheet (<code>GET .../permissions</code>) where each switch can be turned off, or Disconnect can be pressed.</li></ul>
 </div></details>
 <details class="endpoint" id="ep-user-get-notifications">
 <summary><span class="method m-get">GET</span><span class="path">/api/v1/me/notifications</span><span class="sum">List my inbox (bell menu)</span></summary>

@@ -309,7 +309,7 @@ both GRANTED again -&gt; SMS:
 HTTP 202  channel: SMS</code></pre>
 <p>So <strong>suspending SMS alone can quietly move a partner's traffic to email</strong>; suspend both channels if you want the DIRECT sends to stop.</p>
 <h2 id="not-built">Not built yet</h2>
-<ul><li>Enforcement of <code>user.*</code>, <code>location.*</code> and <code>pay.request</code> and the per-user consent step (they arrive with the in-app bridge, built in steps; this page is updated as each step lands).</li><li>A separate history view of a capability's old purposes (the audit tab of the app shows each change with the old and new text).</li><li>Adding new capability keys without a code change.</li></ul>
+<ul><li>Enforcement of <code>user.*</code>, <code>location.*</code> and <code>pay.request</code> (the per-user consent is stored by user-service since 2026-11-04: users answer one permission at a time in the super app; the partner profile endpoint and the bridge arrive in later steps and this page is updated as each lands).</li><li>A separate history view of a capability's old purposes (the audit tab of the app shows each change with the old and new text).</li><li>Adding new capability keys without a code change.</li></ul>
 
 <div class="pager"><a class="prev" href="logo.html"><small>Previous</small>Logo</a><a class="next" href="notification-limits.html"><small>Next</small>Notification limits</a></div>
 <p class="footer">Admin guide: managing mini apps. Examples were captured from a running dev stack (ADERA_ENV=dev) with a throwaway app and a temporary staff account, both removed afterwards. Ids, timestamps and key ids differ on your system.</p>

@@ -45,7 +45,7 @@
 <li><a href="13-sample-data.html">13. Sample data (test scenarios)</a>
 </li>
 <li><a href="14-bridge-consent.html" class=current>14. Mini app bridge and consent (agreed design)</a>
-<ul><li><a href="#short">1. Short answer</a></li><li><a href="#gates">2. Three gates</a></li><li><a href="#data">3. Data paths</a></li><li><a href="#launch">4. Launch token</a></li><li><a href="#consent">5. Consent</a></li><li><a href="#endpoints">6. Endpoints</a></li><li><a href="#scenario">7. Scenario</a></li><li><a href="#notify">8. Revocation</a></li><li><a href="#threats">9. Threats</a></li><li><a href="#build">10. Build order</a></li><li><a href="#decisions">11. Decisions</a></li></ul>
+<ul><li><a href="#short">1. Short answer</a></li><li><a href="#gates">2. Three gates</a></li><li><a href="#data">3. Data paths</a></li><li><a href="#launch">4. Launch token</a></li><li><a href="#consent">5. Consent</a></li><li><a href="#endpoints">6. Endpoints</a></li><li><a href="#scenario">7. Scenario</a></li><li><a href="#notify">8. Revocation</a></li><li><a href="#threats">9. Threats</a></li><li><a href="#build">10. Build order</a></li><li><a href="#decisions">11. Decisions</a></li><li><a href="#built-decisions">12. Built: decisions</a></li></ul>
 </li>
 </ul>
 <h4>Endpoints</h4><ul>
@@ -67,7 +67,7 @@
 <h1>14. Mini app bridge and user consent (agreed design)</h1>
 <p class="lead">How a mini app gets data about a user and from the device, how the user decides what it may have, and how we stop it from taking more. Permissions are asked <strong>at the moment of need, one at a time, like Android</strong>, not all at launch. Design agreed on 2026-11-04; implementation starts from this page. Every endpoint and sample below is the intended shape; once a step is built, its real requests and responses replace the illustrations (marked as such on each step).</p>
 
-<div class="callout warn"><span class="label">Status</span><p>Agreed, build in progress (section 10 lists the steps and which are built). Decisions taken are in section 11. Built so far: step 1 (purpose per capability).</p></div>
+<div class="callout warn"><span class="label">Status</span><p>Agreed, build in progress (section 10 lists the steps and which are built). Decisions taken are in section 11. Built so far: step 1 (purpose per capability) and step 2 (the consent endpoints in user-service).</p></div>
 
 <section><h2 id="short">1. The short answer</h2>
 <ul>
@@ -207,12 +207,12 @@ HTTP 200 OK   capabilities:
 <div class="table-wrap"><table>
 <thead><tr><th>Endpoint</th><th>Purpose</th><th>Called by</th></tr></thead>
 <tbody>
-<tr><td><code>GET /api/v1/me/apps/{app}/permissions</code></td><td>Every capability granted to the app with label, purpose and this user's state. Menu sheet and <code>getPermission</code></td><td>Super app</td></tr>
-<tr><td><code>POST /api/v1/me/apps/{app}/permissions/{capability}/request</code></td><td>The mini app asked. Returns the state and, only if a dialog is allowed, a one-time prompt with the approved text</td><td>Super app, from <code>requestPermission</code></td></tr>
-<tr><td><code>PUT /api/v1/me/apps/{app}/permissions/{capability}/answer</code></td><td>The dialog answer, with the prompt id from the previous call</td><td>Super app</td></tr>
-<tr><td><code>PUT /api/v1/me/apps/{app}/permissions/{capability}</code></td><td>The menu switch: sets GRANTED or DENIED, resets the count, unblocks</td><td>Super app, menu sheet</td></tr>
-<tr><td><code>DELETE /api/v1/me/apps/{app}/permissions</code></td><td>Disconnect: everything to DENIED, count 0, and a <code>user.disconnected</code> callback to the partner</td><td>Super app</td></tr>
-<tr><td><code>GET /api/v1/me/permissions</code></td><td>Settings screen: every app that holds at least one permission, with what it can see</td><td>Super app</td></tr>
+<tr><td><code>GET /api/v1/me/apps/{app}/permissions</code> <span class="badge built">built</span></td><td>Every capability granted to the app with label, purpose and this user's state. Menu sheet and <code>getPermission</code></td><td>Super app</td></tr>
+<tr><td><code>POST /api/v1/me/apps/{app}/permissions/{capability}/request</code> <span class="badge built">built</span></td><td>The mini app asked. Returns the state and, only if a dialog is allowed, a one-time prompt with the approved text</td><td>Super app, from <code>requestPermission</code></td></tr>
+<tr><td><code>PUT /api/v1/me/apps/{app}/permissions/{capability}/answer</code> <span class="badge built">built</span></td><td>The dialog answer, with the prompt id from the previous call</td><td>Super app</td></tr>
+<tr><td><code>PUT /api/v1/me/apps/{app}/permissions/{capability}</code> <span class="badge built">built</span></td><td>The menu switch: sets GRANTED or DENIED, resets the count, unblocks</td><td>Super app, menu sheet</td></tr>
+<tr><td><code>DELETE /api/v1/me/apps/{app}/permissions</code> <span class="badge built">built</span></td><td>Disconnect: everything to DENIED, count 0, and a <code>user.disconnected</code> callback to the partner</td><td>Super app</td></tr>
+<tr><td><code>GET /api/v1/me/permissions</code> <span class="badge built">built</span></td><td>Settings screen: every app that holds at least one permission, with what it can see</td><td>Super app</td></tr>
 <tr><td><code>POST /api/v1/me/apps/{app}/launch</code></td><td>Launch token (section 4)</td><td>Super app</td></tr>
 <tr><td><code>GET /v1/users/{alias}/profile</code> (partner API)</td><td>Only the fields the user allowed, nothing else</td><td>Mini app backend, signed</td></tr>
 <tr><td><code>GET /admin/api/v1/apps/{id}/permissions</code></td><td>Backoffice: per capability, counts of granted, denied and blocked users (counts only, no list)</td><td>Staff</td></tr>
@@ -228,48 +228,262 @@ HTTP 200 OK   capabilities:
 <tr><td><code>adera.getLocation()</code></td><td>The reading, or <code>denied</code> / <code>blocked</code> if not allowed. It never shows a dialog by itself</td></tr>
 </tbody></table></div>
 
-<h3>Asking at the moment of need</h3>
-<pre><code>POST /api/v1/me/apps/demo-ride/permissions/location.fine/request
+<h3>Asking at the moment of need <span class="badge built">real, step 2 built</span></h3>
+<p>Captured on 2026-11-04 on the dev stack through the gateway with the seeded user Demo Hana and the seeded app <code>demo-ride</code> (ids trimmed). The test data was removed afterwards. The step-by-step text of the page's own scenario (section 7) was run as the end-to-end journey <code>tests/e2e/permissions.py</code> once the later steps were built. <code>demo-ride</code> has <code>notify.sms</code> granted, so the "not granted by staff" example uses <code>user.contact</code> (which staff denied for this app).</p>
+<pre><code>GET /api/v1/me/apps/demo-ride/permissions
 
-200   (first time: a dialog is allowed)
-{
+200  [
+  {
+    "capability": "location.fine",
+    "label": "Your precise location",
+    "purpose": "To find the closest driver to you",
+    "state": "NOT_ASKED",
+    "denialCount": 0,
+    "canAskAgain": true,
+    "decidedAt": null
+  },
+  {
+    "capability": "notify.inapp",
+    "label": "Notifications in Adera",
+    "purpose": "Send you messages inside Adera.",
+    "state": "NOT_ASKED",
+    "denialCount": 0,
+    "canAskAgain": true,
+    "decidedAt": null
+  },
+  {
+    "capability": "notify.sms",
+    "label": "Text messages (SMS)",
+    "purpose": "Send you text messages.",
+    "state": "NOT_ASKED",
+    "denialCount": 0,
+    "canAskAgain": true,
+    "decidedAt": null
+  },
+  {
+    "capability": "pay.request",
+    "label": "Payments",
+    "purpose": "To ask you to pay for your order",
+    "state": "NOT_ASKED",
+    "denialCount": 0,
+    "canAskAgain": true,
+    "decidedAt": null
+  },
+  {
+    "capability": "user.basic",
+    "label": "Your Adera id",
+    "purpose": "Recognise you in the app without learning who you are.",
+    "state": "GRANTED",
+    "denialCount": 0,
+    "canAskAgain": false,
+    "decidedAt": null
+  },
+  {
+    "capability": "user.full_name",
+    "label": "Your name",
+    "purpose": "To address you by name",
+    "state": "NOT_ASKED",
+    "denialCount": 0,
+    "canAskAgain": true,
+    "decidedAt": null
+  }
+]
+
+POST /api/v1/me/apps/demo-ride/permissions/location.fine/request
+
+first time: a dialog is allowed
+200  {
   "capability": "location.fine",
   "state": "NOT_ASKED",
   "prompt": {
-    "promptId": "pr_3b1f...",
+    "promptId": "pr_3a1d75a74dc96f24689851c2",
     "expiresInSeconds": 300,
     "label": "Your precise location",
-    "purpose": "Find a driver near you."
+    "purpose": "To find the closest driver to you"
   }
 }
 
 PUT /api/v1/me/apps/demo-ride/permissions/location.fine/answer
-{"promptId": "pr_3b1f...", "answer": "DENIED"}
+{"promptId": "pr_3a1d...", "answer": "DENIED"}
 
-200
-{"capability": "location.fine", "state": "DENIED", "denialCount": 1, "canAskAgain": true}
+200  {
+  "capability": "location.fine",
+  "state": "DENIED",
+  "denialCount": 1,
+  "canAskAgain": true
+}
 
-(the mini app explained itself and asks again; the user says no again)
+PUT /api/v1/me/apps/demo-ride/permissions/location.fine/answer
+{"promptId": "pr_3a1d...", "answer": "GRANTED"}
 
-200
-{"capability": "location.fine", "state": "BLOCKED", "denialCount": 2, "canAskAgain": false}
+the same ticket again (replay)
 
-POST .../location.fine/request   (a third time)
+409  {
+  "error": "prompt_invalid"
+}
 
-200
-{"capability": "location.fine", "state": "BLOCKED", "prompt": null}
+the mini app explained itself and asks again
+POST /api/v1/me/apps/demo-ride/permissions/location.fine/request
 
-POST .../notify.sms/request      (not granted to this app by staff)
+200  {
+  "capability": "location.fine",
+  "state": "DENIED",
+  "prompt": {
+    "promptId": "pr_ce183e3a77bf9efad2402bf9",
+    "expiresInSeconds": 300,
+    "label": "Your precise location",
+    "purpose": "To find the closest driver to you"
+  }
+}
 
-200
-{"capability": "notify.sms", "state": "NOT_AVAILABLE", "prompt": null}</code></pre>
+PUT /api/v1/me/apps/demo-ride/permissions/location.fine/answer
+{"promptId": "pr_ce18...", "answer": "DENIED"}
 
-<h3>The menu switch</h3>
+the user says no again
+
+200  {
+  "capability": "location.fine",
+  "state": "BLOCKED",
+  "denialCount": 2,
+  "canAskAgain": false
+}
+
+POST /api/v1/me/apps/demo-ride/permissions/location.fine/request
+
+a third time
+
+200  {
+  "capability": "location.fine",
+  "state": "BLOCKED",
+  "prompt": null
+}
+
+POST /api/v1/me/apps/demo-ride/permissions/user.contact/request
+
+not granted to this app by staff
+
+200  {
+  "capability": "user.contact",
+  "state": "NOT_AVAILABLE",
+  "prompt": null
+}
+
+POST /api/v1/me/apps/demo-ride/permissions/user.basic/request
+
+the pseudonymous id needs no dialog
+
+200  {
+  "capability": "user.basic",
+  "state": "GRANTED",
+  "prompt": null
+}
+
+PUT /api/v1/me/apps/demo-ride/permissions/location.fine/answer
+{"promptId": "pr_made_up", "answer": "GRANTED"}
+
+an answer with a ticket the server never issued
+
+409  {
+  "error": "prompt_invalid"
+}
+
+POST /api/v1/me/apps/demo-paused/permissions/user.basic/request
+
+a PAUSED app
+
+403  {
+  "error": "app_not_live"
+}</code></pre>
+<h3>The menu switch <span class="badge built">real</span></h3>
 <pre><code>PUT /api/v1/me/apps/demo-ride/permissions/location.fine
 {"state": "GRANTED"}
 
-200
-{"capability": "location.fine", "state": "GRANTED", "denialCount": 0, "decidedAt": "2026-11-04T09:12:44Z"}</code></pre>
+200  {
+  "capability": "location.fine",
+  "state": "GRANTED",
+  "denialCount": 0,
+  "decidedAt": "2026-11-04T18:51:54.347095308Z"
+}
+
+PUT /api/v1/me/apps/demo-ride/permissions/user.basic
+{"state": "DENIED"}
+
+409  {
+  "error": "use_disconnect"
+}
+
+the settings screen, after allowing location and SMS
+GET /api/v1/me/permissions
+
+200  [
+  {
+    "appId": "4e831b72-...",
+    "slug": "demo-ride",
+    "name": {
+      "am": "የመኪና ጥሪ",
+      "en": "Ride Hailing"
+    },
+    "status": "LIVE",
+    "permissions": [
+      {
+        "capability": "location.fine",
+        "label": "Your precise location",
+        "purpose": "To find the closest driver to you",
+        "state": "GRANTED",
+        "denialCount": 0,
+        "canAskAgain": false,
+        "decidedAt": "2026-11-04T18:51:54.347095Z"
+      },
+      {
+        "capability": "notify.sms",
+        "label": "Text messages (SMS)",
+        "purpose": "Send you text messages.",
+        "state": "GRANTED",
+        "denialCount": 0,
+        "canAskAgain": false,
+        "decidedAt": "2026-11-04T18:51:54.717533Z"
+      },
+      {
+        "capability": "user.basic",
+        "label": "Your Adera id",
+        "purpose": "Recognise you in the app without learning who you are.",
+        "state": "GRANTED",
+        "denialCount": 0,
+        "canAskAgain": false,
+        "decidedAt": null
+      }
+    ]
+  }
+]
+
+Disconnect
+DELETE /api/v1/me/apps/demo-ride/permissions
+
+200  {
+  "disconnected": true,
+  "changed": [
+    {
+      "capability": "location.fine",
+      "from": "GRANTED",
+      "to": "DENIED"
+    },
+    {
+      "capability": "notify.sms",
+      "from": "GRANTED",
+      "to": "DENIED"
+    },
+    {
+      "capability": "user.basic",
+      "from": "GRANTED",
+      "to": "DENIED"
+    }
+  ]
+}</code></pre>
+<p>What was stored (table <code>consent_event</code>, append only): </p><pre class="out"><code>location.fine NOT_ASKED&gt;DENIED DIALOG
+location.fine DENIED&gt;BLOCKED DIALOG
+location.fine BLOCKED&gt;GRANTED MENU
+notify.sms NOT_ASKED&gt;GRANTED DIALOG</code></pre>
+<p>The dialog request route is limited to 30 requests per minute per address (header <code>X-RateLimit-Limit: 30</code> captured); the other permission routes share the general 300 per minute.</p>
 
 <h3>What the mini app's backend sees</h3>
 <pre><code>GET /v1/users/u_p_8f3c.../profile          (signed with ADERA-SIG-1)
@@ -323,7 +537,7 @@ POST .../notify.sms/request      (not granted to this app by staff)
 <section><h2 id="build">10. Build order</h2>
 <ol>
 <li><strong>Built 2026-11-04.</strong> Registry: <code>purpose</code> per granted capability, with backoffice field and audit.</li>
-<li>user-service: <code>app_consent</code>, <code>consent_event</code>, the request, answer, menu, list and disconnect endpoints with the state rules of section 5. Tests, docs.</li>
+<li><strong>Built 2026-11-04.</strong> user-service: <code>app_consent</code>, <code>consent_event</code>, the request, answer, menu, list and disconnect endpoints with the state rules of section 5. Tests, docs.</li>
 <li>Backoffice: counts per capability on the app page.</li>
 <li>notify.* gate in the notification path, and mute converted to consent.</li>
 <li>Launch token and the partner <code>/profile</code> endpoint.</li>
@@ -343,6 +557,18 @@ POST .../notify.sms/request      (not granted to this app by staff)
 <li><strong>Identifying data goes through the mini app's backend</strong> with a signed request; the browser path is only for <code>user.basic</code> and device data.</li>
 </ol>
 <p>Still open, with my default: does consent expire? (default: no.) Does <code>pay.request</code> need a confirmation on every payment rather than a stored yes? (default: yes; designed when payments are built.) Does <code>user.basic</code>, the pseudonymous id, need a dialog? (default: no, the id is not personal data and the mini app needs it to identify the user at all; it is granted without asking.)</p></section>
+
+<section><h2 id="built-decisions">12. Decisions taken while building (where this page was silent)</h2>
+<p>The wording and numbers above won everywhere the code allowed it. Where the page said nothing, this is what was chosen (each is easy to change):</p>
+<ul>
+<li><strong>Step 1.</strong> The existing per-capability <code>reason</code> already was the purpose text (per language, required in English for sensitive capabilities, shown to users), so it was renamed <code>purpose</code> instead of adding a second field; <code>reason</code> stays accepted as an input alias. New rules: at most 160 characters, one line, no link. A grant without a purpose is allowed where the catalog does not require one, and the dialog then shows the catalog's default sentence.</li>
+<li><strong>Step 2, app state.</strong> A DRAFT or unknown app answers <code>404 not_found</code> (users never see drafts); a PAUSED or KILLED app answers <code>403 app_not_live</code> (the page's gate 1 wording). Disconnect is allowed for any existing non-draft app, also paused, so a user can always leave.</li>
+<li><strong>Step 2, errors.</strong> <code>409 prompt_invalid</code> (no ticket, wrong ticket, used, or tied to another user, app or capability), <code>409 prompt_expired</code>, <code>403 capability_not_granted</code> for answer and menu on a capability staff did not grant, <code>409 use_disconnect</code> for switching <code>user.basic</code> off, <code>403 account_suspended</code> / <code>account_deleted</code> for a user who is not ACTIVE. All use the <code>{"error": code}</code> shape; validation uses <code>validation_failed</code> with <code>fields</code>.</li>
+<li><strong>Step 2, user.basic.</strong> Reported <code>GRANTED</code> without a row while granted to the app (open decision default). Disconnect stores <code>DENIED</code> for it too (so the next profile call can be refused); it is switched on again by the menu or, from step 5, by opening the app. It cannot be refused in a dialog or switched off alone.</li>
+<li><strong>Step 2, shapes.</strong> The list endpoint returns a JSON array. Each item also carries <code>denialCount</code>, <code>canAskAgain</code> (a dialog would be shown on the next request) and <code>decidedAt</code>. The settings overview lists an app only while the user has at least one <code>GRANTED</code> permission there; only permissions that are still granted by staff are shown. The answer to Disconnect is <code>{"disconnected": true, "changed": [...]}</code>.</li>
+<li><strong>Step 2, ticket.</strong> <code>pr_</code> plus 24 random hex characters, valid 5 minutes, single use, replaced by the next request. Never-asked permissions stay <code>NOT_ASKED</code> after Disconnect; a <code>BLOCKED</code> one becomes <code>DENIED</code> with count 0 (the page says "everything to DENIED, count 0").</li>
+<li><strong>Step 2, rate limit.</strong> 30 per minute per address for the dialog request route, matched in the gateway by a regular expression on the path (APISIX does not match a wildcard in the middle of a path); everything else under <code>/api/v1/me</code> keeps 300 per minute.</li>
+</ul></section>
 
 <div class="pager"><a class="prev" href="13-sample-data.html"><small>Previous</small>13. Sample data</a><a class="next" href="../index.html"><small>Back to</small>Home / contents</a></div>
 <p class="footer">Adera backend documentation &middot; proposal written 2026-11-04 &middot; <a href="../index.html">contents</a></p>

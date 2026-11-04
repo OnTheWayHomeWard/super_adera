@@ -139,4 +139,37 @@ class PurposeTests {
 		assertThat((Object) JsonPath.read(log, "$[1].meta.previousState")).isNull();
 	}
 
+	@Test
+	void internalPermissionsEndpointAnswersByIdOrSlugWithStatusAndGrantedCapabilities() throws Exception {
+		UUID id = app();
+		grant(id, "location.fine", Map.of("state", "GRANTED", "purpose", Map.of("en", "Find a driver near you."))).andExpect(status().isOk());
+		grant(id, "notify.email", Map.of("state", "SUSPENDED")).andExpect(status().isOk());
+		String slug = JsonPath.read(mvc.perform(as(get("/admin/api/v1/apps/{id}", id), Role.VIEWER)).andReturn().getResponse().getContentAsString(), "$.app.slug");
+		for (String key : new String[] { id.toString(), slug }) {
+			mvc.perform(get("/internal/apps/{k}/permissions", key)).andExpect(status().isOk())
+				.andExpect(jsonPath("$.appId").value(id.toString())).andExpect(jsonPath("$.slug").value(slug))
+				.andExpect(jsonPath("$.name.en").value("App")).andExpect(jsonPath("$.status").value("DRAFT"))
+				.andExpect(jsonPath("$.permissions.length()").value(1))
+				.andExpect(jsonPath("$.permissions[0].capability").value("location.fine"))
+				.andExpect(jsonPath("$.permissions[0].label").value("Your precise location"))
+				.andExpect(jsonPath("$.permissions[0].purpose.en").value("Find a driver near you."))
+				.andExpect(jsonPath("$.permissions[0].defaultPurpose").value("Use your exact position while the app is open."));
+		}
+		mvc.perform(get("/internal/apps/{k}/permissions", "no-such-app")).andExpect(status().isNotFound()).andExpect(jsonPath("$.error").value("not_found"));
+		mvc.perform(get("/internal/apps/{k}/permissions", UUID.randomUUID())).andExpect(status().isNotFound());
+	}
+
+	@Test
+	void internalAppsByIdsReturnsTheKnownOnesAndSkipsTheRest() throws Exception {
+		UUID a = app();
+		UUID b = app();
+		grant(a, "location.fine", Map.of("state", "GRANTED", "purpose", Map.of("en", "Find a driver near you."))).andExpect(status().isOk());
+		String body = mvc.perform(get("/internal/apps").param("ids", a + "," + b + "," + UUID.randomUUID())).andExpect(status().isOk())
+			.andReturn().getResponse().getContentAsString();
+		assertThat((java.util.List<?>) JsonPath.read(body, "$")).hasSize(2);
+		assertThat((java.util.List<String>) JsonPath.read(body, "$[*].appId")).containsExactlyInAnyOrder(a.toString(), b.toString());
+		mvc.perform(get("/internal/apps").param("ids", "not-a-uuid")).andExpect(status().isBadRequest()).andExpect(jsonPath("$.error").value("validation_failed"));
+		mvc.perform(get("/internal/apps").param("ids", "")).andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(0));
+	}
+
 }

@@ -48,6 +48,10 @@ public class InternalController {
 			List<String> grantedCapabilities, List<GrantedPermission> permissions, List<AppConfigRepository.LimitRow> notificationLimits, List<String> allowedCidrs) {
 	}
 
+	/** An app with what staff granted it, for the user-service consent endpoints. {@code name} is per language. */
+	public record AppPermissions(UUID appId, String slug, Map<String, String> name, String status, List<GrantedPermission> permissions) {
+	}
+
 	private static final java.util.regex.Pattern ACTION = java.util.regex.Pattern.compile("^[a-z][a-z0-9_.-]{1,60}$");
 
 	private final app.adera.registry.audit.AuditService audit;
@@ -107,6 +111,50 @@ public class InternalController {
 	public Map<String, Object> app(@PathVariable UUID appId) {
 		MiniApp app = apps.findById(appId).orElseThrow(() -> new Errors.NotFound("mini app"));
 		return Map.of("appId", app.getId(), "slug", app.getSlug(), "status", app.getStatus().name());
+	}
+
+	/** The app by id OR slug, its status and the capabilities granted to it (never cached by the caller: a pause or a removed grant must bite at once). */
+	@GetMapping("/apps/{idOrSlug}/permissions")
+	@Transactional(readOnly = true)
+	public AppPermissions permissions(@PathVariable String idOrSlug) {
+		MiniApp app = find(idOrSlug).orElseThrow(() -> new Errors.NotFound("mini app"));
+		return permissionsOf(app);
+	}
+
+	/** Several apps at once: {@code ?ids=a,b,c}. Unknown ids are skipped. */
+	@GetMapping("/apps")
+	@Transactional(readOnly = true)
+	public List<AppPermissions> appsByIds(@RequestParam(defaultValue = "") String ids) {
+		List<UUID> parsed = new java.util.ArrayList<>();
+		for (String part : ids.split(",")) {
+			if (part.isBlank()) {
+				continue;
+			}
+			try {
+				parsed.add(UUID.fromString(part.trim()));
+			}
+			catch (IllegalArgumentException e) {
+				throw new Errors.ValidationFailed("ids", "must be a comma-separated list of app ids");
+			}
+		}
+		return parsed.stream().distinct().limit(100).map(apps::findById).flatMap(java.util.Optional::stream).map(this::permissionsOf).toList();
+	}
+
+	private java.util.Optional<MiniApp> find(String idOrSlug) {
+		try {
+			return apps.findById(UUID.fromString(idOrSlug));
+		}
+		catch (IllegalArgumentException e) {
+			return apps.findBySlug(idOrSlug);
+		}
+	}
+
+	private AppPermissions permissionsOf(MiniApp app) {
+		List<GrantedPermission> permissions = config.capabilities(app.getId()).stream().filter(c -> c.state().equals("GRANTED")).map(c -> {
+			Capability cap = Capability.byKey(c.capability()).orElse(null);
+			return new GrantedPermission(c.capability(), cap == null ? c.capability() : cap.label(), c.purpose(), cap == null ? "" : cap.defaultPurpose());
+		}).toList();
+		return new AppPermissions(app.getId(), app.getSlug(), app.getName(), app.getStatus().name(), permissions);
 	}
 
 	/** How other services (user-service) write to the central audit log. Not routed by the gateway. */

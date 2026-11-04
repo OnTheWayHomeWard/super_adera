@@ -357,6 +357,39 @@ routes:
         redis_password: ${{APISIX_REDIS_PASSWORD}}
     upstream_id: user-service
 
+  # The permission dialog request ("the mini app needs location now"): stricter, because each call can open a dialog on the user's
+  # screen and issues a one-time ticket. A mini app must not be able to spam it. The rest of /me/apps/*/permissions uses the general `me` limit.
+  - id: me-permission-request
+    uris: ["/api/v1/me/apps/*"]
+    methods: ["POST"]
+    vars:
+      - ["uri", "~~", "^/api/v1/me/apps/[^/]+/permissions/[^/]+/request$"]
+    priority: 30
+    plugins:
+      forward-auth:
+        uri: http://user-service:8080/internal/auth/verify
+        request_headers: ["Authorization", "Cookie"]
+        upstream_headers: ["X-User-Id"]
+        extra_headers:
+          X-Gateway-Secret: ${{USER_GATEWAY_SECRET}}
+        status_on_error: 503
+      proxy-rewrite:
+        headers:
+          set:
+            X-Gateway-Secret: ${{USER_GATEWAY_SECRET}}
+      limit-count:
+        count: 30
+        time_window: 60
+        key_type: var
+        key: remote_addr
+        rejected_code: 429
+        policy: redis
+        redis_host: redis
+        redis_port: 6379
+        redis_username: apisix
+        redis_password: ${{APISIX_REDIS_PASSWORD}}
+    upstream_id: user-service
+
   # Everything else under /api/v1/me
   - id: me
     uris: ["/api/v1/me", "/api/v1/me/*"]
