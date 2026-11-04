@@ -165,6 +165,10 @@ describe("3. mini apps", () => {
     }
     await api(`apps/${appId}/capabilities/notify.inapp`, { method: "PUT", body: { state: "GRANTED" } });
     log("location.coarse GRANTED/SUSPENDED/DENIED, notify.inapp GRANTED");
+    // counts per capability come from user-service through the same gateway
+    const counts = await api<{ capabilities: { capability: string; granted: number; denied: number; blocked: number }[] }>(`apps/${appId}/permissions`);
+    expect(counts.capabilities.find((c) => c.capability === "notify.inapp")).toMatchObject({ granted: 0, denied: 0, blocked: 0 });
+    log(`permission counts: ${counts.capabilities.length} granted capabilities listed`);
   });
 
   it("notification limits: null is unlimited, 0 is none", async () => {

@@ -3,6 +3,7 @@ import { useState } from "react";
 import { applyApiError, ErrorAlert, RoleGate, StatusTag, Time } from "../../../components/common";
 import { api } from "../../../lib/client";
 import { useApiQuery } from "../../../lib/hooks";
+import { countsFor, describeCounts, type ConsentCounts } from "../../../lib/consentCounts";
 import { LANGS, type CapabilityInfo, type CapabilityRow, type I18n } from "../../../lib/types";
 import type { TabProps } from "./types";
 
@@ -26,6 +27,7 @@ const STATE_HELP: Record<string, string> = {
 
 export function CapabilitiesTab({ detail, reload }: TabProps) {
   const catalog = useApiQuery<CapabilityInfo[]>(["capabilities"], "capabilities");
+  const counts = useApiQuery<ConsentCounts>(["app-permissions", detail.app.id], `apps/${detail.app.id}/permissions`);
   const [editing, setEditing] = useState<Row | null>(null);
 
   const rows: Row[] = (catalog.data ?? []).map((info) => ({ info, row: detail.capabilities.find((c) => c.capability === info.key) }));
@@ -34,9 +36,10 @@ export function CapabilitiesTab({ detail, reload }: TabProps) {
     <div>
       <Typography.Paragraph type="secondary">
         What this app may ask for. The purpose is one plain sentence shown verbatim to users in the permission dialog (for example "Find a driver near you."), so it is reviewed here with the grant. It is required to grant the capabilities marked below; without one the dialog shows the default text. No links, at most 160 characters. Every change is on the audit tab.
-        Granting a notification channel also creates default limits for it (see the limits tab).
+        Granting a notification channel also creates default limits for it (see the limits tab). The <b>Users</b> column counts how many users granted, denied or were blocked for each granted capability (numbers only, no names).
       </Typography.Paragraph>
       <ErrorAlert error={catalog.error} />
+      <ErrorAlert error={counts.error} title="Could not load the user counts" />
       <Table<Row>
         size="small"
         rowKey={(r) => r.info.key}
@@ -58,6 +61,10 @@ export function CapabilitiesTab({ detail, reload }: TabProps) {
                     </div>
                   ))
                 : "-",
+          },
+          {
+            title: "Users",
+            render: (_, r) => (r.row?.state === "GRANTED" ? (counts.isLoading ? "..." : describeCounts(countsFor(counts.data, r.info.key))) : <span style={{ opacity: 0.6 }}>-</span>),
           },
           { title: "Updated", render: (_, r) => <Time value={r.row?.updatedAt} /> },
           {

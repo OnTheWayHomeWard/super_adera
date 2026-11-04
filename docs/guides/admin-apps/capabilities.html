@@ -187,6 +187,60 @@
 ]</code></pre>
 <p>No parameters. The list is the same for every app.</p>
 </div></details>
+<details class="endpoint" id="ep-permission-counts"><summary><span class="method m-get">GET</span><span class="path">/admin/api/v1/apps/{appId}/permissions</span><span class="sum">How many users granted, denied or were blocked per capability</span></summary><div class="body"><dl class="meta"><dt>Who may call</dt><dd>Any staff role (counts only)</dd><dt>Auth</dt><dd>Staff session Bearer token at assurance level aal2 (<code>Authorization: Bearer $TOKEN</code>)</dd><dt>Rate limit</dt><dd>300 requests per minute per client IP at the gateway</dd><dt>Backoffice</dt><dd>App &gt; <em>Capabilities</em>, column <em>Users</em></dd><dt>Audit name</dt><dd>none (read)</dd><dt>Reversible</dt><dd>n/a</dd></dl>
+<p><strong>Purpose.</strong> For every capability that is GRANTED to the app: the number of users who allowed it, refused it once, or were blocked after refusing twice. <strong>When to use it.</strong> Before you tighten or suspend a capability ("how many users did say yes to location?"), or when a partner complains that few users accept a permission (a high blocked count means its purpose sentence or its timing is not convincing). Counts only: you never see which user answered what.</p>
+<pre><code>curl -sS "$GATEWAY/admin/api/v1/apps/$APP_ID/permissions" \
+  -H "Authorization: Bearer $TOKEN"</code></pre><pre class="out"><code>HTTP 200 OK
+
+{
+  "appId": "4e831b72-a33b-4d93-a7ba-65e19b9dbd0a",
+  "slug": "demo-ride",
+  "capabilities": [
+    {
+      "capability": "location.fine",
+      "label": "Your precise location",
+      "granted": 2,
+      "denied": 1,
+      "blocked": 1
+    },
+    {
+      "capability": "notify.inapp",
+      "label": "Notifications in Adera",
+      "granted": 0,
+      "denied": 0,
+      "blocked": 0
+    },
+    {
+      "capability": "notify.sms",
+      "label": "Text messages (SMS)",
+      "granted": 2,
+      "denied": 0,
+      "blocked": 0
+    },
+    {
+      "capability": "pay.request",
+      "label": "Payments",
+      "granted": 2,
+      "denied": 0,
+      "blocked": 0
+    },
+    {
+      "capability": "user.basic",
+      "label": "Your Adera id",
+      "granted": 8,
+      "denied": 0,
+      "blocked": 0
+    },
+    {
+      "capability": "user.full_name",
+      "label": "Your name",
+      "granted": 3,
+      "denied": 0,
+      "blocked": 0
+    }
+  ]
+}</code></pre>
+<ul><li><code>user.basic</code> needs no dialog: <code>granted</code> is the number of users with a private id for the app who did not disconnect, <code>denied</code> the number who disconnected.</li><li>Deleted users are not counted; suspended ones are. Capabilities you removed are not listed.</li><li>404 <code>not_found</code> for an unknown app.</li></ul></div></details>
 <details class="endpoint" id="ep-capability-set" open><summary><span class="method m-put">PUT</span><span class="path">/admin/api/v1/apps/{appId}/capabilities/{capability}</span><span class="sum">Grant, deny or suspend a capability</span></summary><div class="body"><dl class="meta"><dt>Who may call</dt><dd>ADMIN or SUPER_ADMIN</dd><dt>Auth</dt><dd>Staff session Bearer token at assurance level aal2 (<code>Authorization: Bearer $TOKEN</code>)</dd><dt>Rate limit</dt><dd>300 requests per minute per client IP at the gateway (HTTP 429 beyond that)</dd><dt>Backoffice</dt><dd>App &gt; <em>Capabilities</em> (Edit button per row: state, purpose in English / Amharic / Afaan Oromoo)</dd><dt>Audit name</dt><dd><code>capability.set</code> (meta: capability, state, purpose, previousState, previousPurpose)</dd><dt>Reversible</dt><dd>Yes: set the previous state again</dd></dl>
 <p><strong>Purpose.</strong> Sets the state of one capability for one app, and (when granting) the purpose sentence users will read. The call <strong>replaces</strong> that capability's state and purpose; it is an upsert, not a patch. <strong>When to use it.</strong> To approve what a partner asked for, to refuse it, or to suspend a capability during a misuse investigation.</p>
 <h4>Path and body</h4>

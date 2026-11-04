@@ -215,6 +215,17 @@ PASSWORDS = {"u01": "kebede", "u02": "tesfaye2", "u03": "tesfaye", "u04": "dawit
              "u07": "bekele", "u08": "gebru123", "u09": "haile123", "u10": "worku123", "u11": "sam12345", "u12": "dina1234",
              "u13": "noapps", "u14": "blank1", "u15": "filled"}
 
+# What users allowed mini apps (per capability), seeded through the real permission endpoints. u03 (Demo Hana) is deliberately left
+# without any answer: it is the user of the end-to-end journey tests/e2e/permissions.py (the Demo Ride scenario of docs section 14).
+CONSENT = {
+    "u01": {"demo-ride": {"user.full_name": "GRANTED", "location.fine": "GRANTED", "notify.sms": "GRANTED", "pay.request": "GRANTED"},
+            "demo-food": {"user.full_name": "GRANTED"}},
+    "u02": {"demo-ride": {"location.fine": "DENIED"}},                        # refused once: may be asked one more time
+    "u07": {"demo-ride": {"location.fine": "BLOCKED", "user.full_name": "GRANTED"}},   # refused twice: only the menu can unblock
+    "u15": {"demo-ride": {"user.full_name": "GRANTED", "location.fine": "GRANTED", "notify.sms": "GRANTED", "pay.request": "GRANTED"},
+            "demo-food": {"user.full_name": "GRANTED"}},
+}
+
 TXT_LONG = "Great app. " * 5
 USERS = [
     dict(k="u01", phone="+251900000001", email="demo.abebe@example.com", first="Demo Abebe", last="Kebede", lang="en", gender="male",
@@ -430,7 +441,7 @@ def alias(k, slug):
 def seed_user(u):
     k = u["k"]
     user_id = ensure_user(u)
-    steps = [s for s in ("profile", "devices", "aliases", "prefs", "reviews", "reports") if not done(f"user:{k}:{s}")]
+    steps = [s for s in ("profile", "devices", "aliases", "prefs", "consent", "reviews", "reports") if not done(f"user:{k}:{s}")]
     if not steps:
         return
     needs_token = [s for s in steps if s not in ("aliases",)]
@@ -488,6 +499,20 @@ def seed_user(u):
             st, r = ucall(k, "PUT", f"/api/v1/me/apps/{S['apps'][slug]['id']}/preferences", prefs)
             ok(f"{k} mute preferences for {slug} {prefs}", st == 200, st if st != 200 else "")
         mark(f"user:{k}:prefs")
+    if "consent" in steps and needs_token:
+        for slug, caps in CONSENT.get(k, {}).items():
+            for cap, outcome in caps.items():
+                answers = {"GRANTED": ["GRANTED"], "DENIED": ["DENIED"], "BLOCKED": ["DENIED", "DENIED"]}[outcome]
+                final = None
+                for answer in answers:
+                    st, r = ucall(k, "POST", f"/api/v1/me/apps/{slug}/permissions/{cap}/request")
+                    if st != 200 or not r.get("prompt"):
+                        final = f"{st} {r}"
+                        break
+                    st, r = ucall(k, "PUT", f"/api/v1/me/apps/{slug}/permissions/{cap}/answer", {"promptId": r["prompt"]["promptId"], "answer": answer})
+                    final = r.get("state") if st == 200 else f"{st} {r}"
+                ok(f"{k} permission {cap} for {slug} -> {outcome}", final == outcome, final if final != outcome else "")
+        mark(f"user:{k}:consent")
     if "reviews" in steps and needs_token:
         for slug, rating, text in u["reviews"]:
             if rating is None:

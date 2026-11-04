@@ -67,7 +67,7 @@
 <h1>14. Mini app bridge and user consent (agreed design)</h1>
 <p class="lead">How a mini app gets data about a user and from the device, how the user decides what it may have, and how we stop it from taking more. Permissions are asked <strong>at the moment of need, one at a time, like Android</strong>, not all at launch. Design agreed on 2026-11-04; implementation starts from this page. Every endpoint and sample below is the intended shape; once a step is built, its real requests and responses replace the illustrations (marked as such on each step).</p>
 
-<div class="callout warn"><span class="label">Status</span><p>Agreed, build in progress (section 10 lists the steps and which are built). Decisions taken are in section 11. Built so far: step 1 (purpose per capability) and step 2 (the consent endpoints in user-service).</p></div>
+<div class="callout warn"><span class="label">Status</span><p>Agreed, build in progress (section 10 lists the steps and which are built). Decisions taken are in section 11. Built so far: step 1 (purpose per capability), step 2 (the consent endpoints in user-service) and step 3 (counts per capability in the backoffice).</p></div>
 
 <section><h2 id="short">1. The short answer</h2>
 <ul>
@@ -215,7 +215,7 @@ HTTP 200 OK   capabilities:
 <tr><td><code>GET /api/v1/me/permissions</code> <span class="badge built">built</span></td><td>Settings screen: every app that holds at least one permission, with what it can see</td><td>Super app</td></tr>
 <tr><td><code>POST /api/v1/me/apps/{app}/launch</code></td><td>Launch token (section 4)</td><td>Super app</td></tr>
 <tr><td><code>GET /v1/users/{alias}/profile</code> (partner API)</td><td>Only the fields the user allowed, nothing else</td><td>Mini app backend, signed</td></tr>
-<tr><td><code>GET /admin/api/v1/apps/{id}/permissions</code></td><td>Backoffice: per capability, counts of granted, denied and blocked users (counts only, no list)</td><td>Staff</td></tr>
+<tr><td><code>GET /admin/api/v1/apps/{id}/permissions</code> <span class="badge built">built</span></td><td>Backoffice: per capability, counts of granted, denied and blocked users (counts only, no list)</td><td>Staff</td></tr>
 </tbody></table></div>
 
 <h3>The bridge, for mini app developers</h3>
@@ -485,6 +485,59 @@ location.fine BLOCKED&gt;GRANTED MENU
 notify.sms NOT_ASKED&gt;GRANTED DIALOG</code></pre>
 <p>The dialog request route is limited to 30 requests per minute per address (header <code>X-RateLimit-Limit: 30</code> captured); the other permission routes share the general 300 per minute.</p>
 
+<h3>What the backoffice sees <span class="badge built">real, step 3 built</span></h3>
+<p>Served by user-service (it owns the consent), reached through the gateway route <code>admin-app-permissions</code>; the capabilities listed come from registry-service. Any staff role may read it, counts only. Captured 2026-11-04 with a temporary VIEWER account on the seeded app <code>demo-ride</code> after the seeded users had answered (one granted-all user, one single refusal, one blocked):</p>
+<pre><code>GET /admin/api/v1/apps/&lt;demo-ride id&gt;/permissions
+
+200
+{
+  "appId": "4e831b72-a33b-4d93-a7ba-65e19b9dbd0a",
+  "slug": "demo-ride",
+  "capabilities": [
+    {
+      "capability": "location.fine",
+      "label": "Your precise location",
+      "granted": 2,
+      "denied": 1,
+      "blocked": 1
+    },
+    {
+      "capability": "notify.inapp",
+      "label": "Notifications in Adera",
+      "granted": 0,
+      "denied": 0,
+      "blocked": 0
+    },
+    {
+      "capability": "notify.sms",
+      "label": "Text messages (SMS)",
+      "granted": 2,
+      "denied": 0,
+      "blocked": 0
+    },
+    {
+      "capability": "pay.request",
+      "label": "Payments",
+      "granted": 2,
+      "denied": 0,
+      "blocked": 0
+    },
+    {
+      "capability": "user.basic",
+      "label": "Your Adera id",
+      "granted": 8,
+      "denied": 0,
+      "blocked": 0
+    },
+    {
+      "capability": "user.full_name",
+      "label": "Your name",
+      "granted": 3,
+      "denied": 0,
+      "blocked": 0
+    }
+  ]
+}</code></pre>
 <h3>What the mini app's backend sees</h3>
 <pre><code>GET /v1/users/u_p_8f3c.../profile          (signed with ADERA-SIG-1)
 
@@ -538,7 +591,7 @@ notify.sms NOT_ASKED&gt;GRANTED DIALOG</code></pre>
 <ol>
 <li><strong>Built 2026-11-04.</strong> Registry: <code>purpose</code> per granted capability, with backoffice field and audit.</li>
 <li><strong>Built 2026-11-04.</strong> user-service: <code>app_consent</code>, <code>consent_event</code>, the request, answer, menu, list and disconnect endpoints with the state rules of section 5. Tests, docs.</li>
-<li>Backoffice: counts per capability on the app page.</li>
+<li><strong>Built 2026-11-04.</strong> Backoffice: counts per capability on the app page.</li>
 <li>notify.* gate in the notification path, and mute converted to consent.</li>
 <li>Launch token and the partner <code>/profile</code> endpoint.</li>
 <li>Callbacks <code>user.consent_changed</code> and <code>user.disconnected</code>.</li>
@@ -568,6 +621,7 @@ notify.sms NOT_ASKED&gt;GRANTED DIALOG</code></pre>
 <li><strong>Step 2, shapes.</strong> The list endpoint returns a JSON array. Each item also carries <code>denialCount</code>, <code>canAskAgain</code> (a dialog would be shown on the next request) and <code>decidedAt</code>. The settings overview lists an app only while the user has at least one <code>GRANTED</code> permission there; only permissions that are still granted by staff are shown. The answer to Disconnect is <code>{"disconnected": true, "changed": [...]}</code>.</li>
 <li><strong>Step 2, ticket.</strong> <code>pr_</code> plus 24 random hex characters, valid 5 minutes, single use, replaced by the next request. Never-asked permissions stay <code>NOT_ASKED</code> after Disconnect; a <code>BLOCKED</code> one becomes <code>DENIED</code> with count 0 (the page says "everything to DENIED, count 0").</li>
 <li><strong>Step 2, rate limit.</strong> 30 per minute per address for the dialog request route, matched in the gateway by a regular expression on the path (APISIX does not match a wildcard in the middle of a path); everything else under <code>/api/v1/me</code> keeps 300 per minute.</li>
+<li><strong>Step 3, who serves the counts.</strong> user-service, because it owns the consent data; it asks registry-service (existing internal call) which capabilities the app has. The gateway sends only this one path to user-service (route <code>admin-app-permissions</code>, matched by regular expression). Any staff role may read it (counts are not personal data). <code>user.basic</code> counts users with a pseudonymous id for the app: granted = not disconnected, denied = disconnected. Deleted users are not counted, suspended ones are; capabilities staff removed are not listed. The backoffice shows the numbers in a <em>Users</em> column of the Capabilities tab.</li>
 </ul></section>
 
 <div class="pager"><a class="prev" href="13-sample-data.html"><small>Previous</small>13. Sample data</a><a class="next" href="../index.html"><small>Back to</small>Home / contents</a></div>

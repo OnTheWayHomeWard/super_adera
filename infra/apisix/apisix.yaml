@@ -553,6 +553,40 @@ routes:
         redis_password: ${{APISIX_REDIS_PASSWORD}}
     upstream_id: notification-service
 
+  # ---- Staff: how many users granted / denied / were blocked per capability of one app -> user-service (owns the consent) ----
+  # More specific than admin-api (priority 20), matched by regular expression because APISIX has no wildcard in the middle of a path.
+  - id: admin-app-permissions
+    uris: ["/admin/api/v1/apps/*"]
+    methods: ["GET"]
+    vars:
+      - ["uri", "~~", "^/admin/api/v1/apps/[^/]+/permissions$"]
+    priority: 30
+    plugins:
+      forward-auth:
+        uri: http://registry-service:8080/internal/staff/verify
+        request_headers: ["Authorization"]
+        upstream_headers: ["X-Staff-Id", "X-Staff-Role"]
+        extra_headers:
+          X-Gateway-Secret: ${{USER_GATEWAY_SECRET}}
+        status_on_error: 503
+      proxy-rewrite:
+        headers:
+          set:
+            X-Gateway-Secret: ${{USER_GATEWAY_SECRET}}
+            X-Client-IP: $remote_addr
+      limit-count:
+        count: 300
+        time_window: 60
+        key_type: var
+        key: remote_addr
+        rejected_code: 429
+        policy: redis
+        redis_host: redis
+        redis_port: 6379
+        redis_username: apisix
+        redis_password: ${{APISIX_REDIS_PASSWORD}}
+    upstream_id: user-service
+
   # ---- Staff: registered users (list, detail, suspend) -> user-service (more specific than admin-api, so it wins) ----
   - id: admin-users
     uris: ["/admin/api/v1/users", "/admin/api/v1/users/*"]

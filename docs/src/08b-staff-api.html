@@ -63,7 +63,7 @@
 </nav>
 <main>
 <h1>8b. Staff / dashboard admin API</h1>
-<p class="lead">Everything the staff dashboard calls: mini-app management, capabilities, limits, allowed server addresses, partner keys, reviews and reports, audit, staff accounts, notification templates and the delivery log. 38 endpoints, captured live (the six added for the backoffice are in <a href="#dashboard-users">Dashboard counts and registered users</a>; filters were added to the audit log, notification list and reports).</p>
+<p class="lead">Everything the staff dashboard calls: mini-app management, capabilities, limits, allowed server addresses, partner keys, reviews and reports, audit, staff accounts, notification templates and the delivery log. 39 endpoints, captured live (the six added for the backoffice are in <a href="#dashboard-users">Dashboard counts and registered users</a>; filters were added to the audit log, notification list and reports).</p>
 
 <section>
 <h2 id="how-it-works">How staff calls work</h2>
@@ -72,7 +72,7 @@
 <li><strong>Who:</strong> an active staff member with an <strong>aal2</strong> Kratos session: the emailed one-time code <em>and</em> an authenticator-app code. Get the token with <a href="09-guides.html#staff-login">the staff login guide</a> and the <a href="08e-kratos-flows.html">Kratos flows</a>. Send it as <code>Authorization: Bearer $TOKEN</code>.</li>
 <li><strong>What the gateway does:</strong> forward-auth to registry-service <code>/internal/staff/verify</code>, then it sets <code>X-Staff-Id</code> and <code>X-Staff-Role</code> and forwards. Clients never send those headers (a client-sent value is overwritten). See <a href="05-communication.html#staff-request">the staff request path</a>.</li>
 <li><strong>Roles:</strong> <code>VIEWER</code> reads; <code>ADMIN</code> changes things; <code>SUPER_ADMIN</code> manages staff and revives killed apps. The role is read from the live Kratos session on every call, so a role change applies at once with no new login. A too-low role gets <code>403 insufficient_role</code>.</li>
-<li><strong>Routing:</strong> <code>/admin/api/v1/notification/*</code> is served by notification-service (route <code>admin-notification</code>); everything else under <code>/admin/api/v1</code> by registry-service (route <code>admin-api</code>). Both use the same staff check and the same 300 per minute limit.</li>
+<li><strong>Routing:</strong> <code>/admin/api/v1/notification/*</code> is served by notification-service (route <code>admin-notification</code>); <code>GET /admin/api/v1/apps/{id}/permissions</code> (consent counts) by user-service (route <code>admin-app-permissions</code>); everything else under <code>/admin/api/v1</code> by registry-service (route <code>admin-api</code>). Both use the same staff check and the same 300 per minute limit.</li>
 <li><strong>Bodies are JSON</strong> (<code>Content-Type: application/json</code>) except the logo upload (multipart). <strong>Unknown fields are rejected</strong> with <code>400 validation_failed</code> on every write, so a typo never silently does nothing. Absent field = unchanged, <code>null</code> = clear (where the field is optional).</li>
 <li><strong>Every change is audited</strong> (actor, role, IP, target) and can be read at <a href="#ep-staff-get-audit">GET /audit</a>.</li>
 <li><strong>Error shape:</strong> <code>{"error":"&lt;code&gt;"}</code>, plus <code>"fields":{"&lt;field&gt;":"&lt;message&gt;"}</code> for validation (every problem is reported at once) or details such as <code>missing</code>. Notification-service endpoints use the same shape.</li>
@@ -777,6 +777,68 @@ X-Request-Id: d0730211-30fc-4d70-b222-281731e2108f
 ]</code></pre>
 <h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th><code>error</code></th><th>When it happens</th></tr></thead><tbody><tr><td>200</td><td>-</td><td>OK.</td></tr><tr><td>401</td><td><code>unauthorized</code></td><td>No <code>Authorization</code> header, or an invalid, expired or revoked session token. Returned by the gateway's forward-auth (from registry-service).</td></tr><tr><td>403</td><td><code>mfa_required</code></td><td>The session is only aal1 (emailed code only), or Kratos refuses it because an authenticator app is enrolled but not used in this session. Do the authenticator step.</td></tr><tr><td>403</td><td><code>not_staff</code></td><td>A valid session, but the person is not an ACTIVE staff member (customers get this).</td></tr></tbody></table></div>
 <h4>How to use it</h4><ul><li><code>purposeRequired: true</code> means granting needs an English purpose of at least 10 characters (at most 160, one line, no link), shown verbatim to users in the permission dialog. Without a purpose the dialog uses <code>defaultPurpose</code>.</li><li>Full table with limits: <a href="10-reference.html#capabilities">capability catalog</a>.</li></ul>
+</div></details>
+<details class="endpoint" id="ep-staff-get-apps-id-permissions">
+<summary><span class="method m-get">GET</span><span class="path">/admin/api/v1/apps/{appId}/permissions</span><span class="sum">How many users granted, denied or were blocked, per capability</span></summary>
+<div class="body"><dl class="meta"><dt>Audience</dt><dd>Adera staff (the dashboard)</dd><dt>Client path</dt><dd><code>/admin/api/v1/apps/{appId}/permissions</code> through the gateway (route <code>admin-app-permissions</code>)</dd><dt>Internal path</dt><dd>same path on <strong>user-service</strong> (it owns the consent data; the gateway sends this one path there, everything else under <code>/admin/api/v1/apps</code> goes to registry-service)</dd><dt>Auth</dt><dd><code>Authorization: Bearer $TOKEN</code>, an <strong>aal2</strong> staff session. Minimum role: <strong>VIEWER</strong> (counts are not personal data).</dd><dt>Rate limit</dt><dd>300 per 60 s per client IP</dd><dt>Implemented in</dt><dd><code>services/user-service/.../consent/AdminConsentController.java</code></dd></dl>
+<h4>Purpose</h4><p>For each capability that is currently GRANTED to the app (the same ones users see), counts of users whose answer is <code>GRANTED</code>, <code>DENIED</code> or <code>BLOCKED</code>. <strong>Counts only: no list of users</strong> (who answered what is between the user and the partner). The backoffice shows it in the <em>Users</em> column of the app's Capabilities tab. user-service serves it because it owns the consent; the list of capabilities comes from registry-service through its internal API. <code>{appId}</code> is the id or the slug.</p>
+<h4>Request parameters</h4><div class="table-wrap"><table><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why it exists</th></tr></thead><tbody><tr><td><code>appId</code></td><td>path</td><td>UUID or slug</td><td>yes</td><td>existing app</td><td>Which app.</td></tr></tbody></table></div>
+<h4>Example (the seeded app demo-ride)</h4>
+<pre><code>curl -s "$GATEWAY/admin/api/v1/apps/$APP_ID/permissions" \
+  -H "Authorization: Bearer $TOKEN"</code></pre>
+<pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+
+{
+  "appId": "4e831b72-a33b-4d93-a7ba-65e19b9dbd0a",
+  "slug": "demo-ride",
+  "capabilities": [
+    {
+      "capability": "location.fine",
+      "label": "Your precise location",
+      "granted": 2,
+      "denied": 1,
+      "blocked": 1
+    },
+    {
+      "capability": "notify.inapp",
+      "label": "Notifications in Adera",
+      "granted": 0,
+      "denied": 0,
+      "blocked": 0
+    },
+    {
+      "capability": "notify.sms",
+      "label": "Text messages (SMS)",
+      "granted": 2,
+      "denied": 0,
+      "blocked": 0
+    },
+    {
+      "capability": "pay.request",
+      "label": "Payments",
+      "granted": 2,
+      "denied": 0,
+      "blocked": 0
+    },
+    {
+      "capability": "user.basic",
+      "label": "Your Adera id",
+      "granted": 8,
+      "denied": 0,
+      "blocked": 0
+    },
+    {
+      "capability": "user.full_name",
+      "label": "Your name",
+      "granted": 3,
+      "denied": 0,
+      "blocked": 0
+    }
+  ]
+}</code></pre>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th>Error code</th><th>When it happens</th></tr></thead><tbody><tr><td><strong>404</strong></td><td><code>not_found</code></td><td>No such app.</td></tr><tr><td><strong>401</strong></td><td><code>unauthorized</code></td><td>No or invalid staff session (empty body from the gateway on a missing token).</td></tr><tr><td><strong>403</strong></td><td><code>mfa_required</code></td><td>The session is only aal1.</td></tr></tbody></table></div>
+<h4>How to use it</h4><ul><li><code>user.basic</code> has no dialog: <code>granted</code> is the number of users with a pseudonymous id for the app who did not disconnect, <code>denied</code> the number who disconnected, <code>blocked</code> is always 0.</li><li>Users whose account was deleted are not counted; suspended users are. A capability nobody answered yet shows zeros.</li><li>Capabilities that staff removed are not listed, even if users answered them earlier (their answers are kept but inert).</li></ul>
 </div></details>
 <details class="endpoint" id="ep-staff-put-apps-id-capabilities"><summary><span class="method m-put">PUT</span><span class="path">/admin/api/v1/apps/{appId}/capabilities/{capability}</span><span class="sum">Grant, deny or suspend one capability</span></summary><div class="body">
 <dl class="meta"><dt>Audience</dt><dd>Adera staff (the dashboard)</dd><dt>Client path</dt><dd><code>/admin/api/v1/apps/{appId}/capabilities/{capability}</code> through the gateway</dd><dt>Internal path</dt><dd>same path on registry-service :8080 (the gateway does not rewrite it)</dd><dt>Auth</dt><dd><code>Authorization: Bearer $TOKEN</code>, a Kratos session token of an <strong>aal2</strong> staff session. The gateway checks it and adds <code>X-Staff-Id</code>, <code>X-Staff-Role</code>, <code>X-Gateway-Secret</code>. Minimum role: <strong>ADMIN</strong>.</dd><dt>Rate limit</dt><dd>300 per 60 s per client IP (gateway route <code>admin-api</code>)</dd><dt>Implemented in</dt><dd><code>services/registry-service/src/main/java/app/adera/registry/app/AppConfigService.java (setCapability)</code></dd></dl>
