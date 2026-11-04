@@ -44,7 +44,7 @@
 </li>
 <li><a href="13-sample-data.html">13. Sample data (test scenarios)</a>
 </li>
-<li><a href="14-bridge-consent.html" class=current>14. Mini app bridge and consent (proposal)</a>
+<li><a href="14-bridge-consent.html" class=current>14. Mini app bridge and consent (agreed design)</a>
 <ul><li><a href="#short">1. Short answer</a></li><li><a href="#gates">2. Three gates</a></li><li><a href="#data">3. Data paths</a></li><li><a href="#launch">4. Launch token</a></li><li><a href="#consent">5. Consent</a></li><li><a href="#endpoints">6. Endpoints</a></li><li><a href="#scenario">7. Scenario</a></li><li><a href="#notify">8. Revocation</a></li><li><a href="#threats">9. Threats</a></li><li><a href="#build">10. Build order</a></li><li><a href="#decisions">11. Decisions</a></li></ul>
 </li>
 </ul>
@@ -64,19 +64,20 @@
 </ul>
 </nav>
 <main>
-<h1>14. Mini app bridge and user consent (design proposal)</h1>
-<p class="lead">How a mini app gets data about a user and from the device, how the user decides what it may have, and how we stop it from taking more. <strong>Nothing on this page is built yet.</strong> It is a proposal to discuss; every endpoint and table below is a suggestion, and the sample requests and responses are illustrations of the intended shape, not output from the running stack. Written 2026-11-04 on top of what exists today (apps, granted capabilities, pseudonymous ids, signed partner API, notification limits, mute preferences).</p>
+<h1>14. Mini app bridge and user consent (agreed design)</h1>
+<p class="lead">How a mini app gets data about a user and from the device, how the user decides what it may have, and how we stop it from taking more. Permissions are asked <strong>at the moment of need, one at a time, like Android</strong>, not all at launch. Design agreed on 2026-11-04; implementation starts from this page. Every endpoint and sample below is the intended shape; once a step is built, its real requests and responses replace the illustrations (marked as such on each step).</p>
 
-<div class="callout warn"><span class="label">Proposal</span><p>Status: for discussion. Section 11 lists the decisions I need from you before building.</p></div>
+<div class="callout warn"><span class="label">Status</span><p>Agreed, build in progress (section 10 lists the steps). Decisions taken are in section 11.</p></div>
 
 <section><h2 id="short">1. The short answer</h2>
 <ul>
-<li><strong>The manifest is our registry, not a file the mini app hosts.</strong> A mini app must not describe its own powers. The list of capabilities an app may ever ask for is what staff granted in the backoffice (<code>user.basic</code>, <code>location.fine</code>, ...). We add a purpose sentence per capability, written by the partner and approved by staff, so the user is told <em>why</em>.</li>
-<li><strong>The backend decides, always.</strong> The super app's bridge (the JavaScript the mini app calls) checks locally only to give quick feedback. A mini app is third-party code inside a WebView, so the bridge cannot be trusted as a gate. Every data request ends in a backend check, and the backend does not look at what the bridge said.</li>
+<li><strong>The manifest is our registry, not a file the mini app hosts.</strong> A mini app must not describe its own powers. The capabilities an app may ever ask for are the ones staff granted in the backoffice (<code>user.basic</code>, <code>location.fine</code>, ...). We add a purpose sentence per capability, written by the partner and approved by staff, so the user is told <em>why</em>. The mini app cannot change that text.</li>
+<li><strong>Ask at the moment of need, one permission at a time.</strong> Opening a mini app shows no dialog. When the mini app first needs location, it asks for location, the super app shows our approved text, and the user answers. A granted answer is remembered; a denied one is remembered too and limits how often the app may ask again (section 5).</li>
+<li><strong>The backend decides, always.</strong> The super app's bridge (the JavaScript the mini app calls) only drives the dialog. A mini app is third-party code inside a WebView, so the bridge cannot be the gate. Every data request ends in a backend check that ignores what the bridge said.</li>
 <li><strong>Three gates, in this order:</strong> (1) did Adera grant this capability to this app, and is the app LIVE? (2) did this user say yes to this capability for this app, and is it still yes? (3) is the request for exactly what that capability covers? Fail any gate and nothing is returned.</li>
-<li><strong>Consent is stored per user, per app, per capability</strong>, with a history, so "allowed" is something we can prove and the user can change at any time.</li>
-<li><strong>Yes, we need endpoints for the menu toggles.</strong> A permissions sheet in every mini app's top menu needs read, change and revoke endpoints (section 6).</li>
-<li><strong>Location is different.</strong> We never hold the user's live position. It is read from the phone, so it needs the phone's own permission as well as ours. The backend records consent and the super app hands the reading to the mini app (section 3).</li>
+<li><strong>The mini app decides what a "no" means.</strong> It can show "we cannot continue without your location", the reason, and an Allow button that asks again, or open the permission settings once asking is blocked. The server does not know which permissions an app cannot live without.</li>
+<li><strong>The menu sheet always works.</strong> Every mini app's top menu lists its permissions with a switch each; that is the only way to undo a block (section 5).</li>
+<li><strong>Location is different.</strong> We never hold the live position. It is read from the phone, so it needs the phone's own permission as well as ours. The backend records consent and the super app hands the reading to the mini app (section 3).</li>
 </ul></section>
 
 <section><h2 id="gates">2. The three gates</h2>
@@ -84,7 +85,7 @@
 <thead><tr><th>Gate</th><th>Question</th><th>Who knows</th><th>Fails with</th></tr></thead>
 <tbody>
 <tr><td>1. Granted</td><td>Is the capability granted to the app, and is the app LIVE (not DRAFT, PAUSED or KILLED)?</td><td>registry-service (exists today)</td><td><code>403 capability_not_granted</code> or <code>403 app_not_live</code></td></tr>
-<tr><td>2. Consented</td><td>Did this user allow it, and not revoke it since? Is the user ACTIVE?</td><td>user-service (new table)</td><td><code>403 consent_required</code> or <code>403 consent_revoked</code></td></tr>
+<tr><td>2. Consented</td><td>Did this user allow it, and not revoke it since? Is the user ACTIVE?</td><td>user-service (new table)</td><td><code>403 consent_required</code> (body says the state: NOT_ASKED, DENIED, BLOCKED)</td></tr>
 <tr><td>3. In scope</td><td>Is the thing asked for covered by the capability? (<code>location.coarse</code> gives a city, never coordinates; <code>user.contact</code> never gives the address.)</td><td>The data endpoint itself</td><td><code>403 outside_capability</code></td></tr>
 </tbody></table></div>
 <p>Gate 1 is checked on every call, so pausing or killing an app, or removing a capability in the backoffice, takes effect immediately. The 15-second revoked-key cache we already accepted is the only delay.</p></section>
@@ -106,7 +107,7 @@
 <p><strong>Recommendation:</strong> support both behind the same three gates. Use Path B for <code>user.full_name</code>, <code>user.contact</code> and <code>user.address</code>. Allow Path A only for <code>user.basic</code> and for device data.</p>
 
 <h3>Location</h3>
-<p>The phone asks the user for its own location permission the first time (the system dialog). Our consent is a separate yes. The bridge only gives a reading if both are yes, and returns <code>denied</code> without telling the mini app which of the two said no. If the mini app's backend needs the position, the mini app frontend sends it; we do not store positions on our servers.</p></section>
+<p>The phone asks the user for its own location permission the first time (the system dialog). Our consent is a separate yes. The bridge only gives a reading if both are yes, and otherwise returns <code>denied</code> or <code>blocked</code> without telling the mini app which of the two said no. If the mini app's backend needs the position, the mini app frontend sends it; we do not store positions on our servers.</p></section>
 
 <section><h2 id="launch">4. Launching a mini app: the launch token</h2>
 <p>Opening a mini app creates a short session. The super app asks the backend for a launch token and loads the mini app URL (the one registered in the backoffice) with the token. The token is a signed JWT using the same Adera signing key as callbacks; partners already fetch the public key at <code>/.well-known/jwks.json</code>.</p>
@@ -120,66 +121,103 @@ Authorization: Bearer &lt;user session&gt;
   "url": "https://ride.example.com/app?launch=eyJhbGciOi...",
   "consents": [
     {"capability": "user.basic",     "state": "GRANTED"},
-    {"capability": "location.fine",  "state": "NOT_ASKED"}
+    {"capability": "location.fine",  "state": "NOT_ASKED"}   (a state only; no dialog is shown at launch)
   ]
 }</code></pre>
 <p>Decoded token (claims): <code>iss</code> Adera, <code>aud</code> the app's id, <code>sub</code> the pseudonymous id <code>u_p_...</code> (never the real user id), <code>env</code> dev or prod, <code>scopes</code> the capabilities the user allowed <em>at this moment</em>, <code>exp</code> five minutes ahead. The mini app backend uses it to know who is calling, then calls Adera with its own signed requests for the data. Scopes in the token are only a hint for the mini app: Adera re-checks consent on every data call, so a revoked permission stops working even with a live token.</p></section>
 
-<section><h2 id="consent">5. Consent: what we store</h2>
+<section><h2 id="consent">5. Permission states and what we store</h2>
+<p>Each (user, app, capability) is in one of four states:</p>
+<div class="table-wrap"><table>
+<thead><tr><th>State</th><th>Meaning</th><th>A request from the mini app</th></tr></thead>
+<tbody>
+<tr><td><code>NOT_ASKED</code></td><td>Never asked (also: no row)</td><td>Shows the dialog</td></tr>
+<tr><td><code>GRANTED</code></td><td>The user said yes</td><td>Returns <code>granted</code> with no dialog</td></tr>
+<tr><td><code>DENIED</code></td><td>The user said no once</td><td>Shows the dialog one more time (the mini app should explain why first)</td></tr>
+<tr><td><code>BLOCKED</code></td><td>The user said no twice in a row</td><td>Returns <code>blocked</code> with no dialog. Only the menu switch can change it</td></tr>
+</tbody></table></div>
+<p>Rules: answering yes in the dialog sets <code>GRANTED</code> and the denial count to 0. The first no sets <code>DENIED</code> (count 1); the second no sets <code>BLOCKED</code> (count 2). A switch in the menu always works: switching on sets <code>GRANTED</code>, count 0; switching off sets <code>DENIED</code>, count 0, so the mini app may ask again later. A capability not granted to the app by staff never gets a dialog: the request returns <code>not_available</code> at once. There is no timer that unblocks; only the menu does.</p>
+<p>The server enforces this, not the bridge: a dialog is only allowed after the server has issued a one-time prompt for it (section 6), and an answer without a prompt is refused unless it comes from the menu.</p>
 <p>New tables in user-service (it owns users and the per-app pseudonymous ids):</p>
 <div class="table-wrap"><table>
 <thead><tr><th>Table</th><th>Columns</th><th>Notes</th></tr></thead>
 <tbody>
-<tr><td><code>app_consent</code></td><td>user id, app id, capability, state (GRANTED, DENIED), decided at, decided on screen (first-launch or menu), app version asked</td><td>One current row per user, app and capability. Absence means NOT_ASKED.</td></tr>
-<tr><td><code>consent_event</code></td><td>user id, app id, capability, from state, to state, at, source</td><td>Append only. This is the proof that the user agreed and when.</td></tr>
+<tr><td><code>app_consent</code></td><td>user id, app id, capability, state, denial count, decided at, source (dialog or menu), prompt id and prompt expiry (while a dialog is open)</td><td>One current row per user, app and capability. No row means NOT_ASKED.</td></tr>
+<tr><td><code>consent_event</code></td><td>user id, app id, capability, from state, to state, at, source</td><td>Append only. Proof that the user agreed and when.</td></tr>
 </tbody></table></div>
-<p>The consent screen shows only capabilities the app is <em>granted</em> (gate 1). If staff later grant a new capability, the user is asked again at next launch, and nothing is shared meanwhile. If staff remove one, the consent row stays but is inert, and the permissions sheet no longer lists it.</p>
-<p>Per-capability text lives in the registry next to the grant: <code>purpose</code> (one sentence, shown to the user), and <code>required</code> true or false. Staff review the text with the grant, so a partner cannot show "to improve your experience" for a location request.</p></section>
+<p>The menu sheet lists only capabilities that are currently granted to the app (gate 1). If staff remove a capability its row stays but is inert and no longer listed. If staff grant a new one, nothing happens until the mini app asks for it.</p>
+<p>Per-capability text lives in the registry next to the grant: <code>purpose</code> (one sentence, shown in the dialog). Staff review the text with the grant, so a partner cannot show "to improve your experience" for a location request. There is no <code>required</code> flag: the mini app decides whether it can work without a permission.</p></section>
 
-<section><h2 id="endpoints">6. Proposed endpoints</h2>
-<p>All user endpoints go through the existing gateway route for signed-in users. Paths follow the style of the current end-user API.</p>
+<section><h2 id="endpoints">6. Endpoints</h2>
+<p>All user endpoints use the existing gateway route for signed-in users. They live under <code>/me/apps/{app}</code>, so they do not collide with the public catalog's <code>/apps/{app}/permissions</code> (what an app is allowed to use, visible to anyone). <code>{app}</code> is the id or slug.</p>
 <div class="table-wrap"><table>
 <thead><tr><th>Endpoint</th><th>Purpose</th><th>Called by</th></tr></thead>
 <tbody>
-<tr><td><code>GET /api/v1/apps/{app}/permissions</code></td><td>What the app asks for (granted capabilities, purpose, required) plus this user's current state for each</td><td>Super app: first-launch dialog and menu sheet</td></tr>
-<tr><td><code>PUT /api/v1/me/apps/{app}/consents</code></td><td>Decide several at once (the first-launch dialog)</td><td>Super app</td></tr>
-<tr><td><code>PUT /api/v1/me/apps/{app}/consents/{capability}</code></td><td>Toggle one (the menu sheet)</td><td>Super app</td></tr>
-<tr><td><code>DELETE /api/v1/me/apps/{app}/consents</code></td><td>Disconnect: set everything to DENIED and ask the mini app to delete what it holds</td><td>Super app</td></tr>
-<tr><td><code>GET /api/v1/me/consents</code></td><td>Settings screen: every app with what it can see</td><td>Super app</td></tr>
+<tr><td><code>GET /api/v1/me/apps/{app}/permissions</code></td><td>Every capability granted to the app with label, purpose and this user's state. Menu sheet and <code>getPermission</code></td><td>Super app</td></tr>
+<tr><td><code>POST /api/v1/me/apps/{app}/permissions/{capability}/request</code></td><td>The mini app asked. Returns the state and, only if a dialog is allowed, a one-time prompt with the approved text</td><td>Super app, from <code>requestPermission</code></td></tr>
+<tr><td><code>PUT /api/v1/me/apps/{app}/permissions/{capability}/answer</code></td><td>The dialog answer, with the prompt id from the previous call</td><td>Super app</td></tr>
+<tr><td><code>PUT /api/v1/me/apps/{app}/permissions/{capability}</code></td><td>The menu switch: sets GRANTED or DENIED, resets the count, unblocks</td><td>Super app, menu sheet</td></tr>
+<tr><td><code>DELETE /api/v1/me/apps/{app}/permissions</code></td><td>Disconnect: everything to DENIED, count 0, and a <code>user.disconnected</code> callback to the partner</td><td>Super app</td></tr>
+<tr><td><code>GET /api/v1/me/permissions</code></td><td>Settings screen: every app that holds at least one permission, with what it can see</td><td>Super app</td></tr>
 <tr><td><code>POST /api/v1/me/apps/{app}/launch</code></td><td>Launch token (section 4)</td><td>Super app</td></tr>
-<tr><td><code>GET /v1/users/{alias}/profile</code> (partner API)</td><td>Path B: only the fields the user consented to, nothing else</td><td>Mini app backend, signed</td></tr>
-<tr><td><code>GET /admin/api/v1/apps/{id}/consents</code></td><td>Backoffice: how many users granted or denied each capability (counts only, no user list)</td><td>Staff</td></tr>
+<tr><td><code>GET /v1/users/{alias}/profile</code> (partner API)</td><td>Only the fields the user allowed, nothing else</td><td>Mini app backend, signed</td></tr>
+<tr><td><code>GET /admin/api/v1/apps/{id}/permissions</code></td><td>Backoffice: per capability, counts of granted, denied and blocked users (counts only, no list)</td><td>Staff</td></tr>
 </tbody></table></div>
 
-<h3>First-launch dialog</h3>
-<pre><code>GET /api/v1/apps/demo-ride/permissions
+<h3>The bridge, for mini app developers</h3>
+<div class="table-wrap"><table>
+<thead><tr><th>Call</th><th>Result</th></tr></thead>
+<tbody>
+<tr><td><code>adera.requestPermission("location.fine")</code></td><td>Promise of <code>granted</code>, <code>denied</code>, <code>blocked</code> or <code>not_available</code>. One permission per call; there is no batch call</td></tr>
+<tr><td><code>adera.getPermission("location.fine")</code></td><td>The same four values (plus <code>not_asked</code>), without ever showing a dialog</td></tr>
+<tr><td><code>adera.openPermissionSettings()</code></td><td>Opens the app's permission sheet in the super app menu; resolves when the user closes it</td></tr>
+<tr><td><code>adera.getLocation()</code></td><td>The reading, or <code>denied</code> / <code>blocked</code> if not allowed. It never shows a dialog by itself</td></tr>
+</tbody></table></div>
 
-200
+<h3>Asking at the moment of need</h3>
+<pre><code>POST /api/v1/me/apps/demo-ride/permissions/location.fine/request
+
+200   (first time: a dialog is allowed)
 {
-  "app": {"slug": "demo-ride", "name": "Demo Ride"},
-  "permissions": [
-    {"capability": "user.basic",    "label": "Recognise you",         "purpose": "Keeps your trips under one anonymous id.", "required": true,  "state": "NOT_ASKED"},
-    {"capability": "user.full_name","label": "Your name",             "purpose": "Shown to the driver.",                     "required": false, "state": "NOT_ASKED"},
-    {"capability": "location.fine","label": "Your precise location", "purpose": "Find a driver near you.",                  "required": true,  "state": "NOT_ASKED"},
-    {"capability": "notify.sms",   "label": "Text messages",         "purpose": "Send the driver's arrival code.",          "required": false, "state": "NOT_ASKED"}
-  ]
+  "capability": "location.fine",
+  "state": "NOT_ASKED",
+  "prompt": {
+    "promptId": "pr_3b1f...",
+    "expiresInSeconds": 300,
+    "label": "Your precise location",
+    "purpose": "Find a driver near you."
+  }
 }
 
-PUT /api/v1/me/apps/demo-ride/consents
-{"decisions": {"user.basic": "GRANTED", "user.full_name": "GRANTED", "location.fine": "GRANTED", "notify.sms": "DENIED"}}
+PUT /api/v1/me/apps/demo-ride/permissions/location.fine/answer
+{"promptId": "pr_3b1f...", "answer": "DENIED"}
 
 200
-{"app": "demo-ride", "consents": {"user.basic": "GRANTED", "user.full_name": "GRANTED", "location.fine": "GRANTED", "notify.sms": "DENIED"}}</code></pre>
-<p>If the user declines a <code>required</code> capability, the super app does not open the mini app and says why. The server does not enforce "required"; it only stores the answer, because only the mini app knows whether it can work without it.</p>
+{"capability": "location.fine", "state": "DENIED", "denialCount": 1, "canAskAgain": true}
 
-<h3>The menu toggle</h3>
-<pre><code>PUT /api/v1/me/apps/demo-ride/consents/location.fine
-{"state": "DENIED"}
+(the mini app explained itself and asks again; the user says no again)
 
 200
-{"capability": "location.fine", "state": "DENIED", "decidedAt": "2026-11-04T09:12:44Z"}</code></pre>
+{"capability": "location.fine", "state": "BLOCKED", "denialCount": 2, "canAskAgain": false}
 
-<h3>What the mini app's backend sees (Path B)</h3>
+POST .../location.fine/request   (a third time)
+
+200
+{"capability": "location.fine", "state": "BLOCKED", "prompt": null}
+
+POST .../notify.sms/request      (not granted to this app by staff)
+
+200
+{"capability": "notify.sms", "state": "NOT_AVAILABLE", "prompt": null}</code></pre>
+
+<h3>The menu switch</h3>
+<pre><code>PUT /api/v1/me/apps/demo-ride/permissions/location.fine
+{"state": "GRANTED"}
+
+200
+{"capability": "location.fine", "state": "GRANTED", "denialCount": 0, "decidedAt": "2026-11-04T09:12:44Z"}</code></pre>
+
+<h3>What the mini app's backend sees</h3>
 <pre><code>GET /v1/users/u_p_8f3c.../profile          (signed with ADERA-SIG-1)
 
 200
@@ -189,21 +227,22 @@ PUT /api/v1/me/apps/demo-ride/consents
   "fullName": "Hana Tesfaye"
 }
 
-(after the user turns user.full_name off)
+(after the user turns user.full_name off in the menu)
 403
-{"error": "consent_revoked", "capability": "user.full_name"}</code></pre>
-<p>Fields the user did not allow are not returned as null. They are absent, so the mini app cannot tell "no data" from "not allowed" except through <code>granted</code>.</p></section>
+{"error": "consent_required", "capability": "user.full_name", "state": "DENIED"}</code></pre>
+<p>Fields the user did not allow are not returned as null. They are absent, so the mini app cannot tell "no data" from "not allowed" except through <code>granted</code>. A mini app backend that needs a permission must have had its frontend request it first: the backend can never trigger a dialog.</p></section>
 
 <section><h2 id="scenario">7. Scenario: Demo Ride, start to finish</h2>
 <ol>
-<li><strong>Admin</strong> grants Demo Ride <code>user.basic</code>, <code>user.full_name</code>, <code>location.fine</code> and <code>notify.sms</code>, and approves a purpose sentence for each. The app goes LIVE.</li>
-<li><strong>Hana</strong> taps Demo Ride in the super app. The app calls <code>GET /permissions</code> and shows the dialog. Hana allows name and location, denies SMS. The phone's own location dialog follows and she allows it.</li>
-<li>The super app calls <code>POST /launch</code> and opens the mini app with the launch token. Scopes: basic, name, location.</li>
-<li>The mini app frontend calls <code>adera.getLocation()</code>. The bridge checks the phone permission, the backend confirms consent, and the position goes to the page.</li>
-<li>The mini app backend verifies the token and calls <code>GET /profile</code>. It receives the alias and the name.</li>
-<li>The mini app backend sends the driver code by SMS through the partner API. Gate 2 says <code>notify.sms</code> is DENIED, so the message is refused with <code>403 consent_required</code> and no SMS leaves. The mini app falls back to in-app (<code>notify.inapp</code>) if it was granted and allowed.</li>
-<li>Later Hana opens the top menu of Demo Ride, sees the sheet "Your name: on, Location: on, SMS: off", turns location off. The next <code>getLocation()</code> returns <code>denied</code>. She turns SMS on, and the next SMS goes through.</li>
-<li>Hana taps "Disconnect". Everything becomes DENIED, the mini app is sent a <code>user.disconnected</code> callback (section 8), and the next <code>/profile</code> returns 403.</li>
+<li><strong>Admin</strong> grants Demo Ride <code>user.basic</code>, <code>user.full_name</code>, <code>location.fine</code> and <code>notify.sms</code>, approves a purpose sentence for each, and the app goes LIVE.</li>
+<li><strong>Hana</strong> taps Demo Ride. No dialog appears. The super app calls <code>POST /launch</code> and opens the mini app with the launch token.</li>
+<li>Hana taps "Find a ride". The mini app calls <code>adera.requestPermission("location.fine")</code>. The super app shows "Demo Ride would like your precise location. Find a driver near you." Hana taps Allow. The phone's own location dialog follows and she allows it. The mini app gets <code>granted</code> and <code>getLocation()</code> returns a position.</li>
+<li>The mini app backend verifies the token and calls <code>GET /profile</code>. Name was never requested, so it returns only the alias and <code>"granted": ["user.basic"]</code>. (<code>user.basic</code> is the pseudonymous id and needs no dialog on its own; see section 11.)</li>
+<li>At the end of the trip the mini app wants to text the driver's code. It calls <code>requestPermission("notify.sms")</code>. Hana taps Deny. The mini app gets <code>denied</code>, shows "We can send the code in the app instead", and uses <code>notify.inapp</code> (asking for that permission the same way if needed). Had it sent the SMS anyway, the partner API would have answered <code>403 consent_required</code> and no SMS would leave.</li>
+<li>The mini app later asks for <code>notify.sms</code> again, with an explanation screen first. Hana denies again. The state is now <code>BLOCKED</code>.</li>
+<li>Next day the mini app tries once more and gets <code>blocked</code> without any dialog. It shows "Text messages are switched off" and a button that calls <code>adera.openPermissionSettings()</code>. Hana turns SMS on in the sheet, and the next SMS goes through.</li>
+<li>Hana opens the top menu and turns location off. The next <code>getLocation()</code> returns <code>denied</code>, and the mini app shows "We cannot continue without your location" and an Allow button that asks again.</li>
+<li>Hana taps "Disconnect". Everything becomes DENIED, the mini app receives a <code>user.disconnected</code> callback (section 8), and the next <code>/profile</code> returns 403.</li>
 </ol></section>
 
 <section><h2 id="notify">8. Notifications, revocation and callbacks</h2>
@@ -227,27 +266,29 @@ PUT /api/v1/me/apps/demo-ride/consents
 <tr><td>A partner reads data and shares it with a third party</td><td><strong>Not preventable by us.</strong> Same as above</td></tr>
 </tbody></table></div></section>
 
-<section><h2 id="build">10. Suggested build order</h2>
+<section><h2 id="build">10. Build order</h2>
 <ol>
-<li>Registry: <code>purpose</code> and <code>required</code> per granted capability, with backoffice fields and audit.</li>
-<li>user-service: <code>app_consent</code>, <code>consent_event</code>, the permissions, consent and list endpoints. Tests, docs, a screen in the backoffice for counts.</li>
+<li>Registry: <code>purpose</code> per granted capability, with backoffice field and audit.</li>
+<li>user-service: <code>app_consent</code>, <code>consent_event</code>, the request, answer, menu, list and disconnect endpoints with the state rules of section 5. Tests, docs.</li>
+<li>Backoffice: counts per capability on the app page.</li>
 <li>notify.* gate in the notification path, and mute converted to consent.</li>
-<li>Launch token and the partner <code>/profile</code> endpoint (Path B).</li>
+<li>Launch token and the partner <code>/profile</code> endpoint.</li>
 <li>Callbacks <code>user.consent_changed</code> and <code>user.disconnected</code>.</li>
-<li>The JavaScript bridge specification for the super app team: method list, message format, origin rule, error codes. Written last, because it is only a thin layer over steps 1 to 5.</li>
+<li>The bridge specification for the super app team: method list, message format, origin rule, error codes. Written last, because it is a thin layer over steps 1 to 6.</li>
 </ol>
-<p>Each step is a separate commit with tests and its documentation, as with the bug fixes.</p></section>
+<p>Each step is a separate commit with tests and its documentation, as with the bug fixes. When a step is built, its sample requests and responses on this page are replaced by real ones captured from the running stack.</p></section>
 
-<section><h2 id="decisions">11. Decisions I need from you</h2>
+<section><h2 id="decisions">11. Decisions taken (2026-11-04)</h2>
 <ol>
-<li><strong>Path A, B or both?</strong> I recommend both, with identifying data only on B.</li>
-<li><strong>Fine-grained consent or one yes per app?</strong> I propose per capability (the toggles you described). One yes per app is simpler but cannot support "share name but not location".</li>
-<li><strong>Required capabilities:</strong> may the app mark some as required so the super app refuses to open without them? I suggest yes.</li>
-<li><strong>Merge mute with notify consent?</strong> I suggest yes (section 8).</li>
-<li><strong>Does consent expire?</strong> For example ask again after 12 months. I suggest no for now.</li>
-<li><strong>Is the pseudonymous id enough for <code>user.basic</code>,</strong> or should the mini app be able to link users across two of its own apps? I suggest one id per user and app, as today.</li>
-<li><strong>Payments:</strong> <code>pay.request</code> needs its own confirmation each time (a per-payment prompt) and not a stored yes. Agreed?</li>
-</ol></section>
+<li><strong>Ask at the moment of need, never all at launch.</strong> One permission per request; there is no batch request.</li>
+<li><strong>Two denials block.</strong> After the second no the dialog is not shown again; the mini app can only point the user to the permission settings.</li>
+<li><strong>Only the menu unblocks.</strong> No timer. The menu switch also resets the denial count.</li>
+<li><strong>No <code>required</code> flag.</strong> The mini app decides what to do when a permission is refused.</li>
+<li><strong>Per-capability consent</strong> (not one yes per app).</li>
+<li><strong>Notification consent replaces mute</strong> (mute becomes DENIED on migration).</li>
+<li><strong>Identifying data goes through the mini app's backend</strong> with a signed request; the browser path is only for <code>user.basic</code> and device data.</li>
+</ol>
+<p>Still open, with my default: does consent expire? (default: no.) Does <code>pay.request</code> need a confirmation on every payment rather than a stored yes? (default: yes; designed when payments are built.) Does <code>user.basic</code>, the pseudonymous id, need a dialog? (default: no, the id is not personal data and the mini app needs it to identify the user at all; it is granted without asking.)</p></section>
 
 <div class="pager"><a class="prev" href="13-sample-data.html"><small>Previous</small>13. Sample data</a><a class="next" href="../index.html"><small>Back to</small>Home / contents</a></div>
 <p class="footer">Adera backend documentation &middot; proposal written 2026-11-04 &middot; <a href="../index.html">contents</a></p>
