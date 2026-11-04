@@ -197,7 +197,7 @@ print(&quot;response signature headers:&quot;, {k: rh.get(k) for k in (&quot;X-A
   '{"externalId":"job-1001","userId":"u_p_...","templateId":"...","params":{"name":"Abebe"}}'
 python3 adera_sign.py ak_prod_0123456789abcdef01234567 partner.pem GET /v1/notifications/job-1001</code></pre>
 <h3 id="signing-response">Our signatures: responses and callbacks</h3>
-<p>We sign too, so a partner can prove an answer or a callback really came from Adera and was not altered. Our public key is at <code>/.well-known/jwks.json</code> (public, cacheable one hour, standard JWKS with <code>kty</code>, <code>use</code>, <code>alg</code>, <code>kid</code>, <code>n</code>, <code>e</code>).</p>
+<p>We sign too, so a partner can prove an answer or a callback really came from Adera and was not altered. Our public key is at <code>/.well-known/jwks.json</code> (public, cacheable one hour, standard JWKS with <code>kty</code>, <code>use</code>, <code>alg</code>, <code>kid</code>, <code>n</code>, <code>e</code>). The same key signs three kinds of callback (<code>X-Adera-Event</code>: <code>notification.status</code>, <code>user.consent_changed</code>, <code>user.disconnected</code>) and the launch tokens. All five consent callbacks captured from the dev stack were verified against this key with <code>openssl</code>.</p>
 <div class="table-wrap"><div class="table-wrap"><table>
 <thead><tr><th>What</th><th>Headers</th><th>Canonical string</th></tr></thead>
 <tbody>

@@ -291,7 +291,7 @@ Content-Type: application/json
 <details class="endpoint" id="ep-user-disconnect">
 <summary><span class="method m-delete">DELETE</span><span class="path">/api/v1/me/apps/{app}/permissions</span><span class="sum">Disconnect: take everything back</span></summary>
 <div class="body"><dl class="meta"><dt>Who may call</dt><dd>the signed-in user's session (the super app; a mini app asks through the bridge)</dd><dt>Client path</dt><dd><code>/api/v1/me/apps/{app}/permissions</code> through the gateway, base <code>$GATEWAY</code>. <code>{app}</code> is the app's id or its slug</dd><dt>Auth</dt><dd><code>Authorization: Bearer $TOKEN</code> (Kratos session token), checked by the gateway's forward-auth.</dd><dt>Rate limit</dt><dd>300 per 60 s per client IP; over the limit the gateway answers <code>429</code></dd></dl>
-<h4>Purpose</h4><p>The "Disconnect" button. Every permission I gave the app becomes <code>DENIED</code> with count 0 (a <code>BLOCKED</code> one too), <code>user.basic</code> included, and any open dialog ticket is closed. Never-asked permissions stay <code>NOT_ASKED</code>. Repeatable: with nothing left to change it answers 200 with an empty <code>changed</code>. Works on PAUSED and KILLED apps too (I must always be able to leave); a DRAFT or unknown app is 404. A later step also sends the partner a <code>user.disconnected</code> callback.</p>
+<h4>Purpose</h4><p>The "Disconnect" button. Every permission I gave the app becomes <code>DENIED</code> with count 0 (a <code>BLOCKED</code> one too), <code>user.basic</code> included, and any open dialog ticket is closed. Never-asked permissions stay <code>NOT_ASKED</code>. Repeatable: with nothing left to change it answers 200 with an empty <code>changed</code>. Works on PAUSED and KILLED apps too (I must always be able to leave); a DRAFT or unknown app is 404. The partner is sent a <code>user.disconnected</code> callback (if staff set a callback address for the app).</p>
 <h4>Request parameters</h4><div class="table-wrap"><table><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th><th>Constraints</th><th>Why it exists</th></tr></thead><tbody><tr><td><code>app</code></td><td>path</td><td>string</td><td>yes</td><td>app id (UUID) or slug</td><td>Which mini app. Slugs are what links and the bridge use.</td></tr></tbody></table></div>
 <h4>Disconnect</h4>
 <pre><code>curl -s -X DELETE "$GATEWAY/api/v1/me/apps/demo-ride/permissions" \
@@ -324,7 +324,7 @@ Content-Type: application/json
   -H "Authorization: Bearer $TOKEN"</code></pre>
 <pre class="out"><code>HTTP/1.1 200 OK (location.fine: state DENIED, denialCount 0, canAskAgain true; user.basic: DENIED)</code></pre>
 <h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th>Error code</th><th>When it happens</th></tr></thead><tbody><tr><td><strong>404</strong></td><td><code>not_found</code></td><td>No such app, or a DRAFT.</td></tr><tr><td><strong>403</strong></td><td><code>account_suspended</code> / <code>account_deleted</code></td><td>My account is not ACTIVE.</td></tr></tbody></table></div>
-<h4>How to use it</h4><ul><li>Opening the mini app again reconnects <code>user.basic</code> (launch token, built in a later step); the others must be answered again.</li></ul>
+<h4>How to use it</h4><ul><li>Opening the mini app again (launch) reconnects <code>user.basic</code>; the others must be answered again.</li></ul>
 </div></details>
 <details class="endpoint" id="ep-user-all-permissions">
 <summary><span class="method m-get">GET</span><span class="path">/api/v1/me/permissions</span><span class="sum">Settings screen: which apps can see what</span></summary>
@@ -427,7 +427,7 @@ Content-Type: application/json
 <h4>How to use it</h4><ul><li><code>url</code> is the app's registered entry URL with <code>launch=&lt;token&gt;</code> added (<code>?</code> or <code>&amp;</code>); <code>null</code> when staff registered no URL.</li><li><code>consents</code> lists every capability staff granted the app with this user's state (<code>NOT_ASKED</code>, <code>GRANTED</code>, <code>DENIED</code>, <code>BLOCKED</code>), in the registry's alphabetical order; it never shows a dialog.</li><li>The token lives 5 minutes (<code>expiresInSeconds</code>). Call launch again whenever the mini app is opened; do not cache a token.</li><li>Decoded token (see section 14): header <code>{"alg":"RS256","typ":"JWT","kid":"..."}</code>; claims <code>iss</code> <code>adera</code>, <code>aud</code> the app id, <code>sub</code> the pseudonymous id, <code>env</code> <code>dev</code> or <code>prod</code>, <code>scopes</code>, <code>iat</code>, <code>exp</code>, <code>jti</code>.</li></ul>
 </div></details>
 <h2 id="not-built">Not built yet</h2>
-<ul><li>The partner callbacks <code>user.consent_changed</code> and <code>user.disconnected</code>.</li><li>The bridge itself (a separate specification for the super app team).</li></ul>
+<ul><li>The bridge itself (a separate specification for the super app team).</li></ul>
 <div class="pager"><a class="prev" href="mute-preferences.html"><small>Previous</small>Mute preferences</a><a class="next" href="building-the-store-screen.html"><small>Next</small>Building the store screen</a></div>
 <p class="footer">Adera super-app guides &middot; mini-app catalog &middot; permissions captured against the running dev stack on 2026-11-04</p>
 </main>

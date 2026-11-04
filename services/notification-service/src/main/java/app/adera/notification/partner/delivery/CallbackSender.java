@@ -68,6 +68,11 @@ public class CallbackSender {
 	}
 
 	public Outcome send(UUID callbackId, String url, String jsonBody) {
+		return send(callbackId, url, jsonBody, "notification.status");
+	}
+
+	/** {@code event} goes out in the X-Adera-Event header (notification.status, user.consent_changed, user.disconnected). */
+	public Outcome send(UUID callbackId, String url, String jsonBody, String event) {
 		URI uri;
 		try {
 			uri = UrlGuard.check(url, allowPrivate);
@@ -85,7 +90,7 @@ public class CallbackSender {
 				.timeout(Duration.ofSeconds(8))
 				.header("Content-Type", "application/json")
 				.header("User-Agent", "Adera-Callbacks/1")
-				.header("X-Adera-Event", "notification.status")
+				.header("X-Adera-Event", event)
 				.header("X-Adera-Key-Id", keys.keyId())
 				.header("X-Adera-Timestamp", timestamp)
 				.header("X-Adera-Signature", signature)

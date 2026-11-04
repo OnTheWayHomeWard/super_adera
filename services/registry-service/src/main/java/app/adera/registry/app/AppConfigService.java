@@ -29,12 +29,14 @@ public class AppConfigService {
 	private static final java.util.regex.Pattern LINK = java.util.regex.Pattern.compile("(?i)(https?:|ftp:|mailto:|www\\.|://)");
 	static final Set<String> STATES = Set.of("GRANTED", "DENIED", "SUSPENDED");
 
+	private final Environment deployment;
 	private final AppConfigRepository config;
 	private final MiniAppRepository apps;
 	private final AuditService audit;
 	private final Clock clock;
 
-	public AppConfigService(AppConfigRepository config, MiniAppRepository apps, AuditService audit, Clock clock) {
+	public AppConfigService(AppConfigRepository config, MiniAppRepository apps, AuditService audit, Clock clock, Environment deployment) {
+		this.deployment = deployment;
 		this.config = config;
 		this.apps = apps;
 		this.audit = audit;
@@ -113,6 +115,31 @@ public class AppConfigService {
 		audit.record(actor, "capability.set", "mini_app", appId.toString(), meta);
 	}
 
+	/** null clears the URL; otherwise an https URL (http too on a DEV deployment) of at most 300 characters without credentials. */
+	private String callbackUrl(Object raw) {
+		if (raw == null) {
+			return null;
+		}
+		if (!(raw instanceof String s) || s.isBlank()) {
+			throw new Errors.ValidationFailed("callbackUrl", "must be a URL like https://partner.example.com/adera/events, or null to remove it");
+		}
+		String url = s.strip();
+		boolean https = url.startsWith("https://");
+		boolean http = url.startsWith("http://") && deployment == Environment.DEV;
+		java.net.URI uri;
+		try {
+			uri = java.net.URI.create(url);
+		}
+		catch (IllegalArgumentException e) {
+			uri = null;
+		}
+		if (url.length() > 300 || uri == null || !(https || http) || uri.getHost() == null || uri.getUserInfo() != null) {
+			throw new Errors.ValidationFailed("callbackUrl", "must be an https:// URL of at most 300 characters with a host and no user name or password"
+					+ (deployment == Environment.DEV ? " (http:// is accepted on a DEV deployment)" : ""));
+		}
+		return url;
+	}
+
 	/** Null when fine, else what is wrong (one sentence, no links, no line breaks, at most 160 characters). */
 	static String purposeProblem(String text) {
 		if (text.length() > MAX_PURPOSE) {
@@ -167,27 +194,47 @@ public class AppConfigService {
 	public AppConfigRepository.EnvironmentRow setEnvironment(UUID appId, String envRaw, Map<String, Object> body, Actor actor) {
 		requireApp(appId);
 		Environment env = Environment.parse(envRaw);
-		if (!(body.get("allowedCidrs") instanceof List<?> list) || list.size() > 50) {
+		boolean hasUrl = body.containsKey("callbackUrl");
+		boolean hasCidrs = body.containsKey("allowedCidrs");
+		if (!hasCidrs && !hasUrl) {
 			throw new Errors.ValidationFailed("allowedCidrs", "must be a list (max 50) of IPs or ranges, e.g. [\"203.0.113.10\", \"198.51.100.0/24\"]");
 		}
-		List<String> normalised = new ArrayList<>();
-		for (Object item : list) {
-			try {
-				String cidr = Cidrs.normalise(String.valueOf(item));
-				if (Cidrs.matchesEverything(cidr) && env == Environment.PROD) {
-					throw new Errors.ValidationFailed("allowedCidrs", "a range that matches every address (/0) is not allowed for PROD");
+		String callbackUrl = hasUrl ? callbackUrl(body.get("callbackUrl")) : null;
+		Instant now = clock.instant();
+		AppConfigRepository.EnvironmentRow current = config.environments(appId).stream().filter(e -> e.environment().equals(env.name())).findFirst()
+			.orElse(new AppConfigRepository.EnvironmentRow(env.name(), List.of(), null));
+		List<String> normalised = current.allowedCidrs();
+		if (hasCidrs) {
+			if (!(body.get("allowedCidrs") instanceof List<?> list) || list.size() > 50) {
+				throw new Errors.ValidationFailed("allowedCidrs", "must be a list (max 50) of IPs or ranges, e.g. [\"203.0.113.10\", \"198.51.100.0/24\"]");
+			}
+			normalised = new ArrayList<>();
+			for (Object item : list) {
+				try {
+					String cidr = Cidrs.normalise(String.valueOf(item));
+					if (Cidrs.matchesEverything(cidr) && env == Environment.PROD) {
+						throw new Errors.ValidationFailed("allowedCidrs", "a range that matches every address (/0) is not allowed for PROD");
+					}
+					if (!normalised.contains(cidr)) {
+						normalised.add(cidr);
+					}
 				}
-				if (!normalised.contains(cidr)) {
-					normalised.add(cidr);
+				catch (IllegalArgumentException e) {
+					throw new Errors.ValidationFailed("allowedCidrs", "'" + item + "' is not a valid IP address or range");
 				}
 			}
-			catch (IllegalArgumentException e) {
-				throw new Errors.ValidationFailed("allowedCidrs", "'" + item + "' is not a valid IP address or range");
-			}
+			config.upsertEnvironment(appId, env.name(), normalised, now);
 		}
-		config.upsertEnvironment(appId, env.name(), normalised, clock.instant());
-		audit.record(actor, "environment.set", "mini_app", appId.toString(), Map.of("environment", env.name(), "allowedCidrs", normalised));
-		return new AppConfigRepository.EnvironmentRow(env.name(), normalised);
+		String url = hasUrl ? callbackUrl : current.callbackUrl();
+		if (hasUrl) {
+			config.setCallbackUrl(appId, env.name(), callbackUrl, now);
+		}
+		Map<String, Object> meta = new LinkedHashMap<>();
+		meta.put("environment", env.name());
+		meta.put("allowedCidrs", normalised);
+		meta.put("callbackUrl", url);
+		audit.record(actor, "environment.set", "mini_app", appId.toString(), meta);
+		return new AppConfigRepository.EnvironmentRow(env.name(), normalised, url);
 	}
 
 	@Transactional

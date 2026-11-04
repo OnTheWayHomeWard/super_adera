@@ -22,7 +22,7 @@ public class AppConfigRepository {
 	public record LimitRow(String channel, Integer maxPerUserPerDay, Integer maxPerDay, Integer maxDistinctUsersPerDay, Long maxTotal) {
 	}
 
-	public record EnvironmentRow(String environment, List<String> allowedCidrs) {
+	public record EnvironmentRow(String environment, List<String> allowedCidrs, String callbackUrl) {
 	}
 
 	public record PaymentRow(List<String> allowedCurrencies, boolean allowHold, Long minAmountMinor, Long maxAmountMinor) {
@@ -86,10 +86,19 @@ public class AppConfigRepository {
 
 	// ---- environments (allowed partner addresses)
 	public List<EnvironmentRow> environments(UUID appId) {
-		return jdbc.sql("SELECT environment, allowed_cidrs::text AS cidrs FROM app_environment WHERE app_id = :id ORDER BY environment")
+		return jdbc.sql("SELECT environment, allowed_cidrs::text AS cidrs, callback_url FROM app_environment WHERE app_id = :id ORDER BY environment")
 			.param("id", appId)
-			.query((rs, n) -> new EnvironmentRow(rs.getString("environment"), list(rs, "cidrs")))
+			.query((rs, n) -> new EnvironmentRow(rs.getString("environment"), list(rs, "cidrs"), rs.getString("callback_url")))
 			.list();
+	}
+
+	/** Only the callback URL (null clears it); creates the environment row with no allowed addresses if it does not exist. */
+	public void setCallbackUrl(UUID appId, String environment, String callbackUrl, Instant now) {
+		jdbc.sql("""
+				INSERT INTO app_environment (app_id, environment, allowed_cidrs, callback_url, updated_at)
+				VALUES (:id, :env, '[]'::jsonb, :url, :now)
+				ON CONFLICT (app_id, environment) DO UPDATE SET callback_url = :url, updated_at = :now""")
+			.param("id", appId).param("env", environment).param("url", callbackUrl).param("now", java.sql.Timestamp.from(now)).update();
 	}
 
 	public void upsertEnvironment(UUID appId, String environment, List<String> cidrs, Instant now) {

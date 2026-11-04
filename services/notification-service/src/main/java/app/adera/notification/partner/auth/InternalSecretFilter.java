@@ -14,7 +14,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 /**
- * {@code /internal/launch-tokens}: only other services, with {@code X-Internal-Secret}. The gateway never routes it. An empty
+ * {@code /internal/launch-tokens} and {@code /internal/consent-events}: only other services, with {@code X-Internal-Secret}. The gateway never routes it. An empty
  * configured secret disables the check (local dev only), like everywhere else.
  */
 @Component
@@ -28,7 +28,8 @@ public class InternalSecretFilter extends OncePerRequestFilter {
 
 	@Override
 	protected boolean shouldNotFilter(HttpServletRequest request) {
-		return !request.getRequestURI().startsWith("/internal/launch-tokens");
+		String path = request.getRequestURI();
+		return !(path.startsWith("/internal/launch-tokens") || path.startsWith("/internal/consent-events"));
 	}
 
 	@Override

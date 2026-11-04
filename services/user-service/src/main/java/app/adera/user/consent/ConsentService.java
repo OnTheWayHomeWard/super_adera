@@ -67,12 +67,15 @@ public class ConsentService {
 	}
 
 	private final JdbcClient jdbc;
+	private final tools.jackson.databind.json.JsonMapper mapper;
 	private final RegistryAppClient registry;
 	private final ProfileService profiles;
 	private final app.adera.user.profile.UserRepository users;
 	private final Clock clock;
 
-	public ConsentService(JdbcClient jdbc, RegistryAppClient registry, ProfileService profiles, app.adera.user.profile.UserRepository users, Clock clock) {
+	public ConsentService(JdbcClient jdbc, RegistryAppClient registry, ProfileService profiles, app.adera.user.profile.UserRepository users, Clock clock,
+			tools.jackson.databind.json.JsonMapper mapper) {
+		this.mapper = mapper;
 		this.jdbc = jdbc;
 		this.registry = registry;
 		this.profiles = profiles;
@@ -259,6 +262,12 @@ public class ConsentService {
 			else if (row.promptId() != null) {
 				clearPrompt(userId, info.appId(), e.getKey());
 			}
+		}
+		if (!changed.isEmpty()) {
+			Map<String, Object> payload = new LinkedHashMap<>();
+			payload.put("capabilities", changed.stream().map(c -> c.get("capability")).toList());
+			payload.put("at", now.toString());
+			enqueuePartnerEvent("user.disconnected", userId, info.appId(), payload, now);
 		}
 		return changed;
 	}
@@ -469,6 +478,24 @@ public class ConsentService {
 			.param("u", userId).param("a", appId).param("c", capability).param("s", to).param("n", count).param("now", ts(now)).param("src", source).update();
 		jdbc.sql("INSERT INTO consent_event (user_id, app_id, capability, from_state, to_state, at, source) VALUES (:u, :a, :c, :f, :t, :now, :src)")
 			.param("u", userId).param("a", appId).param("c", capability).param("f", from).param("t", to).param("now", ts(now)).param("src", source).update();
+		// the partner is told about every real change the user made (a disconnect is reported once, by disconnect())
+		if (!from.equals(to) && !source.equals("DISCONNECT") && !source.equals("MUTE")) {
+			Map<String, Object> payload = new LinkedHashMap<>();
+			payload.put("capability", capability);
+			payload.put("state", to);
+			payload.put("at", now.toString());
+			enqueuePartnerEvent("user.consent_changed", userId, appId, payload, now);
+		}
+	}
+
+	/** Queues an event for the partner in the caller's transaction, only if the partner knows this user (has an alias for the app). */
+	private void enqueuePartnerEvent(String event, UUID userId, UUID appId, Map<String, Object> payload, Instant now) {
+		String alias = jdbc.sql("SELECT alias FROM app_user_alias WHERE app_id = :a AND user_id = :u").param("a", appId).param("u", userId).query(String.class).optional().orElse(null);
+		if (alias == null) {
+			return;
+		}
+		jdbc.sql("INSERT INTO partner_event_outbox (event, app_id, alias, payload, created_at, next_attempt_at) VALUES (:e, :a, :al, CAST(:p AS jsonb), :now, :now)")
+			.param("e", event).param("a", appId).param("al", alias).param("p", mapper.writeValueAsString(payload)).param("now", ts(now)).update();
 	}
 
 	private static java.sql.Timestamp ts(Instant i) {

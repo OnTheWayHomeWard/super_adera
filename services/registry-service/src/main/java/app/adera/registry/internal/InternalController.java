@@ -45,7 +45,7 @@ public class InternalController {
 
 	/** Everything the delivery side needs to decide about one request from one app in one environment. */
 	public record AppContext(UUID appId, String slug, String status, String environment, boolean usable, String denyReason,
-			List<String> grantedCapabilities, List<GrantedPermission> permissions, List<AppConfigRepository.LimitRow> notificationLimits, List<String> allowedCidrs) {
+			List<String> grantedCapabilities, List<GrantedPermission> permissions, List<AppConfigRepository.LimitRow> notificationLimits, List<String> allowedCidrs, String callbackUrl) {
 	}
 
 	/** An app with what staff granted it, for the user-service consent endpoints. {@code name} is per language; {@code entryUrl} is where the mini app is served (launch URL). */
@@ -100,9 +100,10 @@ public class InternalController {
 			Capability cap = Capability.byKey(c.capability()).orElse(null);
 			return new GrantedPermission(c.capability(), cap == null ? c.capability() : cap.label(), c.purpose(), cap == null ? "" : cap.defaultPurpose());
 		}).toList();
-		List<String> cidrs = config.environments(appId).stream().filter(e -> e.environment().equals(env.name())).findFirst()
-			.map(AppConfigRepository.EnvironmentRow::allowedCidrs).orElse(List.of());
-		return new AppContext(appId, app.getSlug(), app.getStatus().name(), env.name(), usable, deny, granted, permissions, config.limits(appId), cidrs);
+		AppConfigRepository.EnvironmentRow envRow = config.environments(appId).stream().filter(e -> e.environment().equals(env.name())).findFirst().orElse(null);
+		List<String> cidrs = envRow == null ? List.of() : envRow.allowedCidrs();
+		return new AppContext(appId, app.getSlug(), app.getStatus().name(), env.name(), usable, deny, granted, permissions, config.limits(appId), cidrs,
+				envRow == null ? null : envRow.callbackUrl());
 	}
 
 	/** Does this app exist, and in which status? (user-service checks ids it is given: 404 for an unknown app.) */

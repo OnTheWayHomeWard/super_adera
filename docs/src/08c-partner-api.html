@@ -443,7 +443,7 @@ Content-Type: application/json
   "error": "missing_signature"
 }</code></pre>
 <h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th>Error code</th><th>When it happens</th></tr></thead><tbody><tr><td><strong>403</strong></td><td><code>consent_required</code></td><td>The user did not allow <code>user.basic</code> (for example after Disconnect), or one of the <code>fields</code> you asked for. Body: <code>capability</code>, <code>state</code> (<code>NOT_ASKED</code>, <code>DENIED</code>, <code>BLOCKED</code>).</td></tr><tr><td><strong>403</strong></td><td><code>capability_not_granted</code></td><td>Staff did not grant your app <code>user.basic</code> or a capability named in <code>fields</code>. Body: <code>capability</code>.</td></tr><tr><td><strong>422</strong></td><td><code>user_unreachable</code></td><td>Unknown alias (or one of another app), deleted or suspended user.</td></tr><tr><td><strong>422</strong></td><td><code>synthetic_user_not_allowed</code></td><td>A <code>u_p_test_*</code> id on a PROD deployment.</td></tr><tr><td><strong>400</strong></td><td><code>validation_failed</code></td><td>Bad alias, or <code>fields</code> with a key that is not a profile capability.</td></tr><tr><td><strong>403</strong></td><td><code>wrong_environment</code>, <code>ip_not_allowed</code>, <code>app_paused</code>...</td><td>As for every partner call (see the common errors).</td></tr><tr><td><strong>401</strong></td><td><code>missing_signature</code> and the other signature errors</td><td>See the common errors.</td></tr></tbody></table></div>
-<h4>How to use it</h4><ul><li><code>user.basic</code> is the connection itself: it is reported <code>granted</code> without a dialog until the user disconnects (then <code>403 consent_required</code> for the whole profile). Opening the app again (launch) reconnects it.</li><li>In DEV the synthetic users answer too: <code>u_p_test_ok</code> (all allowed, fake data), <code>u_p_test_noconsent</code> / <code>_denied</code> / <code>_blocked</code> (state <code>NOT_ASKED</code> / <code>DENIED</code> / <code>BLOCKED</code> for the non-basic permissions), <code>u_p_test_unreachable</code> (422).</li><li>Treat the values as personal data: keep only what you need, delete a user's data when you get the <code>user.disconnected</code> callback (a later step of the bridge), and never log the values.</li><li>Runnable examples: <code>get_profile.py</code> and <code>get-profile.js</code> in the partner guide's <code>examples/</code> folder.</li></ul>
+<h4>How to use it</h4><ul><li><code>user.basic</code> is the connection itself: it is reported <code>granted</code> without a dialog until the user disconnects (then <code>403 consent_required</code> for the whole profile). Opening the app again (launch) reconnects it.</li><li>In DEV the synthetic users answer too: <code>u_p_test_ok</code> (all allowed, fake data), <code>u_p_test_noconsent</code> / <code>_denied</code> / <code>_blocked</code> (state <code>NOT_ASKED</code> / <code>DENIED</code> / <code>BLOCKED</code> for the non-basic permissions), <code>u_p_test_unreachable</code> (422).</li><li>Treat the values as personal data: keep only what you need, delete a user's data when you get the <code>user.disconnected</code> callback (<a href="#consent-events">consent events</a>), and never log the values.</li><li>Runnable examples: <code>get_profile.py</code> and <code>get-profile.js</code> in the partner guide's <code>examples/</code> folder.</li></ul>
 </div></details>
 <details class="endpoint" id="ep-partner-get-v1-notifications-externalid"><summary><span class="method m-get">GET</span><span class="path">/v1/notifications/{externalId}</span><span class="sum">Where is my message? (status)</span></summary><div class="body">
 <dl class="meta"><dt>Audience</dt><dd>A mini app's server (partner)</dd><dt>Client path</dt><dd><code>/v1/notifications/{externalId}</code> through the gateway</dd><dt>Internal path</dt><dd>same path on notification-service :8080</dd><dt>Auth</dt><dd><strong>No login.</strong> Headers <code>X-Adera-Key-Id</code>, <code>X-Adera-Timestamp</code>, <code>X-Adera-Signature</code> (ADERA-SIG-1, see <a href="06-security.html#signing">Security</a>), and the caller's IP must be on the app's allowed list for this deployment's environment (the key must belong to it).</dd><dt>Rate limit</dt><dd>600 per 60 s per client IP (gateway route <code>partner-api</code>), plus the per-app quotas</dd><dt>Answers are signed</dt><dd>Every response, errors included, carries <code>X-Adera-Key-Id</code>, <code>X-Adera-Timestamp</code>, <code>X-Adera-Signature</code> made with Adera's key (public key at <a href="08f-operational.html">/.well-known/jwks.json</a>).</dd><dt>Implemented in</dt><dd><code>services/notification-service/src/main/java/app/adera/notification/partner/delivery/PartnerNotificationController.java</code></dd></dl>
@@ -509,6 +509,55 @@ X-Adera-Signature: p9rAZAHZICwUSJuLTnMD6diz... (base64 RS256 signature)
 }</code></pre>
 <p class="masked">The dev stack ran with <code>PARTNER_ALLOW_PRIVATE_CALLBACKS=true</code> so that the receiver could be a plain <code>http</code> address on this machine; production requires https on a public address.</p>
 </section>
+
+<section><h2 id="consent-events">Consent events</h2>
+<h3 id="consent-callbacks">Consent callbacks: <code>user.consent_changed</code> and <code>user.disconnected</code></h3>
+<p>Besides status reports, Adera tells your server when a user changes a permission or disconnects from your app. They go to the <strong>callback address</strong> staff set for your app and environment (backoffice, app page, Environments tab; no address, no such callbacks) and use exactly the same machinery as the status reports: same signature, same headers, the same retry for 24 hours. They carry the user's <strong>pseudonymous id</strong> and never a real user id. <code>X-Adera-Event</code> says which one it is.</p>
+<ul>
+<li><code>user.consent_changed</code>: <code>alias</code>, <code>capability</code>, <code>state</code> (the new state: <code>GRANTED</code>, <code>DENIED</code> or <code>BLOCKED</code>), <code>at</code> (when the user decided), <code>environment</code>. Sent for every real change: a dialog answer, the menu switch, the old mute switches (<code>notify.*</code>), and <code>user.basic</code> coming back when the user opens the app after a disconnect. Nothing is sent when nothing changed.</li>
+<li><code>user.disconnected</code>: <code>alias</code>, <code>capabilities</code> (the permissions that were taken back, <code>user.basic</code> included), <code>at</code>, <code>environment</code>. One event per disconnect, not one per permission. <strong>A partner that kept the user's name or contact is expected to delete it on this event</strong> (a term of the partner agreement; Adera cannot enforce it once the data has left).</li>
+<li>Only users your app knows (it has their id from a launch) are reported, and only while the app may run in this environment.</li>
+<li><strong>Order and duplicates.</strong> Delivery is at least once and a failed one is retried, so events can arrive late or twice: de-duplicate on <code>Idempotency-Key</code> and order by <code>at</code>.</li>
+<li><strong>Verify</strong> exactly like a status report (the partner guide's <code>callback_receiver.py</code> / <code>callback-receiver.js</code> do it for all events). Real captures from the dev stack (seeded user Demo Hana, demo-ride; the signature is shortened):</li>
+</ul>
+<pre class="out"><code>POST /adera/events HTTP/1.1
+content-type: application/json
+user-agent: Adera-Callbacks/1
+x-adera-event: user.consent_changed
+x-adera-key-id: adera-sig-202610
+x-adera-timestamp: 1793827315
+idempotency-key: 21269340-c299-4d81-9326-d6ab4dde9210
+X-Adera-Signature: CsjFYCfNP/CVi/Qjf7JDnCDO... (base64 RS256 signature)
+
+{
+  "at": "2026-11-04T21:21:54.888252828Z",
+  "alias": "u_p_5496f0de1378750142d148c9ea19b2c9",
+  "event": "user.consent_changed",
+  "state": "GRANTED",
+  "capability": "location.fine",
+  "environment": "DEV"
+}
+
+POST /adera/events HTTP/1.1
+content-type: application/json
+user-agent: Adera-Callbacks/1
+x-adera-event: user.disconnected
+x-adera-key-id: adera-sig-202610
+x-adera-timestamp: 1793827319
+idempotency-key: d4a3770b-1100-4111-96fa-4a2a17b7de1f
+X-Adera-Signature: m3INcq5+aoB6oKdXXc1zXHpw... (base64 RS256 signature)
+
+{
+  "at": "2026-11-04T21:21:55.058819130Z",
+  "alias": "u_p_5496f0de1378750142d148c9ea19b2c9",
+  "event": "user.disconnected",
+  "environment": "DEV",
+  "capabilities": [
+    "notify.inapp",
+    "notify.email",
+    "user.basic"
+  ]
+}</code></pre></section>
 
 <section><h2 id="statuses">Notification statuses</h2>
 <div class="table-wrap"><div class="table-wrap"><table>

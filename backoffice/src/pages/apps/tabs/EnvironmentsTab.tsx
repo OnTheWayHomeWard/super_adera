@@ -2,6 +2,7 @@ import { Alert, Button, Card, Col, Form, Input, App as AntApp, Row, Space, Tag, 
 import { useEffect, useState } from "react";
 import { ErrorAlert, RoleGate, useCan } from "../../../components/common";
 import { api } from "../../../lib/client";
+import { callbackUrlBody, callbackUrlProblem } from "../../../lib/callbackUrl";
 import { splitList } from "../../../lib/format";
 import { useDeploymentEnvironment } from "../../../lib/hooks";
 import { ENVIRONMENTS, type Environment, type EnvironmentRow } from "../../../lib/types";
@@ -54,6 +55,27 @@ function EnvironmentCard({ appId, env, active, row, onSaved }: { appId: string; 
   useEffect(() => setText(savedKey), [savedKey]);
   const list = splitList(text);
   const changed = JSON.stringify(list) !== JSON.stringify(row?.allowedCidrs ?? []);
+  // consent callbacks: its own field and its own Save, so changing one never touches the other
+  const [url, setUrl] = useState(row?.callbackUrl ?? "");
+  const [urlError, setUrlError] = useState<unknown>(null);
+  const [urlBusy, setUrlBusy] = useState(false);
+  const savedUrl = row?.callbackUrl ?? "";
+  useEffect(() => setUrl(savedUrl), [savedUrl]);
+  const urlProblem = callbackUrlProblem(url, env);
+  const urlChanged = url.trim() !== savedUrl;
+  const saveUrl = async () => {
+    setUrlBusy(true);
+    setUrlError(null);
+    try {
+      await api(`apps/${appId}/environments/${env}`, { method: "PUT", body: callbackUrlBody(url) });
+      await onSaved();
+      message.success(url.trim() ? `${env} callback address saved` : `${env} callback address removed`);
+    } catch (e) {
+      setUrlError(e);
+    } finally {
+      setUrlBusy(false);
+    }
+  };
 
   const save = async () => {
     setBusy(true);
@@ -90,6 +112,20 @@ function EnvironmentCard({ appId, env, active, row, onSaved }: { appId: string; 
           {changed && <Button onClick={() => setText((row?.allowedCidrs ?? []).join("\n"))}>Reset</Button>}
           {saved && !changed && <Typography.Text type="success">Saved</Typography.Text>}
         </Space>
+      </RoleGate>
+      <Typography.Title level={5} style={{ marginTop: 16 }}>Callback address (optional)</Typography.Title>
+      <Typography.Paragraph type="secondary">
+        Where Adera tells the partner's server that a user changed a permission (<code>user.consent_changed</code>) or disconnected (<code>user.disconnected</code>). Signed like every Adera callback, retried for 24 hours. Leave empty for no callbacks.
+      </Typography.Paragraph>
+      <ErrorAlert error={urlError} />
+      <Input value={url} onChange={(e) => setUrl(e.target.value)} disabled={!canWrite} placeholder="https://partner.example.com/adera/events" spellCheck={false} status={urlProblem ? "error" : undefined} data-testid={`callback-url-${env}`} />
+      {urlProblem && <Typography.Text type="danger">{urlProblem}</Typography.Text>}
+      <RoleGate ability="write">
+        <div style={{ marginTop: 8 }}>
+          <Button onClick={saveUrl} loading={urlBusy} disabled={!urlChanged || !!urlProblem}>
+            {url.trim() ? "Save callback address" : "Remove callback address"}
+          </Button>
+        </div>
       </RoleGate>
     </Card>
   );

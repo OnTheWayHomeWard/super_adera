@@ -96,6 +96,54 @@ no such externalId  -> 404 {"error": "not_found"}</code></pre>
 <div class="callout why"><span class="label">Why callbacks</span><p>Delivery takes seconds to hours. A callback tells your server the moment a notification is finished, so you can update your own records (for example, offer the user another way to reach them if it ended <code>FAILED</code> or <code>UNREACHABLE</code>) without polling.</p></div>
 <p><strong>When:</strong> once per notification, when it reaches a <strong>final</strong> status (<code>SENT</code>, <code>FAILED</code>, <code>UNREACHABLE</code>, <code>SUPPRESSED</code>, <code>EXPIRED</code>), if you gave a <code>callbackUrl</code>. There are no callbacks for <code>QUEUED</code>, <code>PROCESSING</code> or <code>RETRYING</code>. A request answered <code>200 SUPPRESSED</code> (muted user) also produces a callback, and it can reach your server before you have processed the <code>200</code>. <strong>Not</strong> sent for: replays, requests refused with an error, notifications without <code>callbackUrl</code>.</p>
 
+<h2 id="consent-events">Consent callbacks: the user changed a permission or disconnected</h2>
+<div class="callout why"><span class="label">Why</span><p>A user can switch a permission off in the Adera app at any time, or disconnect from your mini app. Your server must stop using what it was allowed and, after a disconnect, delete what it kept. These two callbacks tell you the moment it happens, so you do not have to find out from a refused request.</p></div>
+<p>They are sent to the <strong>callback address Adera staff set for your app and environment</strong> (ask Adera to set it; without it you get none), use the same headers, signature and retry schedule as the status callbacks above, and are verified the same way (the receiver in <code>examples/</code> handles every event: it prints <code>X-Adera-Event</code>). They carry the user's pseudonymous id and never a real user id.</p>
+<div class="table-wrap"><table><thead><tr><th><code>X-Adera-Event</code></th><th>Body fields</th><th>When</th></tr></thead><tbody>
+<tr><td><code>user.consent_changed</code></td><td><code>event</code>, <code>alias</code>, <code>capability</code>, <code>state</code> (<code>GRANTED</code>, <code>DENIED</code>, <code>BLOCKED</code>), <code>at</code>, <code>environment</code></td><td>Every real change: the user answered the dialog, flipped a switch in the menu, or muted/unmuted a notification channel (<code>notify.*</code>); <code>user.basic</code> becomes <code>GRANTED</code> again when the user opens your app after a disconnect. Not sent when nothing changed.</td></tr>
+<tr><td><code>user.disconnected</code></td><td><code>event</code>, <code>alias</code>, <code>capabilities</code> (everything that was taken back, <code>user.basic</code> included), <code>at</code>, <code>environment</code></td><td>The user pressed Disconnect. One callback per disconnect. <strong>If you kept the user's name, contact or address, delete it now</strong> (your partner agreement requires it; Adera cannot enforce it once the data has left).</td></tr>
+</tbody></table></div>
+<p>Real capture (dev stack, a seeded user and the seeded app demo-ride; the signature is shortened):</p>
+<pre class="out nocopy"><code>POST /adera/events HTTP/1.1
+X-Adera-Event: user.consent_changed
+X-Adera-Key-Id: adera-sig-202610
+X-Adera-Timestamp: 1793827315
+X-Adera-Signature: CsjFYCfNP/CVi/Qjf7JDnCDO... (base64)
+Idempotency-Key: 21269340-c299-4d81-9326-d6ab4dde9210
+
+{
+  "at": "2026-11-04T21:21:54.888252828Z",
+  "alias": "u_p_5496f0de1378750142d148c9ea19b2c9",
+  "event": "user.consent_changed",
+  "state": "GRANTED",
+  "capability": "location.fine",
+  "environment": "DEV"
+}
+
+POST /adera/events HTTP/1.1
+X-Adera-Event: user.disconnected
+X-Adera-Key-Id: adera-sig-202610
+X-Adera-Timestamp: 1793827319
+X-Adera-Signature: m3INcq5+aoB6oKdXXc1zXHpw... (base64)
+Idempotency-Key: d4a3770b-1100-4111-96fa-4a2a17b7de1f
+
+{
+  "at": "2026-11-04T21:21:55.058819130Z",
+  "alias": "u_p_5496f0de1378750142d148c9ea19b2c9",
+  "event": "user.disconnected",
+  "environment": "DEV",
+  "capabilities": [
+    "notify.inapp",
+    "notify.email",
+    "user.basic"
+  ]
+}</code></pre>
+<p>The Python receiver from this guide accepted all of them (a wrong signature would have printed <code>REJECTED</code>):</p>
+<pre class="out nocopy"><code>$ python examples/callback_receiver.py 8099
+callback user.consent_changed {"at": "2026-11-04T21:27:54.897959931Z", "alias": "u_p_5496f0de1378750142d148c9ea19b2c9", "event": "user.consent_changed", "state": "GRANTED", "capability": "location.fine", "environment": "DEV"}
+callback user.disconnected {"at": "2026-11-04T21:27:54.922205122Z", "alias": "u_p_5496f0de1378750142d148c9ea19b2c9", "event": "user.disconnected", "environment": "DEV", "capabilities": ["location.fine", "user.basic", "notify.inapp", "notify.sms", "notify.email"]}
+callback user.consent_changed {"at": "2026-11-04T21:27:54.950071243Z", "alias": "u_p_5496f0de1378750142d148c9ea19b2c9", "event": "user.consent_changed", "state": "GRANTED", "capability": "user.basic", "environment": "DEV"}</code></pre>
+<ul><li><strong>At least once, possibly out of order.</strong> A failed delivery is retried for 24 hours, so an old event can arrive after a newer one or twice: de-duplicate on <code>Idempotency-Key</code> and order by <code>at</code>.</li><li>Only users your app knows (it has their id from a launch) are reported.</li><li>The callbacks are an optimisation, not the truth: every <code>GET /v1/users/{alias}/profile</code> re-checks consent.</li></ul>
 <h3 id="callback-request">The request Adera sends</h3>
 <p>Real capture (the receiver was on the developer machine; the signature is shortened):</p>
 <pre class="out nocopy"><code>POST /adera/hook?src=capture HTTP/1.1

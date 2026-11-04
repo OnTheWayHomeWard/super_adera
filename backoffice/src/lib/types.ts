@@ -74,6 +74,8 @@ export interface LimitRow {
 export interface EnvironmentRow {
   environment: Environment;
   allowedCidrs: string[];
+  /** Where consent callbacks are sent in this environment; null = none. */
+  callbackUrl: string | null;
 }
 
 export interface PaymentRow {

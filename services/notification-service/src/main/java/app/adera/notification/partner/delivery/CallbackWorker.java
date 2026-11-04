@@ -56,7 +56,7 @@ public class CallbackWorker {
 				  SELECT id FROM callback
 				  WHERE (status = 'PENDING' AND next_attempt_at <= now()) OR (status = 'PROCESSING' AND locked_until < now())
 				  ORDER BY next_attempt_at LIMIT 20 FOR UPDATE SKIP LOCKED)
-				RETURNING id, url, payload::text AS payload, attempts, created_at""").query().listOfRows();
+				RETURNING id, url, payload::text AS payload, attempts, created_at, event""").query().listOfRows();
 		for (Map<String, Object> row : due) {
 			UUID id = (UUID) row.get("id");
 			int attempts = ((Number) row.get("attempts")).intValue();
@@ -69,7 +69,7 @@ public class CallbackWorker {
 			}
 			CallbackSender.Outcome outcome;
 			try {
-				outcome = sender.send(id, (String) row.get("url"), (String) row.get("payload"));
+				outcome = sender.send(id, (String) row.get("url"), (String) row.get("payload"), (String) row.get("event"));
 			}
 			catch (RuntimeException e) {
 				log.error("callback {} failed unexpectedly: {}", id, e.toString());

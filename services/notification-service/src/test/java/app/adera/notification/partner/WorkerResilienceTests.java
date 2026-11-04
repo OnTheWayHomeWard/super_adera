@@ -68,7 +68,7 @@ class WorkerResilienceTests {
 		UUID n = notification("SENT", 1, Instant.now().plus(Duration.ofDays(1)));
 		UUID plain = callback(n, "PENDING", 0, Instant.now());
 		UUID asked = callback(n, "PENDING", 0, Instant.now());
-		when(sender.send(any(), anyString(), anyString())).thenAnswer(inv -> new CallbackSender.Outcome(false, false, 503, "http_503", Duration.ZERO));
+		when(sender.send(any(), anyString(), anyString(), anyString())).thenAnswer(inv -> new CallbackSender.Outcome(false, false, 503, "http_503", Duration.ZERO));
 
 		callbacks.runOnce();
 		long wait = ((Number) row("callback", plain).get("wait")).longValue();
@@ -77,7 +77,7 @@ class WorkerResilienceTests {
 
 		// the partner asks for ten minutes
 		jdbc.sql("UPDATE callback SET next_attempt_at = now() - interval '1 second' WHERE id = :id").param("id", asked).update();
-		when(sender.send(any(), anyString(), anyString())).thenAnswer(inv -> new CallbackSender.Outcome(false, false, 429, "http_429", Duration.ofMinutes(10)));
+		when(sender.send(any(), anyString(), anyString(), anyString())).thenAnswer(inv -> new CallbackSender.Outcome(false, false, 429, "http_429", Duration.ofMinutes(10)));
 		callbacks.runOnce();
 		assertThat(((Number) row("callback", asked).get("wait")).longValue()).isBetween(570L, 601L);
 	}
@@ -87,7 +87,7 @@ class WorkerResilienceTests {
 		UUID n = notification("SENT", 1, Instant.now().plus(Duration.ofDays(1)));
 		UUID old = callback(n, "PENDING", 9, Instant.now().minus(Duration.ofHours(25)));
 		UUID tooMany = callback(n, "PENDING", RetryPolicy.MAX_CALLBACK_ATTEMPTS - 1, Instant.now());
-		when(sender.send(any(), anyString(), anyString())).thenAnswer(inv -> new CallbackSender.Outcome(false, false, 500, "http_500"));
+		when(sender.send(any(), anyString(), anyString(), anyString())).thenAnswer(inv -> new CallbackSender.Outcome(false, false, 500, "http_500"));
 		callbacks.runOnce();
 		assertThat(row("callback", old).get("status")).as("past the 24 h window").isEqualTo("FAILED");
 		assertThat(row("callback", tooMany).get("status")).as("attempt cap").isEqualTo("FAILED");
@@ -97,7 +97,7 @@ class WorkerResilienceTests {
 	void aCallbackThatBlowsUpIsBackedOffNotLeftToBeReclaimedEveryMinute() {
 		UUID n = notification("SENT", 1, Instant.now().plus(Duration.ofDays(1)));
 		UUID poison = callback(n, "PENDING", 0, Instant.now());
-		when(sender.send(any(), anyString(), anyString())).thenThrow(new IllegalStateException("boom"));
+		when(sender.send(any(), anyString(), anyString(), anyString())).thenThrow(new IllegalStateException("boom"));
 		callbacks.runOnce();
 		Map<String, Object> r = row("callback", poison);
 		assertThat(r.get("status")).isEqualTo("PENDING");

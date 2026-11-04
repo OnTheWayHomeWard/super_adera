@@ -30,8 +30,14 @@ public class RegistryClient {
 	public record Limit(String channel, Integer maxPerUserPerDay, Integer maxPerDay, Integer maxDistinctUsersPerDay, Long maxTotal) {
 	}
 
+	/** {@code callbackUrl}: where this app wants consent callbacks in this deployment's environment, or null. */
 	public record AppContext(UUID appId, String slug, String status, String environment, boolean usable, String denyReason,
-			List<String> grantedCapabilities, List<Limit> notificationLimits, List<String> allowedCidrs) {
+			List<String> grantedCapabilities, List<Limit> notificationLimits, List<String> allowedCidrs, String callbackUrl) {
+
+		public AppContext(UUID appId, String slug, String status, String environment, boolean usable, String denyReason,
+				List<String> grantedCapabilities, List<Limit> notificationLimits, List<String> allowedCidrs) {
+			this(appId, slug, status, environment, usable, denyReason, grantedCapabilities, notificationLimits, allowedCidrs, null);
+		}
 
 		public Optional<Limit> limit(String channel) {
 			return notificationLimits.stream().filter(l -> l.channel().equals(channel)).findFirst();
