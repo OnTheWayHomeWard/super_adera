@@ -125,12 +125,13 @@ docker compose -f docker-compose.yml -f docker-compose.staging.yml restart apisi
 <section><h2 id="server">6. The server</h2>
 <ul>
 <li>DigitalOcean droplet, 4 vCPU, 8 GB RAM, 160 GB disk, 4 GB swap, Ubuntu, Docker Engine with the compose plugin, automatic security updates.</li>
-<li>Firewall (ufw): only 22, 9080, 8090, 8025, 8091 and 9000 are open. Every other container port is bound to <code>127.0.0.1</code> exactly as on a laptop.</li>
+<li>Firewall (ufw): only 22, 9080, 8090, 8025, 8091 and 9000 are open from outside (plus the Docker networks to the host, for test callback receivers). Every other container port is bound to <code>127.0.0.1</code> exactly as on a laptop.</li>
 <li>Code in <code>/opt/adera</code> (a checkout of the <code>staging</code> branch, owned by <code>deploy</code>); the tracked <code>.env</code> is the laptop's. Not in git, only on the server: <code>deploy/staging/htpasswd</code> (the inbox login), <code>deploy/staging/CREDENTIALS.md</code>, and the seeding script's partner keys in <code>tests/e2e/.seed-keys/</code>.</li>
 <li>Logins: <code>root</code> (the owner's SSH key, host alias <code>bellme-adera-staging</code>) and <code>deploy</code> (the CI key and the owner's key).</li>
 </ul>
 <h3>The compose files</h3>
 <p>The server runs <code>docker-compose.yml</code> plus <code>docker-compose.staging.yml</code>. The override takes our four images from GHCR, adds the <code>edge</code> container (nginx: docs on 8090, Mailpit on 8025 and SMS on 8091 behind basic auth), publishes the gateway, the edge ports and the object store on the public address, and points Kratos' public URL and the signed image links at <code>157.245.133.250</code>.</p>
+<p>For the <code>deploy</code> user, <code>COMPOSE_FILE</code> is set in <code>~/.bashrc</code>, so plain <code>docker compose</code> in <code>/opt/adera</code> uses both files. As root, use the alias:</p>
 <pre><code>cd /opt/adera
 alias dc='docker compose -f docker-compose.yml -f docker-compose.staging.yml'
 dc ps
@@ -161,7 +162,20 @@ curl -X DELETE http://127.0.0.1:4434/admin/identities/&lt;identity-id&gt;/creden
 </ul></section>
 
 <section><h2 id="verified">9. Checked at setup (2026-11-05)</h2>
-<div id="verified-results"><p>Filled in at the end of the setup.</p></div></section>
+<div id="verified-results">
+<div class="table-wrap"><table>
+<thead><tr><th>Check</th><th>Result</th></tr></thead>
+<tbody>
+<tr><td>Data copied from the laptop</td><td>839 tables in the five databases, 5,039 rows: identical table by table (compared right after the copy, before any test)</td></tr>
+<tr><td>CI on master</td><td>registry-service 106, user-service 130, notification-service 136 tests, backoffice 94 tests and build, docs check: all pass</td></tr>
+<tr><td>CI/CD on staging</td><td>Three runs (first deploy, an nginx fix, this page): tests, five images to GHCR, deploy with health checks, all green</td></tr>
+<tr><td>Containers</td><td>All 19 long-running containers up, plus the two one-shot jobs <code>kratos-migrate</code> and <code>rabbitmq-setup</code> exited 0. About 3.6 GB RAM in use, swap unused, 16 GB disk used</td></tr>
+<tr><td>From outside</td><td>Backoffice, docs and JWKS answer 200; Mailpit and the SMS page answer 401 without the login and 200 with it; a demo user (+251900000001) signs in with a password, reads <code>/api/v1/me</code> and the catalog, and the signed logo link loads (200 image/png); internal ports (5432, 6379, 3001, 8080, 4434, 8085, 15672, 9001) are closed</td></tr>
+<tr><td>End-to-end on the server</td><td><code>journey.py</code> 63/63, <code>admin_users.py</code> 13/13, <code>partner.py</code> 66/66, <code>permissions.py</code> 55/55, <code>seed_scenarios.py --check</code> 41 passed and the same 2 known failures as on the laptop (the demo-paused rating and reviews)</td></tr>
+</tbody></table></div>
+<p>The tests added only log, flow and session rows (Kratos flows and sessions, send log, code requests, 124 rows in all) and one inbox item. Users, identities, apps, reviews and consents are still equal to the laptop's.</p>
+<p>Firewall note: the partner and permissions scripts start a callback receiver on the server itself, and the containers call it. ufw allows traffic from the Docker networks (<code>172.16.0.0/12</code>) to the host for that; nothing from outside is opened by it.</p>
+</div></section>
 
 <div class="pager"><a class="prev" href="14-bridge-consent.html"><small>Previous</small>14. Bridge and consent</a><a class="next" href="../index.html"><small>Back to</small>Home / contents</a></div>
 <p class="footer">Adera backend documentation &middot; staging set up 2026-11-05 &middot; <a href="../index.html">contents</a></p>
