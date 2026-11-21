@@ -53,3 +53,41 @@ services:
       - "${STAGING_PUBLIC_IP:-157.245.133.250}:8090:8090"
       - "${STAGING_PUBLIC_IP:-157.245.133.250}:8025:8025"
       - "${STAGING_PUBLIC_IP:-157.245.133.250}:8091:8091"
+
+  # Bridge Lab, the test mini app (bridge-lab/). It needs bridge-lab/.local (config.json and its private key), which
+  # bridge-lab/seed.py writes on the server; restart this container after a seed run.
+  bridge-lab:
+    image: ghcr.io/onthewayhomeward/adera-bridge-lab:${ADERA_IMAGE_TAG:-staging}
+    restart: unless-stopped
+    environment:
+      ADERA_BASE: http://apisix:9080
+      ADERA_ENV: dev
+      BRIDGE_LAB_CONFIG: /app/.local/config.json
+      BRIDGE_LAB_PUBLIC_URL: https://bridge-lab.157-245-133-250.sslip.io
+      BRIDGE_LAB_ALT_URL: https://bridge-lab-alt.157-245-133-250.sslip.io
+      BRIDGE_LAB_FOREIGN_URL: https://bridge-lab-foreign.157-245-133-250.sslip.io
+      ADERA_STORAGE_PREFIX: http://157.245.133.250:9000/adera-media/
+      ADERA_STORAGE_INTERNAL: http://rustfs:9000
+      GRAFANA_URL: ""
+      DOCS_DIR: /app/docs
+    volumes:
+      - ./bridge-lab/.local:/app/.local:ro
+      - ./docs/guides:/app/docs:ro
+
+  # HTTPS (Let's Encrypt) for Bridge Lab only, on free sslip.io names; see deploy/staging/Caddyfile.
+  caddy:
+    image: caddy:2.10.2-alpine
+    restart: unless-stopped
+    depends_on:
+      - bridge-lab
+    volumes:
+      - ./deploy/staging/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    ports:
+      - "${STAGING_PUBLIC_IP:-157.245.133.250}:80:80"
+      - "${STAGING_PUBLIC_IP:-157.245.133.250}:443:443"
+
+volumes:
+  caddy-data:
+  caddy-config:

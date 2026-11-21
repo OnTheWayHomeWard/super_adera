@@ -1,0 +1,16 @@
+# HTTPS for the test mini app Bridge Lab (a mini app's entryUrl must be https). Certificates come from Let's Encrypt
+# automatically; the names are free sslip.io names that resolve to the server's IP. Only Bridge Lab is served here.
+# The registered origin (entryUrl and the first allowed origin).
+bridge-lab.157-245-133-250.sslip.io {
+	reverse_proxy bridge-lab:8095
+}
+
+# The second allowed origin (Bridge Lab's alternate port), for the origin-rule tests.
+bridge-lab-alt.157-245-133-250.sslip.io {
+	reverse_proxy bridge-lab:8096
+}
+
+# NOT registered on purpose: the origin-rule tests check the super app gives this page no bridge.
+bridge-lab-foreign.157-245-133-250.sslip.io {
+	reverse_proxy bridge-lab:8095
+}
