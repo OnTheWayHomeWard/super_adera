@@ -511,6 +511,32 @@ routes:
         redis_username: apisix
         redis_password: ${{APISIX_REDIS_PASSWORD}}
     upstream_id: registry-service
+  # ---- Banners for the super app: PUBLIC (no sign-in), so the home screen can show them before login ----------------
+  # Read only. No forward-auth; the gateway secret proves the request came through here, and identity headers a client
+  # might send are dropped (the answer is the same for everyone and may be cached for 60 s).
+  - id: banners-public
+    uris: ["/api/v1/banners"]
+    methods: [GET]
+    priority: 20
+    plugins:
+      proxy-rewrite:
+        headers:
+          set:
+            X-Gateway-Secret: ${{USER_GATEWAY_SECRET}}
+          remove: ["X-User-Id", "X-Staff-Id", "X-Staff-Role", "Authorization", "Cookie"]
+      limit-count:
+        count: 300
+        time_window: 60
+        key_type: var
+        key: remote_addr
+        rejected_code: 429
+        policy: redis
+        redis_host: redis
+        redis_port: 6379
+        redis_username: apisix
+        redis_password: ${{APISIX_REDIS_PASSWORD}}
+    upstream_id: registry-service
+
   # ---- Partner API: mini-app backends send notifications. No login here: the service checks the request signature. ---
   - id: partner-api
     uris: ["/v1/*"]

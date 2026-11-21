@@ -44,6 +44,14 @@ class TrustAndBootstrapTests {
 	private static final String STAFF = "X-Staff-Id";
 
 	@Test
+	void theBannerListNeedsTheGatewayButNoUser() throws Exception {
+		mvc.perform(get("/api/v1/banners")).andExpect(status().isUnauthorized());
+		mvc.perform(get("/api/v1/banners").header("X-Gateway-Secret", "wrong")).andExpect(status().isUnauthorized());
+		mvc.perform(get("/api/v1/banners").header("X-Gateway-Secret", "gw-secret")).andExpect(status().isOk());
+		mvc.perform(get("/api/v1/apps").header("X-Gateway-Secret", "gw-secret")).andExpect(status().isUnauthorized());
+	}
+
+	@Test
 	void adminApiNeedsTheGatewaySecret() throws Exception {
 		UUID id = UUID.randomUUID();
 		mvc.perform(get("/admin/api/v1/apps").header(STAFF, id.toString()).header("X-Staff-Role", "SUPER_ADMIN")).andExpect(status().isUnauthorized());

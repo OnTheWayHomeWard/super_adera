@@ -18,7 +18,8 @@ import org.springframework.web.filter.OncePerRequestFilter;
  * Decides who may call what, by path:
  * <ul>
  * <li>{@code /admin/api/**}: via the gateway (shared secret) with a verified staff id and role;</li>
- * <li>{@code /api/**}: via the gateway with a verified user id;</li>
+ * <li>{@code /api/**}: via the gateway with a verified user id, except the public banner list {@code /api/v1/banners},
+ * which needs only the gateway (it is shown before sign-in);</li>
  * <li>{@code /internal/staff/verify}: via the gateway;</li>
  * <li>{@code /internal/apps/**}, {@code /internal/partner-keys/**}: other services, with the internal secret.</li>
  * </ul>
@@ -29,6 +30,8 @@ public class TrustFilter extends OncePerRequestFilter {
 
 	public static final String GATEWAY_SECRET = "X-Gateway-Secret";
 	public static final String INTERNAL_SECRET = "X-Internal-Secret";
+	/** User-facing paths that need no signed-in user (still only through the gateway). */
+	static final java.util.Set<String> PUBLIC_USER_PATHS = java.util.Set.of("/api/v1/banners", "/api/v1/banners/");
 
 	private final byte[] gatewaySecret;
 	private final byte[] internalSecret;
@@ -47,6 +50,12 @@ public class TrustFilter extends OncePerRequestFilter {
 		String path = request.getRequestURI();
 		if (path.startsWith("/admin/api/")) {
 			if (!secretOk(request, GATEWAY_SECRET, gatewaySecret) || !staffHeadersOk(request)) {
+				reject(response);
+				return;
+			}
+		}
+		else if (PUBLIC_USER_PATHS.contains(path)) {
+			if (!secretOk(request, GATEWAY_SECRET, gatewaySecret)) {
 				reject(response);
 				return;
 			}

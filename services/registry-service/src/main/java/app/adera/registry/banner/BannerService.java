@@ -379,6 +379,21 @@ public class BannerService {
 		return out;
 	}
 
+	/** What users see now: only visible banners, highest priority first, then newest. */
+	@Transactional(readOnly = true)
+	public List<BannerViews.PublicBanner> visibleNow(Banner.Placement placement, Banner.Category category, int limit) {
+		Instant now = clock.instant();
+		List<Banner> list = banners.findAll(visibleSpec(placement, category, now), PageRequest.of(0, limit, ORDER)).getContent();
+		Map<UUID, MiniApp> appById = appsOf(list);
+		return list.stream().map(b -> {
+			MiniApp app = b.getAppId() == null ? null : appById.get(b.getAppId());
+			BannerViews.PublicApp appView = app == null ? null
+					: new BannerViews.PublicApp(app.getId(), app.getSlug(), app.getName(), appService.logoUrl(app));
+			return new BannerViews.PublicBanner(b.getId(), b.getTitle(), b.getSubtitle(), b.getPlacement().name(), b.getCategory().name(),
+					b.getActionType().name(), b.getTarget(), appView, images(b), b.getPriority(), b.getStartsAt(), b.getEndsAt());
+		}).toList();
+	}
+
 	/** What the backoffice form needs to check before saving. */
 	public Map<String, Object> settings() {
 		Map<String, Object> out = new LinkedHashMap<>();
