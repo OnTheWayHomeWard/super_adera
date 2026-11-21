@@ -33,7 +33,7 @@ class KratosClientSessionsTest {
 		server.start();
 		String url = "http://127.0.0.1:" + server.getAddress().getPort();
 		RegistryProperties props = new RegistryProperties("", "", true, "", "dev", new RegistryProperties.Kratos(url, url),
-				new RegistryProperties.Storage("", "", "", "", "", "", 60), new RegistryProperties.Logo(1, 1));
+				new RegistryProperties.Storage("", "", "", "", "", "", 60), new RegistryProperties.Logo(1, 1), new RegistryProperties.Banner("", 1));
 		return new KratosClient(props, RestClient.builder());
 	}
 

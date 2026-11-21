@@ -61,3 +61,7 @@ adera:
     logo:
       max-bytes: ${LOGO_MAX_BYTES:2097152}
       max-px: ${LOGO_MAX_PX:512}
+    banner:
+      # Domains an EXTERNAL banner may link to, comma separated; each also allows its subdomains. Empty = no external links.
+      external-domains: ${BANNER_EXTERNAL_DOMAINS:}
+      max-bytes: ${BANNER_MAX_BYTES:4194304}

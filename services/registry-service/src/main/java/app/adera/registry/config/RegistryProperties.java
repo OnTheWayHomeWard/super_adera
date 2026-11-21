@@ -12,7 +12,8 @@ public record RegistryProperties(
 		@DefaultValue("dev") String environment,
 		@DefaultValue Kratos kratos,
 		@DefaultValue Storage storage,
-		@DefaultValue Logo logo) {
+		@DefaultValue Logo logo,
+		@DefaultValue Banner banner) {
 
 	public record Kratos(
 			@DefaultValue("http://localhost:4433") String publicUrl,
@@ -32,6 +33,15 @@ public record RegistryProperties(
 	public record Logo(
 			@DefaultValue("2097152") int maxBytes,
 			@DefaultValue("512") int maxPx) {
+	}
+
+	/**
+	 * @param externalDomains comma-separated domains an EXTERNAL banner may link to (each with its subdomains); empty = none
+	 * @param maxBytes the largest image upload accepted
+	 */
+	public record Banner(
+			@DefaultValue("") String externalDomains,
+			@DefaultValue("4194304") int maxBytes) {
 	}
 
 }

@@ -17,6 +17,8 @@ services:
     image: ghcr.io/onthewayhomeward/adera-registry-service:${ADERA_IMAGE_TAG:-staging}
     environment:
       STORAGE_PUBLIC_ENDPOINT: http://${STAGING_PUBLIC_IP:-157.245.133.250}:9000
+      # Domains EXTERNAL banners may link to: the tracked .env's list (the server has the same file), with the same default.
+      BANNER_EXTERNAL_DOMAINS: ${BANNER_EXTERNAL_DOMAINS:-adera.et,example.com}
   backoffice:
     image: ghcr.io/onthewayhomeward/adera-backoffice:${ADERA_IMAGE_TAG:-staging}
     environment:

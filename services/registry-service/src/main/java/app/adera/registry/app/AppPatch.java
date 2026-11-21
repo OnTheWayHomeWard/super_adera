@@ -170,8 +170,9 @@ public final class AppPatch {
 		return new AppPatch(out);
 	}
 
+	/** A language object {"en": .., "am": .., "om": ..}; adds a message to errors and returns null when it is not one. Empty texts are dropped. */
 	@SuppressWarnings("unchecked")
-	private static Map<String, String> i18n(Object value, String field, int max, Map<String, String> errors) {
+	public static Map<String, String> i18n(Object value, String field, int max, Map<String, String> errors) {
 		if (!(value instanceof Map<?, ?> map)) {
 			errors.put(field, "must be an object like {\"en\": \"...\", \"am\": \"...\"}");
 			return null;

@@ -252,6 +252,7 @@ services:
       STORAGE_PUBLIC_ENDPOINT: ${STORAGE_PUBLIC_ENDPOINT:-http://127.0.0.1:9000}
       STORAGE_ACCESS_KEY: ${RUSTFS_ACCESS_KEY}
       STORAGE_SECRET_KEY: ${RUSTFS_SECRET_KEY}
+      BANNER_EXTERNAL_DOMAINS: ${BANNER_EXTERNAL_DOMAINS:-}   # where EXTERNAL banners may link (comma separated, subdomains included)
       OTEL_TRACES_ENDPOINT: http://otel-collector:4318/v1/traces
     ports:
       - "127.0.0.1:8087:8080"   # dev only; staff and users go through the gateway
