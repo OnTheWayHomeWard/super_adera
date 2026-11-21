@@ -164,6 +164,8 @@
 <tr><td><code>KRATOS_PUBLIC_URL</code>, <code>KRATOS_ADMIN_URL</code></td><td>localhost:4433 / 4434</td><td>yes</td><td>no</td><td>Kratos APIs</td><td>compose</td></tr>
 <tr><td><code>STORAGE_ENDPOINT</code>, <code>STORAGE_PUBLIC_ENDPOINT</code>, <code>STORAGE_ACCESS_KEY</code>, <code>STORAGE_SECRET_KEY</code>, <code>STORAGE_BUCKET</code>, <code>STORAGE_REGION</code>, <code>STORAGE_PRESIGN_MINUTES</code></td><td>as user-service</td><td>yes</td><td>keys yes</td><td>RustFS for logos</td><td>compose / default</td></tr>
 <tr><td><code>LOGO_MAX_BYTES</code>, <code>LOGO_MAX_PX</code></td><td><code>2097152</code>, <code>512</code></td><td>no</td><td>no</td><td>Logo limits</td><td>default</td></tr>
+<tr><td><code>BANNER_EXTERNAL_DOMAINS</code></td><td><code>adera.et,example.com</code> (in <code>.env</code>)</td><td>no</td><td>no</td><td>Comma-separated domains an <code>EXTERNAL</code> banner may link to (each with its subdomains); empty = no external banners. registry-service; also set in <code>docker-compose.staging.yml</code></td><td><code>.env</code></td></tr>
+<tr><td><code>BANNER_MAX_BYTES</code></td><td><code>4194304</code></td><td>no</td><td>no</td><td>Largest banner image upload</td><td>default</td></tr>
 <tr><td><code>TRACING_SAMPLE_RATE</code>, <code>OTEL_TRACES_ENDPOINT</code></td><td><code>1.0</code>, localhost collector</td><td>no</td><td>no</td><td>Traces</td><td>compose sets the endpoint</td></tr>
 </tbody></table></div>
 
@@ -372,6 +374,7 @@
 <tr><td><code>only_super_admin_can_revive_killed_app</code></td><td>403</td><td>Setting a KILLED app to any other status as ADMIN.</td></tr>
 <tr><td><code>slug_taken</code></td><td>409</td><td>Creating an app whose slug exists.</td></tr>
 <tr><td><code>not_ready_for_live</code></td><td>409</td><td>Setting LIVE without a logo and/or <code>supportEmail</code>; <code>missing</code> lists them, comma separated.</td></tr>
+<tr><td><code>not_ready_to_publish</code></td><td>409</td><td>Publishing a banner that has no image yet; <code>fields.missing</code> = <code>image</code>.</td></tr>
 <tr><td><code>too_many_active_keys</code></td><td>409</td><td>Registering or generating a sixth ACTIVE key in an environment; <code>max</code> is 5.</td></tr>
 <tr><td><code>cannot_demote_self</code></td><td>409</td><td>A super admin lowering or disabling themselves.</td></tr>
 <tr><td><code>last_super_admin</code></td><td>409</td><td>Removing or disabling the last active super admin.</td></tr>

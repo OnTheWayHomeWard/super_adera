@@ -441,6 +441,21 @@ usage_total:  app 2398a5ca-... | PROD | SMS | total 1</code></pre>
 <pre class="out"><code>id 2398a5ca-1f2e-4b1f-9470-8cfbd543c643   slug demo-rides   name {"en":"Demo Rides","am":"..."}   status LIVE   priority 100
 logo_image_id 8b799f2c-7806-4b4a-9f7e-07e75dd9c541   markets ["ET"]   rating_avg 4.50   rating_count 2   brand_color #1F6FEB</code></pre>
 
+<h3 id="reg-banner"><code>banner</code> (V9, 2026-11-21)</h3>
+<p><strong>Purpose:</strong> promotional banners shown in the super app (<a href="16-banners.html">section 16</a>). <strong>Why one switch:</strong> staff set only <code>status</code>; whether a banner shows is computed at read time from the times and the linked app, so nothing has to run when a banner starts or ends. <strong>Written by:</strong> registry-service (<code>BannerService</code>, staff API). <strong>Read by:</strong> registry-service (public <code>/api/v1/banners</code>, admin API).</p>
+<div class="table-wrap"><table><thead><tr><th>Column</th><th>Type</th><th>Meaning and why</th></tr></thead><tbody>
+<tr><td><code>id</code></td><td>uuid PK</td><td>Banner id.</td></tr>
+<tr><td><code>title</code>, <code>subtitle</code></td><td>jsonb</td><td>Per language <code>{"en","am","om"}</code>; title needs <code>en</code>; subtitle defaults to <code>{}</code>.</td></tr>
+<tr><td><code>placement</code>, <code>category</code></td><td>varchar(20), CHECK</td><td><code>HOME_HERO|FEATURED|PROMOTIONS|CATALOG_TOP</code>; <code>PROMOTION|FEATURED_APP|ANNOUNCEMENT|EVENT</code>.</td></tr>
+<tr><td><code>app_id</code></td><td>uuid FK <code>mini_app</code>, ON DELETE CASCADE</td><td>Linked app; required (CHECK) for <code>FEATURED_APP</code> or a <code>MINI_APP</code> action.</td></tr>
+<tr><td><code>action_type</code>, <code>target</code></td><td>varchar(10) CHECK, varchar(500)</td><td>What a tap does and where; <code>NONE</code> must have no target (CHECK).</td></tr>
+<tr><td><code>image_id</code>, <code>image_variants</code></td><td>uuid, jsonb</td><td>Files <code>banners/{id}/{image_id}/{small|medium|large}.jpg</code> in RustFS; <code>image_variants</code> holds each size's width and height.</td></tr>
+<tr><td><code>starts_at</code>, <code>ends_at</code></td><td>timestamptz</td><td>The window; <code>ends_at</code> null = open-ended; CHECK <code>ends_at &gt; starts_at</code>.</td></tr>
+<tr><td><code>priority</code></td><td>integer 0 to 100000</td><td>Higher first.</td></tr>
+<tr><td><code>status</code></td><td>varchar(10), CHECK</td><td><code>DRAFT|PUBLISHED|PAUSED</code>. "Ended" is never stored.</td></tr>
+<tr><td><code>created_by</code>, <code>updated_by</code>, <code>created_at</code>, <code>updated_at</code></td><td>uuid, timestamptz</td><td>Staff ids and times.</td></tr>
+</tbody></table></div>
+<p>Indexes: <code>idx_banner_public</code> (placement, priority DESC, created_at DESC) WHERE status = 'PUBLISHED'; <code>idx_banner_app</code>.</p>
 <h3 id="reg-capability"><code>app_capability</code></h3>
 <p><strong>Purpose:</strong> which data and services an app may ask for. <strong>Why:</strong> the "admin grants" gate of a two-gate model (the user-consent gate comes with the frontend bridge, not built yet). The <code>purpose</code> text (one sentence per language, formerly column <code>reason</code>; migration <code>V7__capability_purpose.sql</code> renames it) is what users see in the permission dialog; changes are audited with the old and new text. Notification sending is gated by <code>notify.sms</code>, <code>notify.email</code>, <code>notify.inapp</code>. <strong>Written by:</strong> registry-service (<code>AppConfigService</code>, audited as <code>capability.set</code>). <strong>Read by:</strong> registry-service; notification-service via <code>/internal/apps/{id}/context</code> (<code>capability_not_granted</code>). Columns: <code>app_id</code> uuid FK cascade, <code>capability</code> varchar(40), <code>state</code> (<code>GRANTED | DENIED | SUSPENDED</code>), <code>reason</code> jsonb (per language), <code>updated_by</code>, <code>updated_at</code>; PK <code>(app_id, capability)</code>. The catalog of capability names is in <a href="10-reference.html#capabilities">the reference</a>.</p>
 <p><span class="badge partial">illustrative example</span></p>

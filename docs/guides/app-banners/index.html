@@ -26,6 +26,13 @@
 <h2 id="overview">Overview</h2>
 <p>A banner is a picture with a title (and maybe a subtitle) shown in one of four places in the app. Tapping it opens a mini app at a given page, a screen of the super app, a web page on an approved domain, or nothing. The app asks one public endpoint for the banners of a placement; the server answers with only the banners that should be showing <em>right now</em>, highest priority first, with three image sizes and everything needed to act on a tap.</p>
 <div class="callout why"><span class="label">Why it is built this way</span><p>Staff schedule banners ahead of time and pause them in an emergency, and a banner for a mini app must vanish when that app is suspended. If the app decided any of that, old app versions would show stale or unsafe banners. So the server decides what is visible at every request and the app renders exactly what it gets.</p></div>
+<h2 id="status">What exists</h2>
+<div class="table-wrap"><table><thead><tr><th>Part</th><th>State</th></tr></thead><tbody>
+<tr><td>The public list <code>GET /api/v1/banners</code> (no sign-in), filters, image sizes, cache header</td><td><span class="badge built">built</span></td></tr>
+<tr><td>Staff create, schedule, publish, pause and delete banners in the backoffice</td><td><span class="badge built">built</span></td></tr>
+<tr><td>Rendering and tap handling in the super app (this guide)</td><td><span class="badge notyet">to build in the app</span></td></tr>
+</tbody></table></div>
+<p>On the dev stack six demo banners exist (titles start with "Demo: "): four showing, one in each placement, plus a scheduled and an ended one that the list does not return.</p>
 <h2 id="conventions">Conventions</h2>
 <ul>
 <li><strong>Base URL.</strong> Everything goes through the gateway: <code>$GATEWAY</code> is <code>http://127.0.0.1:9080</code> on the dev stack (the staging server and the public API host later). Paths are exactly what the client calls.</li>
@@ -53,7 +60,7 @@
 </tbody></table></div>
 
 <div class="pager"><span class="placeholder"></span><a class="next" href="fetching.html"><small>Next</small>Fetching banners</a></div>
-<p class="footer">Adera guides &middot; banners &middot; design written 2026-11-21, before the code; illustrative examples are marked</p>
+<p class="footer">Adera guides &middot; banners &middot; samples captured against the running dev stack on 2026-11-21</p>
 </main>
 </div>
 <script src="app.js"></script>

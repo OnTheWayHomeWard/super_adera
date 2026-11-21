@@ -71,7 +71,7 @@
 <h1>16. Banners</h1>
 <p class="lead">Promotional banners in the super app: a picture with a title, shown in one of four places, that opens a mini app, a super-app screen or a web page when tapped. Staff manage them in the backoffice; the super app reads the ones that are showing right now with one public call.</p>
 
-<div class="callout warn"><span class="label">Status</span><p><span class="badge notyet">design, not built yet</span> This page is the agreed design, written before the code. The examples marked "illustrative" show the planned shapes; they are replaced with answers captured from the running stack once the feature is built. The frontend guide is <code>docs/guides/app-banners/</code>.</p></div>
+<div class="callout ok"><span class="label">Status</span><p><span class="badge built">built 2026-11-21</span> Built as designed below, in eight commits (design, table and rules, staff API, images, public API and gateway route, backoffice, seed and e2e, these samples). The examples are real answers from the running dev stack. The frontend guide is <code>docs/guides/app-banners/</code>; every staff endpoint with real requests and answers is in <a href="08b-staff-api.html#banners">8b. Staff API, Banners</a>.</p></div>
 
 <section><h2 id="summary">1. Summary</h2>
 <ul>
@@ -157,30 +157,57 @@
 <tr><td><code>category</code></td><td>enum</td><td>no</td><td>Only this category.</td></tr>
 <tr><td><code>limit</code></td><td>1 to 50</td><td>no (10)</td><td>At most this many, highest priority first.</td></tr>
 </tbody></table></div>
-<p>Order: <code>priority</code> descending, then newest first. Unknown enum values or a bad limit answer <code>400 validation_failed</code> with the field. Illustrative answer (planned shape):</p>
-<pre class="out nocopy"><code>HTTP 200
-Cache-Control: public, max-age=60
+<p>Order: <code>priority</code> descending, then newest first. Unknown enum values or a bad limit answer <code>400 validation_failed</code> with the field. Real answer for the seeded Demo Ride banner (signed links shortened: <code>X-Amz-Date</code> and <code>X-Amz-Signature</code> replaced by <code>...</code>):</p><pre><code>curl -sS -i "$GATEWAY/api/v1/banners?placement=HOME_HERO&amp;limit=5"</code></pre><pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+Cache-Control: max-age=60, public
+X-RateLimit-Limit: 300
 
 [
   {
-    "id": "&lt;uuid&gt;",
-    "title": {"en": "Your first ride is on us"},
-    "subtitle": {"en": "Up to 150 birr off"},
-    "placement": "HOME_HERO",
-    "category": "FEATURED_APP",
-    "actionType": "MINI_APP",
-    "target": "/promo/first-ride",
-    "app": {"id": "&lt;uuid&gt;", "slug": "demo-ride", "name": {"en": "Ride Hailing"}, "logoUrl": "&lt;signed link&gt;"},
-    "images": {
-      "small":  {"url": "&lt;signed link&gt;", "width": 480, "height": 200},
-      "medium": {"url": "&lt;signed link&gt;", "width": 960, "height": 400},
-      "large":  {"url": "&lt;signed link&gt;", "width": 1200, "height": 500}
+    &quot;id&quot;: &quot;1889a808-f0c3-46ba-808f-b573d92b7b48&quot;,
+    &quot;title&quot;: {
+      &quot;am&quot;: &quot;ማሳያ፦ የመጀመሪያ ጉዞዎ በእኛ ነው&quot;,
+      &quot;en&quot;: &quot;Demo: Your first ride is on us&quot;
     },
-    "priority": 100,
-    "startsAt": "2026-11-20T00:00:00Z",
-    "endsAt": null
+    &quot;subtitle&quot;: {
+      &quot;en&quot;: &quot;Up to 150 birr off your first Ride Hailing trip&quot;
+    },
+    &quot;placement&quot;: &quot;HOME_HERO&quot;,
+    &quot;category&quot;: &quot;FEATURED_APP&quot;,
+    &quot;actionType&quot;: &quot;MINI_APP&quot;,
+    &quot;target&quot;: &quot;/promo/first-ride&quot;,
+    &quot;app&quot;: {
+      &quot;id&quot;: &quot;4e831b72-a33b-4d93-a7ba-65e19b9dbd0a&quot;,
+      &quot;slug&quot;: &quot;demo-ride&quot;,
+      &quot;name&quot;: {
+        &quot;am&quot;: &quot;የመኪና ጥሪ&quot;,
+        &quot;en&quot;: &quot;Ride Hailing&quot;
+      },
+      &quot;logoUrl&quot;: &quot;http://127.0.0.1:9000/adera-media/apps/4e831b72-a33b-4d93-a7ba-65e19b9dbd0a/logo/13fa5c73-6a1e-494c-ab25-3d4b4dc9641e.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&amp;X-Amz-Date=...&amp;X-Amz-Expires=3600&amp;X-Amz-Signature=...&quot;
+    },
+    &quot;images&quot;: {
+      &quot;small&quot;: {
+        &quot;url&quot;: &quot;http://127.0.0.1:9000/adera-media/banners/1889a808-f0c3-46ba-808f-b573d92b7b48/a2dc29f0-496d-4613-9aa3-e5ba9cb9fe9f/small.jpg?X-Amz-Algorithm=AWS4-HMAC-SHA256&amp;X-Amz-Date=...&amp;X-Amz-Expires=3600&amp;X-Amz-Signature=...&quot;,
+        &quot;width&quot;: 480,
+        &quot;height&quot;: 192
+      },
+      &quot;medium&quot;: {
+        &quot;url&quot;: &quot;http://127.0.0.1:9000/adera-media/banners/1889a808-f0c3-46ba-808f-b573d92b7b48/a2dc29f0-496d-4613-9aa3-e5ba9cb9fe9f/medium.jpg?X-Amz-Algorithm=AWS4-HMAC-SHA256&amp;X-Amz-Date=...&amp;X-Amz-Expires=3600&amp;X-Amz-Signature=...&quot;,
+        &quot;width&quot;: 960,
+        &quot;height&quot;: 384
+      },
+      &quot;large&quot;: {
+        &quot;url&quot;: &quot;http://127.0.0.1:9000/adera-media/banners/1889a808-f0c3-46ba-808f-b573d92b7b48/a2dc29f0-496d-4613-9aa3-e5ba9cb9fe9f/large.jpg?X-Amz-Algorithm=AWS4-HMAC-SHA256&amp;X-Amz-Date=...&amp;X-Amz-Expires=3600&amp;X-Amz-Signature=...&quot;,
+        &quot;width&quot;: 1600,
+        &quot;height&quot;: 640
+      }
+    },
+    &quot;priority&quot;: 100,
+    &quot;startsAt&quot;: &quot;2026-11-20T09:22:01Z&quot;,
+    &quot;endsAt&quot;: null
   }
-]</code></pre>
+]</code></pre><pre class="out nocopy"><code>GET /api/v1/banners?placement=SIDEBAR
+HTTP 400  {&quot;error&quot;: &quot;validation_failed&quot;, &quot;fields&quot;: {&quot;placement&quot;: &quot;must be HOME_HERO, FEATURED, PROMOTIONS or CATALOG_TOP&quot;}}</code></pre>
 </div></details>
 </section>
 
@@ -225,12 +252,15 @@ Cache-Control: public, max-age=60
 </section>
 
 <section><h2 id="tests">11. Tests</h2>
-<ul>
-<li>registry-service: validation of every field and combination, the computed state at fixed times, visibility (scheduled, ended, paused, draft, app not LIVE), image sizes, roles, audit rows, the public endpoint without a user id and its cache header.</li>
-<li>backoffice: form payloads, target rules, state tabs, role gating.</li>
-<li><code>tests/e2e/banners.py</code>: the real stack through the gateway with a temporary ADMIN (create, image upload, publish, public fetch with filters, scheduled, ended, paused and suspended-app banners not shown, external domain refused, VIEWER cannot write), cleaning up after itself.</li>
-<li>Seed: one demo banner per placement, a <code>FEATURED_APP</code> banner for Demo Ride, one scheduled and one ended (section 13).</li>
-</ul>
+<div class="table-wrap"><table>
+<thead><tr><th>Suite</th><th>What it covers</th><th>Result (2026-11-21)</th></tr></thead>
+<tbody>
+<tr><td>registry-service <code>./mvnw -B -ntp verify</code></td><td>New: <code>BannerDomainTest</code> (12: state at fixed times, field and combination rules, allow-list), <code>BannerTableTests</code> (2: mapping, database checks), <code>BannerAdminApiTests</code> (10: roles, validation, status, computed-state filters, reorder, delete, audit), <code>BannerImageTests</code> (3: sizes, JPEG, replace, limits), <code>BannerPublicApiTests</code> (3: visibility, app suspension, order, limit, cache header, no user), <code>TrustAndBootstrapTests</code> +1</td><td>137 tests, 0 failures (106 before)</td></tr>
+<tr><td>backoffice <code>npm test</code></td><td>New: <code>lib/banners.test.ts</code> (14: payloads, target rules, tabs, status buttons, image checks, size choice), <code>pages/banners/BannerList.test.tsx</code> (4: VIEWER sees no write buttons, publish needs an image, "not shown" badge, preview language)</td><td>112 tests pass, type check and build pass</td></tr>
+<tr><td><code>backoffice/tests/ui/banners.mjs</code> (Playwright, real browser and stack)</td><td>ADMIN: tabs, client checks, create a MINI_APP banner for Demo Ride with an image, preview, publish (Live), change placement, Live tab, pause and delete. VIEWER: no write buttons, read-only form</td><td>ADMIN 8/8, VIEWER 4/4</td></tr>
+<tr><td><code>tests/e2e/banners.py</code> (through the gateway)</td><td>Temporary ADMIN and VIEWER; image upload and the RustFS links; publish; public list without sign-in with filters, limit and order; scheduled, ended, paused, draft not listed; a PAUSED app hides its banner until LIVE again; external domain refused; reorder; audit; VIEWER 403 on every write; cleans up</td><td>56 passed, 0 failed; nothing left behind</td></tr>
+<tr><td><code>tests/e2e/seed_scenarios.py --check</code></td><td>New banner checks: the four live demo banners are listed without sign-in, the scheduled and ended ones are not, states 4 Live / 1 Scheduled / 1 Ended, VIEWER cannot pause</td><td>all 10 banner checks pass (overall 51 passed, 2 failed: the two known demo-paused rating/review failures recorded on the staging page, unrelated)</td></tr>
+</tbody></table></div>
 </section>
 
 <section><h2 id="decisions">12. Decisions</h2>
@@ -239,13 +269,15 @@ Cache-Control: public, max-age=60
 <li><strong>No "ended" status and no scheduled job.</strong> Start and end are only compared with the clock when reading. Nothing can be late or forgotten, and an ended banner can be extended by editing <code>endsAt</code>.</li>
 <li><strong>Titles in three languages</strong> like app names, English required.</li>
 <li><strong>Priority: higher first.</strong> Reorder sets priorities 10 apart so one banner can later be slotted between two others by hand.</li>
+<li><strong>Images are JPEG</strong> (photos are several times smaller than PNG); transparency is flattened onto white.</li>
+<li><strong>The new-banner form starts at the current minute</strong>, so publishing shows the banner at once (rounding up made it "Scheduled" for up to a minute; found in the browser walk-through).</li>
 <li><strong>Allow-list checked on save only.</strong> Re-checking every banner on every read would hide banners silently; operators who remove a domain should pause the banners that use it.</li>
 <li><strong>The linked app must exist when saving, in any status</strong>, so a banner can be prepared for an app that is not LIVE yet; it shows once the app is LIVE.</li>
 </ul>
 </section>
 
 <div class="pager"><a class="prev" href="15-staging.html"><small>Previous</small>15. Staging server</a><a class="next" href="../index.html"><small>Back to</small>Home / contents</a></div>
-<p class="footer">Adera backend documentation &middot; banners design 2026-11-21 &middot; <a href="../index.html">contents</a></p>
+<p class="footer">Adera backend documentation &middot; banners built 2026-11-21 &middot; <a href="../index.html">contents</a></p>
 </main>
 </div>
 <script src="app.js"></script>

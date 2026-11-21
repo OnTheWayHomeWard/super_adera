@@ -26,12 +26,30 @@
 <tr><td>429</td><td>(gateway page)</td><td>More than 300 calls a minute from one address.</td><td>Hide the banners and try again later.</td></tr>
 <tr><td>5xx</td><td>(any)</td><td>The service is down or restarting.</td><td>Hide the placement; never block the screen.</td></tr>
 </tbody></table></div>
-<h2 id="samples">Samples (illustrative until captured)</h2>
-<pre class="out"><code>HTTP 400
-{"error": "validation_failed", "fields": {"placement": "must be HOME_HERO, FEATURED, PROMOTIONS or CATALOG_TOP"}}</code></pre>
+<h2 id="samples">Real samples</h2>
+<pre class="out"><code>GET /api/v1/banners?placement=SIDEBAR
+HTTP 400
+{
+  &quot;error&quot;: &quot;validation_failed&quot;,
+  &quot;fields&quot;: {
+    &quot;placement&quot;: &quot;must be HOME_HERO, FEATURED, PROMOTIONS or CATALOG_TOP&quot;
+  }
+}
+
+GET /api/v1/banners?limit=0
+HTTP 400
+{
+  "error": "validation_failed",
+  "fields": {
+    "limit": "must be a whole number from 1 to 50"
+  }
+}
+
+POST /api/v1/banners   (the route is read only)
+HTTP 404 (gateway)</code></pre>
 
 <div class="pager"><a class="prev" href="actions.html"><small>Previous</small>Handling a tap</a><a class="next" href="known-issues.html"><small>Next</small>Known issues and not built yet</a></div>
-<p class="footer">Adera guides &middot; banners &middot; design written 2026-11-21, before the code; illustrative examples are marked</p>
+<p class="footer">Adera guides &middot; banners &middot; samples captured against the running dev stack on 2026-11-21</p>
 </main>
 </div>
 <script src="app.js"></script>

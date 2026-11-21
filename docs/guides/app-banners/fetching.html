@@ -32,28 +32,95 @@
 </tbody></table></div>
 <h4>Request</h4>
 <pre><code>curl -sS "$GATEWAY/api/v1/banners?placement=HOME_HERO&amp;limit=5"</code></pre>
-<h4>Answer (illustrative until captured)</h4>
-<pre class="out"><code>HTTP 200
-Cache-Control: public, max-age=60
+<h4>Real answer (the seeded demo banner; signed links shortened)</h4>
+<pre class="out"><code>HTTP/1.1 200 OK
+Content-Type: application/json
+Cache-Control: max-age=60, public
 
 [
   {
-    "id": "&lt;uuid&gt;",
-    "title": {"en": "Your first ride is on us", "am": "..."},
-    "subtitle": {"en": "Up to 150 birr off"},
-    "placement": "HOME_HERO",
-    "category": "FEATURED_APP",
-    "actionType": "MINI_APP",
-    "target": "/promo/first-ride",
-    "app": {"id": "&lt;uuid&gt;", "slug": "demo-ride", "name": {"en": "Ride Hailing"}, "logoUrl": "&lt;signed link&gt;"},
-    "images": {
-      "small":  {"url": "&lt;signed link&gt;", "width": 480, "height": 200},
-      "medium": {"url": "&lt;signed link&gt;", "width": 960, "height": 400},
-      "large":  {"url": "&lt;signed link&gt;", "width": 1200, "height": 500}
+    &quot;id&quot;: &quot;1889a808-f0c3-46ba-808f-b573d92b7b48&quot;,
+    &quot;title&quot;: {
+      &quot;am&quot;: &quot;ማሳያ፦ የመጀመሪያ ጉዞዎ በእኛ ነው&quot;,
+      &quot;en&quot;: &quot;Demo: Your first ride is on us&quot;
     },
-    "priority": 100,
-    "startsAt": "2026-11-20T00:00:00Z",
-    "endsAt": null
+    &quot;subtitle&quot;: {
+      &quot;en&quot;: &quot;Up to 150 birr off your first Ride Hailing trip&quot;
+    },
+    &quot;placement&quot;: &quot;HOME_HERO&quot;,
+    &quot;category&quot;: &quot;FEATURED_APP&quot;,
+    &quot;actionType&quot;: &quot;MINI_APP&quot;,
+    &quot;target&quot;: &quot;/promo/first-ride&quot;,
+    &quot;app&quot;: {
+      &quot;id&quot;: &quot;4e831b72-a33b-4d93-a7ba-65e19b9dbd0a&quot;,
+      &quot;slug&quot;: &quot;demo-ride&quot;,
+      &quot;name&quot;: {
+        &quot;am&quot;: &quot;የመኪና ጥሪ&quot;,
+        &quot;en&quot;: &quot;Ride Hailing&quot;
+      },
+      &quot;logoUrl&quot;: &quot;http://127.0.0.1:9000/adera-media/apps/4e831b72-a33b-4d93-a7ba-65e19b9dbd0a/logo/13fa5c73-6a1e-494c-ab25-3d4b4dc9641e.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&amp;X-Amz-Date=...&amp;X-Amz-Expires=3600&amp;X-Amz-Signature=...&quot;
+    },
+    &quot;images&quot;: {
+      &quot;small&quot;: {
+        &quot;url&quot;: &quot;http://127.0.0.1:9000/adera-media/banners/1889a808-f0c3-46ba-808f-b573d92b7b48/a2dc29f0-496d-4613-9aa3-e5ba9cb9fe9f/small.jpg?X-Amz-Algorithm=AWS4-HMAC-SHA256&amp;X-Amz-Date=...&amp;X-Amz-Expires=3600&amp;X-Amz-Signature=...&quot;,
+        &quot;width&quot;: 480,
+        &quot;height&quot;: 192
+      },
+      &quot;medium&quot;: {
+        &quot;url&quot;: &quot;http://127.0.0.1:9000/adera-media/banners/1889a808-f0c3-46ba-808f-b573d92b7b48/a2dc29f0-496d-4613-9aa3-e5ba9cb9fe9f/medium.jpg?X-Amz-Algorithm=AWS4-HMAC-SHA256&amp;X-Amz-Date=...&amp;X-Amz-Expires=3600&amp;X-Amz-Signature=...&quot;,
+        &quot;width&quot;: 960,
+        &quot;height&quot;: 384
+      },
+      &quot;large&quot;: {
+        &quot;url&quot;: &quot;http://127.0.0.1:9000/adera-media/banners/1889a808-f0c3-46ba-808f-b573d92b7b48/a2dc29f0-496d-4613-9aa3-e5ba9cb9fe9f/large.jpg?X-Amz-Algorithm=AWS4-HMAC-SHA256&amp;X-Amz-Date=...&amp;X-Amz-Expires=3600&amp;X-Amz-Signature=...&quot;,
+        &quot;width&quot;: 1600,
+        &quot;height&quot;: 640
+      }
+    },
+    &quot;priority&quot;: 100,
+    &quot;startsAt&quot;: &quot;2026-11-20T09:22:01Z&quot;,
+    &quot;endsAt&quot;: null
+  }
+]</code></pre>
+<p>Signed links look like <code>http://127.0.0.1:9000/adera-media/banners/{id}/{image}/large.jpg?X-Amz-Algorithm=...&amp;X-Amz-Date=...&amp;X-Amz-Expires=3600&amp;X-Amz-Signature=...</code>; here the date and signature are replaced by <code>...</code>. Use them exactly as received.</p><h4>Every placement at once (no filter; shortened to the fields that differ)</h4>
+<pre><code>curl -sS "$GATEWAY/api/v1/banners"</code></pre>
+<pre class="out"><code>HTTP 200
+[
+  {
+    &quot;placement&quot;: &quot;HOME_HERO&quot;,
+    &quot;category&quot;: &quot;FEATURED_APP&quot;,
+    &quot;actionType&quot;: &quot;MINI_APP&quot;,
+    &quot;target&quot;: &quot;/promo/first-ride&quot;,
+    &quot;priority&quot;: 100,
+    &quot;title&quot;: &quot;Demo: Your first ride is on us&quot;,
+    &quot;app&quot;: &quot;demo-ride&quot;
+  },
+  {
+    &quot;placement&quot;: &quot;FEATURED&quot;,
+    &quot;category&quot;: &quot;PROMOTION&quot;,
+    &quot;actionType&quot;: &quot;MINI_APP&quot;,
+    &quot;target&quot;: null,
+    &quot;priority&quot;: 80,
+    &quot;title&quot;: &quot;Demo: Lunch in 30 minutes&quot;,
+    &quot;app&quot;: &quot;demo-food&quot;
+  },
+  {
+    &quot;placement&quot;: &quot;PROMOTIONS&quot;,
+    &quot;category&quot;: &quot;ANNOUNCEMENT&quot;,
+    &quot;actionType&quot;: &quot;INTERNAL&quot;,
+    &quot;target&quot;: &quot;adera://wallet&quot;,
+    &quot;priority&quot;: 50,
+    &quot;title&quot;: &quot;Demo: Top up your wallet&quot;,
+    &quot;app&quot;: null
+  },
+  {
+    &quot;placement&quot;: &quot;CATALOG_TOP&quot;,
+    &quot;category&quot;: &quot;EVENT&quot;,
+    &quot;actionType&quot;: &quot;EXTERNAL&quot;,
+    &quot;target&quot;: &quot;https://www.adera.et/events/community-day&quot;,
+    &quot;priority&quot;: 40,
+    &quot;title&quot;: &quot;Demo: Adera community day&quot;,
+    &quot;app&quot;: null
   }
 ]</code></pre>
 </div></details>
@@ -76,7 +143,7 @@ Cache-Control: public, max-age=60
 </ul>
 
 <div class="pager"><a class="prev" href="index.html"><small>Previous</small>Overview and contents</a><a class="next" href="rendering.html"><small>Next</small>Rendering each placement</a></div>
-<p class="footer">Adera guides &middot; banners &middot; design written 2026-11-21, before the code; illustrative examples are marked</p>
+<p class="footer">Adera guides &middot; banners &middot; samples captured against the running dev stack on 2026-11-21</p>
 </main>
 </div>
 <script src="app.js"></script>

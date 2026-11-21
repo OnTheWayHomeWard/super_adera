@@ -2081,18 +2081,381 @@ Content-Type: application/json
 </div></details>
 </section>
 <section><h2 id="banners">Banners</h2>
-<p><span class="badge notyet">design, not built yet</span> Promotional banners shown in the super app (design and rules: <a href="16-banners.html">16. Banners</a>). Served by registry-service through the route <code>admin-api</code>. Reads need VIEWER, writes ADMIN; every write is audited (<code>banner.*</code>). Real requests and answers are added here once the endpoints are built.</p>
-<div class="table-wrap"><table><thead><tr><th>Method and path</th><th>Role</th><th>Body / query</th><th>Answer</th></tr></thead><tbody>
-<tr><td><code>GET /admin/api/v1/banners</code></td><td>VIEWER</td><td>query <code>placement</code>, <code>category</code>, <code>state</code> (<code>DRAFT</code>, <code>PAUSED</code>, <code>SCHEDULED</code>, <code>LIVE</code>, <code>ENDED</code>), <code>appId</code>, <code>page</code> (0), <code>size</code> (50, at most 100)</td><td>array of banners, <code>X-Total-Count</code></td></tr>
-<tr><td><code>GET /admin/api/v1/banners/settings</code></td><td>VIEWER</td><td>-</td><td>allowed external domains, enum values, image sizes, upload limit</td></tr>
-<tr><td><code>GET /admin/api/v1/banners/{id}</code></td><td>VIEWER</td><td>-</td><td>one banner; 404 <code>not_found</code></td></tr>
-<tr><td><code>POST /admin/api/v1/banners</code></td><td>ADMIN</td><td><code>title</code>*, <code>subtitle</code>, <code>placement</code>*, <code>category</code>*, <code>appId</code>, <code>actionType</code>*, <code>target</code>, <code>startsAt</code>*, <code>endsAt</code>, <code>priority</code></td><td>the new banner (<code>status: DRAFT</code>)</td></tr>
-<tr><td><code>PATCH /admin/api/v1/banners/{id}</code></td><td>ADMIN</td><td>any of the fields above</td><td>the banner</td></tr>
-<tr><td><code>POST /admin/api/v1/banners/{id}/image</code></td><td>ADMIN</td><td>multipart <code>file</code></td><td>the banner with <code>images</code>; 400 bad image, 413 <code>file_too_large</code></td></tr>
-<tr><td><code>POST /admin/api/v1/banners/{id}/status</code></td><td>ADMIN</td><td><code>{"status": "PUBLISHED" | "PAUSED" | "DRAFT"}</code></td><td>the banner; 409 <code>not_ready_to_publish</code> without an image</td></tr>
-<tr><td><code>POST /admin/api/v1/banners/reorder</code></td><td>ADMIN</td><td><code>{"ids": [...]}</code> (1 to 100)</td><td>the banners in the new order</td></tr>
-<tr><td><code>DELETE /admin/api/v1/banners/{id}</code></td><td>ADMIN</td><td>-</td><td><code>{"status": "deleted"}</code></td></tr>
-</tbody></table></div>
+<p><span class="badge built">built 2026-11-21</span> Promotional banners in the super app; design and rules in <a href="16-banners.html">16. Banners</a>, the public list in <a href="16-banners.html#public-api">section 6</a> there. Reads need VIEWER, writes ADMIN. Every write is audited (<code>banner.create</code>, <code>banner.update</code>, <code>banner.image</code>, <code>banner.status</code>, <code>banner.reorder</code>, <code>banner.delete</code>; target type <code>banner</code>, and the linked app's id so it also appears in that app's audit view). Answers were captured on 2026-11-21 from the running stack (the demo banners of section 13 and the throw-away banners of <code>tests/e2e/banners.py</code>, titles prefixed <code>e2e-banners-...</code>, deleted afterwards). Signed image links are shortened (<code>X-Amz-Date</code> and <code>X-Amz-Signature</code> replaced by <code>...</code>); they are valid 60 minutes.</p>
+<p>Every banner answer has the same shape: the stored fields, <code>status</code> (the switch), <code>state</code> (computed: <code>DRAFT</code>, <code>PAUSED</code>, <code>SCHEDULED</code>, <code>LIVE</code>, <code>ENDED</code>), <code>visible</code> (what users get right now), <code>app</code> with its <code>status</code>, and <code>images</code> (null until uploaded).</p>
+<details class="endpoint" id="ep-staff-get-banners"><summary><span class="method m-get">GET</span><span class="path">/admin/api/v1/banners</span><span class="sum">List banners (filters by computed state)</span></summary><div class="body">
+<dl class="meta"><dt>Client path</dt><dd><code>/admin/api/v1/banners</code> through the gateway (route <code>admin-api</code>, same path on registry-service)</dd><dt>Auth</dt><dd><code>Authorization: Bearer $TOKEN</code> of an aal2 staff session. Minimum role: <strong>VIEWER</strong>.</dd><dt>Rate limit</dt><dd>300 per 60 s per client IP</dd><dt>Implemented in</dt><dd><code>services/registry-service/src/main/java/app/adera/registry/banner/BannerAdminController.java</code></dd></dl>
+<h4>Purpose</h4><p>The backoffice list and its tabs. Highest priority first, then newest. The total is in <code>X-Total-Count</code>.</p>
+<h4>Request parameters</h4><div class="table-wrap"><table><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th><th>Rules and why</th></tr></thead><tbody><tr><td>placement</td><td>query</td><td>enum</td><td>no</td><td>Only this placement.</td></tr><tr><td>category</td><td>query</td><td>enum</td><td>no</td><td>Only this category.</td></tr><tr><td>state</td><td>query</td><td>enum</td><td>no</td><td>The computed state: <code>DRAFT</code>, <code>PAUSED</code>, <code>SCHEDULED</code>, <code>LIVE</code> (published, inside the window, whatever the app), <code>ENDED</code>.</td></tr><tr><td>appId</td><td>query</td><td>uuid</td><td>no</td><td>Banners linked to this app.</td></tr><tr><td>page</td><td>query</td><td>integer</td><td>no (0)</td><td>0-based.</td></tr><tr><td>size</td><td>query</td><td>integer</td><td>no (50)</td><td>1 to 100.</td></tr></tbody></table></div>
+<h4>Example request</h4><pre><code>curl -sS -i &quot;$BASE/admin/api/v1/banners?state=ENDED&amp;size=5&quot; -H &quot;Authorization: Bearer $TOKEN&quot;</code></pre>
+<h4>Real answer (the demo banner in the Ended tab)</h4><pre class="out"><code>HTTP 200
+X-Total-Count: 1
+
+[
+  {
+    &quot;id&quot;: &quot;30c687d5-1097-4b4f-811a-643dfa410546&quot;,
+    &quot;title&quot;: {
+      &quot;am&quot;: &quot;ማሳያ፦ የሳምንቱ መጨረሻ ቅናሽ&quot;,
+      &quot;en&quot;: &quot;Demo: Marketplace weekend sale&quot;
+    },
+    &quot;subtitle&quot;: {
+      &quot;en&quot;: &quot;Ended: kept to show the Ended tab&quot;
+    },
+    &quot;placement&quot;: &quot;PROMOTIONS&quot;,
+    &quot;category&quot;: &quot;PROMOTION&quot;,
+    &quot;appId&quot;: &quot;43241b83-6a1b-488c-a222-4250d51b7104&quot;,
+    &quot;app&quot;: {
+      &quot;id&quot;: &quot;43241b83-6a1b-488c-a222-4250d51b7104&quot;,
+      &quot;slug&quot;: &quot;demo-market&quot;,
+      &quot;name&quot;: {
+        &quot;am&quot;: &quot;ገበያ&quot;,
+        &quot;en&quot;: &quot;Marketplace&quot;
+      },
+      &quot;logoUrl&quot;: &quot;http://127.0.0.1:9000/adera-media/apps/43241b83-6a1b-488c-a222-4250d51b7104/logo/14ec68d6-0281-4ee0-bbad-042f24d237ed.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&amp;X-Amz-Date=...&amp;X-Amz-Expires=3600&amp;X-Amz-Signature=...&quot;,
+      &quot;status&quot;: &quot;LIVE&quot;
+    },
+    &quot;actionType&quot;: &quot;MINI_APP&quot;,
+    &quot;target&quot;: &quot;/sale/weekend&quot;,
+    &quot;imageId&quot;: &quot;a1b32382-76c6-4930-bc7a-741f2acb66bf&quot;,
+    &quot;images&quot;: {
+      &quot;small&quot;: {
+        &quot;url&quot;: &quot;http://127.0.0.1:9000/adera-media/banners/30c687d5-1097-4b4f-811a-643dfa410546/a1b32382-76c6-4930-bc7a-741f2acb66bf/small.jpg?X-Amz-Algorithm=AWS4-HMAC-SHA256&amp;X-Amz-Date=...&amp;X-Amz-Expires=3600&amp;X-Amz-Signature=...&quot;,
+        &quot;width&quot;: 480,
+        &quot;height&quot;: 192
+      },
+      &quot;medium&quot;: {
+        &quot;url&quot;: &quot;http://127.0.0.1:9000/adera-media/banners/30c687d5-1097-4b4f-811a-643dfa410546/a1b32382-76c6-4930-bc7a-741f2acb66bf/medium.jpg?X-Amz-Algorithm=AWS4-HMAC-SHA256&amp;X-Amz-Date=...&amp;X-Amz-Expires=3600&amp;X-Amz-Signature=...&quot;,
+        &quot;width&quot;: 960,
+        &quot;height&quot;: 384
+      },
+      &quot;large&quot;: {
+        &quot;url&quot;: &quot;http://127.0.0.1:9000/adera-media/banners/30c687d5-1097-4b4f-811a-643dfa410546/a1b32382-76c6-4930-bc7a-741f2acb66bf/large.jpg?X-Amz-Algorithm=AWS4-HMAC-SHA256&amp;X-Amz-Date=...&amp;X-Amz-Expires=3600&amp;X-Amz-Signature=...&quot;,
+        &quot;width&quot;: 1600,
+        &quot;height&quot;: 640
+      }
+    },
+    &quot;startsAt&quot;: &quot;2026-11-07T09:22:04Z&quot;,
+    &quot;endsAt&quot;: &quot;2026-11-14T09:22:04Z&quot;,
+    &quot;priority&quot;: 60,
+    &quot;status&quot;: &quot;PUBLISHED&quot;,
+    &quot;state&quot;: &quot;ENDED&quot;,
+    &quot;visible&quot;: false,
+    &quot;createdBy&quot;: &quot;5b3c4be5-34e8-45b2-909d-821830aae090&quot;,
+    &quot;updatedBy&quot;: &quot;5b3c4be5-34e8-45b2-909d-821830aae090&quot;,
+    &quot;createdAt&quot;: &quot;2026-11-21T09:22:04.874641Z&quot;,
+    &quot;updatedAt&quot;: &quot;2026-11-21T09:22:05.434135Z&quot;
+  }
+]</code></pre>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th><code>error</code></th><th>When</th></tr></thead><tbody><tr><td>400</td><td><code>validation_failed</code></td><td>An unknown <code>placement</code>, <code>category</code> or <code>state</code> (<code>fields.state</code>: "must be DRAFT, PAUSED, SCHEDULED, LIVE or ENDED").</td></tr><tr><td>401 / 403</td><td><code>unauthorized</code>, <code>mfa_required</code>, <code>not_staff</code></td><td>As for every staff endpoint (see the top of this page).</td></tr></tbody></table></div>
+</div></details>
+
+<details class="endpoint" id="ep-staff-banner-settings"><summary><span class="method m-get">GET</span><span class="path">/admin/api/v1/banners/settings</span><span class="sum">What the banner form needs</span></summary><div class="body">
+<dl class="meta"><dt>Client path</dt><dd><code>/admin/api/v1/banners/settings</code> through the gateway (route <code>admin-api</code>, same path on registry-service)</dd><dt>Auth</dt><dd><code>Authorization: Bearer $TOKEN</code> of an aal2 staff session. Minimum role: <strong>VIEWER</strong>.</dd><dt>Rate limit</dt><dd>300 per 60 s per client IP</dd><dt>Implemented in</dt><dd><code>services/registry-service/src/main/java/app/adera/registry/banner/BannerAdminController.java</code></dd></dl>
+<h4>Purpose</h4><p>The allowed external domains (from <code>BANNER_EXTERNAL_DOMAINS</code>), the enum values, the stored image sizes and the upload limit, so the form can check before saving.</p>
+
+<h4>Example request</h4><pre><code>curl -sS &quot;$BASE/admin/api/v1/banners/settings&quot; -H &quot;Authorization: Bearer $TOKEN&quot;</code></pre>
+<h4>Real answer</h4><pre class="out"><code>HTTP 200
+{
+  &quot;externalDomains&quot;: [
+    &quot;adera.et&quot;,
+    &quot;example.com&quot;
+  ],
+  &quot;placements&quot;: [
+    &quot;HOME_HERO&quot;,
+    &quot;FEATURED&quot;,
+    &quot;PROMOTIONS&quot;,
+    &quot;CATALOG_TOP&quot;
+  ],
+  &quot;categories&quot;: [
+    &quot;PROMOTION&quot;,
+    &quot;FEATURED_APP&quot;,
+    &quot;ANNOUNCEMENT&quot;,
+    &quot;EVENT&quot;
+  ],
+  &quot;actionTypes&quot;: [
+    &quot;MINI_APP&quot;,
+    &quot;INTERNAL&quot;,
+    &quot;EXTERNAL&quot;,
+    &quot;NONE&quot;
+  ],
+  &quot;statuses&quot;: [
+    &quot;DRAFT&quot;,
+    &quot;PUBLISHED&quot;,
+    &quot;PAUSED&quot;
+  ],
+  &quot;states&quot;: [
+    &quot;DRAFT&quot;,
+    &quot;PAUSED&quot;,
+    &quot;SCHEDULED&quot;,
+    &quot;LIVE&quot;,
+    &quot;ENDED&quot;
+  ],
+  &quot;imageSizes&quot;: {
+    &quot;small&quot;: 480,
+    &quot;medium&quot;: 960,
+    &quot;large&quot;: 1600
+  },
+  &quot;maxImageBytes&quot;: 4194304
+}</code></pre>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th><code>error</code></th><th>When</th></tr></thead><tbody><tr><td>401 / 403</td><td><code>unauthorized</code>, <code>mfa_required</code>, <code>not_staff</code></td><td>As for every staff endpoint (see the top of this page).</td></tr></tbody></table></div>
+</div></details>
+
+<details class="endpoint" id="ep-staff-get-banner"><summary><span class="method m-get">GET</span><span class="path">/admin/api/v1/banners/{bannerId}</span><span class="sum">One banner</span></summary><div class="body">
+<dl class="meta"><dt>Client path</dt><dd><code>/admin/api/v1/banners/{bannerId}</code> through the gateway (route <code>admin-api</code>, same path on registry-service)</dd><dt>Auth</dt><dd><code>Authorization: Bearer $TOKEN</code> of an aal2 staff session. Minimum role: <strong>VIEWER</strong>.</dd><dt>Rate limit</dt><dd>300 per 60 s per client IP</dd><dt>Implemented in</dt><dd><code>services/registry-service/src/main/java/app/adera/registry/banner/BannerAdminController.java</code></dd></dl>
+<h4>Purpose</h4><p>The edit screen.</p>
+
+<h4>Example request</h4><pre><code>curl -sS &quot;$BASE/admin/api/v1/banners/$BANNER&quot; -H &quot;Authorization: Bearer $TOKEN&quot;</code></pre>
+<h4>Real answer (the Demo Ride hero banner)</h4><pre class="out"><code>HTTP 200
+{
+  &quot;id&quot;: &quot;1889a808-f0c3-46ba-808f-b573d92b7b48&quot;,
+  &quot;title&quot;: {
+    &quot;am&quot;: &quot;ማሳያ፦ የመጀመሪያ ጉዞዎ በእኛ ነው&quot;,
+    &quot;en&quot;: &quot;Demo: Your first ride is on us&quot;
+  },
+  &quot;subtitle&quot;: {
+    &quot;en&quot;: &quot;Up to 150 birr off your first Ride Hailing trip&quot;
+  },
+  &quot;placement&quot;: &quot;HOME_HERO&quot;,
+  &quot;category&quot;: &quot;FEATURED_APP&quot;,
+  &quot;appId&quot;: &quot;4e831b72-a33b-4d93-a7ba-65e19b9dbd0a&quot;,
+  &quot;app&quot;: {
+    &quot;id&quot;: &quot;4e831b72-a33b-4d93-a7ba-65e19b9dbd0a&quot;,
+    &quot;slug&quot;: &quot;demo-ride&quot;,
+    &quot;name&quot;: {
+      &quot;am&quot;: &quot;የመኪና ጥሪ&quot;,
+      &quot;en&quot;: &quot;Ride Hailing&quot;
+    },
+    &quot;logoUrl&quot;: &quot;http://127.0.0.1:9000/adera-media/apps/4e831b72-a33b-4d93-a7ba-65e19b9dbd0a/logo/13fa5c73-6a1e-494c-ab25-3d4b4dc9641e.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&amp;X-Amz-Date=...&amp;X-Amz-Expires=3600&amp;X-Amz-Signature=...&quot;,
+    &quot;status&quot;: &quot;LIVE&quot;
+  },
+  &quot;actionType&quot;: &quot;MINI_APP&quot;,
+  &quot;target&quot;: &quot;/promo/first-ride&quot;,
+  &quot;imageId&quot;: &quot;a2dc29f0-496d-4613-9aa3-e5ba9cb9fe9f&quot;,
+  &quot;images&quot;: {
+    &quot;small&quot;: {
+      &quot;url&quot;: &quot;http://127.0.0.1:9000/adera-media/banners/1889a808-f0c3-46ba-808f-b573d92b7b48/a2dc29f0-496d-4613-9aa3-e5ba9cb9fe9f/small.jpg?X-Amz-Algorithm=AWS4-HMAC-SHA256&amp;X-Amz-Date=...&amp;X-Amz-Expires=3600&amp;X-Amz-Signature=...&quot;,
+      &quot;width&quot;: 480,
+      &quot;height&quot;: 192
+    },
+    &quot;medium&quot;: {
+      &quot;url&quot;: &quot;http://127.0.0.1:9000/adera-media/banners/1889a808-f0c3-46ba-808f-b573d92b7b48/a2dc29f0-496d-4613-9aa3-e5ba9cb9fe9f/medium.jpg?X-Amz-Algorithm=AWS4-HMAC-SHA256&amp;X-Amz-Date=...&amp;X-Amz-Expires=3600&amp;X-Amz-Signature=...&quot;,
+      &quot;width&quot;: 960,
+      &quot;height&quot;: 384
+    },
+    &quot;large&quot;: {
+      &quot;url&quot;: &quot;http://127.0.0.1:9000/adera-media/banners/1889a808-f0c3-46ba-808f-b573d92b7b48/a2dc29f0-496d-4613-9aa3-e5ba9cb9fe9f/large.jpg?X-Amz-Algorithm=AWS4-HMAC-SHA256&amp;X-Amz-Date=...&amp;X-Amz-Expires=3600&amp;X-Amz-Signature=...&quot;,
+      &quot;width&quot;: 1600,
+      &quot;height&quot;: 640
+    }
+  },
+  &quot;startsAt&quot;: &quot;2026-11-20T09:22:01Z&quot;,
+  &quot;endsAt&quot;: null,
+  &quot;priority&quot;: 100,
+  &quot;status&quot;: &quot;PUBLISHED&quot;,
+  &quot;state&quot;: &quot;LIVE&quot;,
+  &quot;visible&quot;: true,
+  &quot;createdBy&quot;: &quot;5b3c4be5-34e8-45b2-909d-821830aae090&quot;,
+  &quot;updatedBy&quot;: &quot;5b3c4be5-34e8-45b2-909d-821830aae090&quot;,
+  &quot;createdAt&quot;: &quot;2026-11-21T09:22:01.775686Z&quot;,
+  &quot;updatedAt&quot;: &quot;2026-11-21T09:22:02.175760Z&quot;
+}</code></pre>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th><code>error</code></th><th>When</th></tr></thead><tbody><tr><td>404</td><td><code>not_found</code></td><td>No banner with this id.</td></tr><tr><td>401 / 403</td><td><code>unauthorized</code>, <code>mfa_required</code>, <code>not_staff</code></td><td>As for every staff endpoint (see the top of this page).</td></tr></tbody></table></div>
+</div></details>
+
+<details class="endpoint" id="ep-staff-post-banner"><summary><span class="method m-post">POST</span><span class="path">/admin/api/v1/banners</span><span class="sum">Create a banner (as DRAFT)</span></summary><div class="body">
+<dl class="meta"><dt>Client path</dt><dd><code>/admin/api/v1/banners</code> through the gateway (route <code>admin-api</code>, same path on registry-service)</dd><dt>Auth</dt><dd><code>Authorization: Bearer $TOKEN</code> of an aal2 staff session. Minimum role: <strong>ADMIN</strong>.</dd><dt>Rate limit</dt><dd>300 per 60 s per client IP</dd><dt>Implemented in</dt><dd><code>services/registry-service/src/main/java/app/adera/registry/banner/BannerAdminController.java</code></dd></dl>
+<h4>Purpose</h4><p>Starts as <code>DRAFT</code> with no image. Unknown fields are refused; every problem is reported at once in <code>fields</code>.</p>
+<h4>Request parameters</h4><div class="table-wrap"><table><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th><th>Rules and why</th></tr></thead><tbody><tr><td>title</td><td>body</td><td>object</td><td>create: yes</td><td>Language object <code>{"en", "am", "om"}</code>, English required, at most 80 characters each. What the user reads.</td></tr><tr><td>subtitle</td><td>body</td><td>object or null</td><td>no</td><td>Same, at most 160 characters; null or <code>{}</code> = none.</td></tr><tr><td>placement</td><td>body</td><td>enum</td><td>create: yes</td><td><code>HOME_HERO</code>, <code>FEATURED</code>, <code>PROMOTIONS</code>, <code>CATALOG_TOP</code> (case-insensitive): where the super app shows it.</td></tr><tr><td>category</td><td>body</td><td>enum</td><td>create: yes</td><td><code>PROMOTION</code>, <code>FEATURED_APP</code>, <code>ANNOUNCEMENT</code>, <code>EVENT</code>.</td></tr><tr><td>appId</td><td>body</td><td>uuid or null</td><td>with FEATURED_APP or MINI_APP</td><td>An existing mini app (any status; the banner shows only while it is LIVE).</td></tr><tr><td>actionType</td><td>body</td><td>enum</td><td>create: yes</td><td><code>MINI_APP</code>, <code>INTERNAL</code>, <code>EXTERNAL</code>, <code>NONE</code>: what a tap does.</td></tr><tr><td>target</td><td>body</td><td>string or null</td><td>INTERNAL, EXTERNAL</td><td>MINI_APP: a route starting with <code>/</code> (not <code>//</code>) or none = app home; INTERNAL: <code>adera://...</code>; EXTERNAL: <code>https://</code> on a domain of <code>BANNER_EXTERNAL_DOMAINS</code> or a subdomain, no user info; NONE: must be empty. At most 500 characters, URL characters only.</td></tr><tr><td>startsAt</td><td>body</td><td>ISO-8601 with offset</td><td>create: yes</td><td>Not shown before. May be in the past.</td></tr><tr><td>endsAt</td><td>body</td><td>ISO-8601 or null</td><td>no</td><td>Null = open-ended; must be later than <code>startsAt</code>.</td></tr><tr><td>priority</td><td>body</td><td>integer 0 to 100000</td><td>no (0)</td><td>Higher is shown first.</td></tr></tbody></table></div>
+<h4>Example request</h4><pre><code>curl -sS -X POST &quot;$BASE/admin/api/v1/banners&quot; -H &quot;Authorization: Bearer $TOKEN&quot; -H &#x27;Content-Type: application/json&#x27; -d &#x27;{&quot;title&quot;: {&quot;en&quot;: &quot;e2e-banners-b2821e Your first ride is on us&quot;, &quot;am&quot;: &quot;የመጀመሪያ ጉዞዎ በእኛ ነው&quot;}, &quot;placement&quot;: &quot;HOME_HERO&quot;, &quot;category&quot;: &quot;FEATURED_APP&quot;, &quot;actionType&quot;: &quot;MINI_APP&quot;, &quot;startsAt&quot;: &quot;2026-11-21T08:22:49Z&quot;, &quot;subtitle&quot;: {&quot;en&quot;: &quot;Up to 150 birr off&quot;}, &quot;appId&quot;: &quot;7b548bc6-2b06-44be-97e9-4a9f364f8961&quot;, &quot;target&quot;: &quot;/promo/first-ride&quot;, &quot;priority&quot;: 90}&#x27;</code></pre>
+<h4>Real answer</h4><pre class="out"><code>HTTP 200
+{
+  &quot;id&quot;: &quot;71cca691-9d7f-4ffa-a0b3-535584170fcc&quot;,
+  &quot;title&quot;: {
+    &quot;en&quot;: &quot;e2e-banners-b2821e Your first ride is on us&quot;,
+    &quot;am&quot;: &quot;የመጀመሪያ ጉዞዎ በእኛ ነው&quot;
+  },
+  &quot;subtitle&quot;: {
+    &quot;en&quot;: &quot;Up to 150 birr off&quot;
+  },
+  &quot;placement&quot;: &quot;HOME_HERO&quot;,
+  &quot;category&quot;: &quot;FEATURED_APP&quot;,
+  &quot;appId&quot;: &quot;7b548bc6-2b06-44be-97e9-4a9f364f8961&quot;,
+  &quot;app&quot;: {
+    &quot;id&quot;: &quot;7b548bc6-2b06-44be-97e9-4a9f364f8961&quot;,
+    &quot;slug&quot;: &quot;e2e-banners-b2821e&quot;,
+    &quot;name&quot;: {
+      &quot;am&quot;: &quot;ሙከራ&quot;,
+      &quot;en&quot;: &quot;E2E Banner App&quot;
+    },
+    &quot;logoUrl&quot;: &quot;http://127.0.0.1:9000/adera-media/apps/7b548bc6-2b06-44be-97e9-4a9f364f8961/logo/94533a0c-953b-4a73-b8e0-526a8bce9add.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&amp;X-Amz-Date=...&amp;X-Amz-Expires=3600&amp;X-Amz-Signature=...&quot;,
+    &quot;status&quot;: &quot;LIVE&quot;
+  },
+  &quot;actionType&quot;: &quot;MINI_APP&quot;,
+  &quot;target&quot;: &quot;/promo/first-ride&quot;,
+  &quot;imageId&quot;: null,
+  &quot;images&quot;: null,
+  &quot;startsAt&quot;: &quot;2026-11-21T08:22:49Z&quot;,
+  &quot;endsAt&quot;: null,
+  &quot;priority&quot;: 90,
+  &quot;status&quot;: &quot;DRAFT&quot;,
+  &quot;state&quot;: &quot;DRAFT&quot;,
+  &quot;visible&quot;: false,
+  &quot;createdBy&quot;: &quot;33ac61b5-7bfa-4080-8c07-9659ed1e0a30&quot;,
+  &quot;updatedBy&quot;: &quot;33ac61b5-7bfa-4080-8c07-9659ed1e0a30&quot;,
+  &quot;createdAt&quot;: &quot;2026-11-21T09:22:50.006077125Z&quot;,
+  &quot;updatedAt&quot;: &quot;2026-11-21T09:22:50.006077125Z&quot;
+}
+
+A VIEWER:
+HTTP 403  {"error": "insufficient_role"}
+
+An external link outside the allow-list:
+HTTP 400  {&quot;error&quot;: &quot;validation_failed&quot;, &quot;fields&quot;: {&quot;target&quot;: &quot;the domain evil.test is not allowed for banners (allowed: adera.et, example.com, and their subdomains)&quot;}}
+
+FEATURED_APP without an app:
+HTTP 400  {&quot;error&quot;: &quot;validation_failed&quot;, &quot;fields&quot;: {&quot;appId&quot;: &quot;required when category is FEATURED_APP&quot;}}</code></pre>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th><code>error</code></th><th>When</th></tr></thead><tbody><tr><td>400</td><td><code>validation_failed</code></td><td>A field or a combination is not acceptable: unknown field, missing required field, bad enum, bad time, end not after start, <code>appId</code> missing for FEATURED_APP/MINI_APP or "no such mini app", a target that does not fit the action type, an external domain not allowed.</td></tr><tr><td>403</td><td><code>insufficient_role</code></td><td>The caller is a VIEWER (real answer below).</td></tr><tr><td>401 / 403</td><td><code>unauthorized</code>, <code>mfa_required</code>, <code>not_staff</code></td><td>As for every staff endpoint (see the top of this page).</td></tr></tbody></table></div>
+</div></details>
+
+<details class="endpoint" id="ep-staff-patch-banner"><summary><span class="method m-patch">PATCH</span><span class="path">/admin/api/v1/banners/{bannerId}</span><span class="sum">Change some fields</span></summary><div class="body">
+<dl class="meta"><dt>Client path</dt><dd><code>/admin/api/v1/banners/{bannerId}</code> through the gateway (route <code>admin-api</code>, same path on registry-service)</dd><dt>Auth</dt><dd><code>Authorization: Bearer $TOKEN</code> of an aal2 staff session. Minimum role: <strong>ADMIN</strong>.</dd><dt>Rate limit</dt><dd>300 per 60 s per client IP</dd><dt>Implemented in</dt><dd><code>services/registry-service/src/main/java/app/adera/registry/banner/BannerAdminController.java</code></dd></dl>
+<h4>Purpose</h4><p>Absent = unchanged, null = clear (subtitle, appId, target, endsAt). The banner as it would be after the change is checked again as a whole: switching <code>actionType</code> to <code>NONE</code> needs <code>"target": null</code> in the same request. Editing a published banner takes effect at once. Audited as <code>banner.update</code> with the field names.</p>
+<h4>Request parameters</h4><div class="table-wrap"><table><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th><th>Rules and why</th></tr></thead><tbody><tr><td>title</td><td>body</td><td>object</td><td>create: yes</td><td>Language object <code>{"en", "am", "om"}</code>, English required, at most 80 characters each. What the user reads.</td></tr><tr><td>subtitle</td><td>body</td><td>object or null</td><td>no</td><td>Same, at most 160 characters; null or <code>{}</code> = none.</td></tr><tr><td>placement</td><td>body</td><td>enum</td><td>create: yes</td><td><code>HOME_HERO</code>, <code>FEATURED</code>, <code>PROMOTIONS</code>, <code>CATALOG_TOP</code> (case-insensitive): where the super app shows it.</td></tr><tr><td>category</td><td>body</td><td>enum</td><td>create: yes</td><td><code>PROMOTION</code>, <code>FEATURED_APP</code>, <code>ANNOUNCEMENT</code>, <code>EVENT</code>.</td></tr><tr><td>appId</td><td>body</td><td>uuid or null</td><td>with FEATURED_APP or MINI_APP</td><td>An existing mini app (any status; the banner shows only while it is LIVE).</td></tr><tr><td>actionType</td><td>body</td><td>enum</td><td>create: yes</td><td><code>MINI_APP</code>, <code>INTERNAL</code>, <code>EXTERNAL</code>, <code>NONE</code>: what a tap does.</td></tr><tr><td>target</td><td>body</td><td>string or null</td><td>INTERNAL, EXTERNAL</td><td>MINI_APP: a route starting with <code>/</code> (not <code>//</code>) or none = app home; INTERNAL: <code>adera://...</code>; EXTERNAL: <code>https://</code> on a domain of <code>BANNER_EXTERNAL_DOMAINS</code> or a subdomain, no user info; NONE: must be empty. At most 500 characters, URL characters only.</td></tr><tr><td>startsAt</td><td>body</td><td>ISO-8601 with offset</td><td>create: yes</td><td>Not shown before. May be in the past.</td></tr><tr><td>endsAt</td><td>body</td><td>ISO-8601 or null</td><td>no</td><td>Null = open-ended; must be later than <code>startsAt</code>.</td></tr><tr><td>priority</td><td>body</td><td>integer 0 to 100000</td><td>no (0)</td><td>Higher is shown first.</td></tr></tbody></table></div>
+<h4>Example request</h4><pre><code>curl -sS -X PATCH &quot;$BASE/admin/api/v1/banners/$BANNER&quot; -H &quot;Authorization: Bearer $TOKEN&quot; -H &#x27;Content-Type: application/json&#x27; -d &#x27;{&quot;endsAt&quot;: null}&#x27;</code></pre>
+<h4>Real answer (an ENDED banner gets no end: it is LIVE again, no status change needed)</h4><pre class="out"><code>HTTP 200
+{
+  &quot;id&quot;: &quot;4bfacb54-b2eb-4294-847b-eeaae1b2253c&quot;,
+  &quot;title&quot;: {
+    &quot;en&quot;: &quot;e2e-banners-b2821e ended&quot;
+  },
+  &quot;subtitle&quot;: {},
+  &quot;placement&quot;: &quot;HOME_HERO&quot;,
+  &quot;category&quot;: &quot;ANNOUNCEMENT&quot;,
+  &quot;appId&quot;: null,
+  &quot;app&quot;: null,
+  &quot;actionType&quot;: &quot;NONE&quot;,
+  &quot;target&quot;: null,
+  &quot;imageId&quot;: &quot;cbbf2a2c-672d-4373-9d1c-2059d637b907&quot;,
+  &quot;images&quot;: {
+    &quot;small&quot;: {
+      &quot;url&quot;: &quot;http://127.0.0.1:9000/adera-media/banners/4bfacb54-b2eb-4294-847b-eeaae1b2253c/cbbf2a2c-672d-4373-9d1c-2059d637b907/small.jpg?X-Amz-Algorithm=AWS4-HMAC-SHA256&amp;X-Amz-Date=...&amp;X-Amz-Expires=3600&amp;X-Amz-Signature=...&quot;,
+      &quot;width&quot;: 480,
+      &quot;height&quot;: 180
+    },
+    &quot;medium&quot;: {
+      &quot;url&quot;: &quot;http://127.0.0.1:9000/adera-media/banners/4bfacb54-b2eb-4294-847b-eeaae1b2253c/cbbf2a2c-672d-4373-9d1c-2059d637b907/medium.jpg?X-Amz-Algorithm=AWS4-HMAC-SHA256&amp;X-Amz-Date=...&amp;X-Amz-Expires=3600&amp;X-Amz-Signature=...&quot;,
+      &quot;width&quot;: 800,
+      &quot;height&quot;: 300
+    },
+    &quot;large&quot;: {
+      &quot;url&quot;: &quot;http://127.0.0.1:9000/adera-media/banners/4bfacb54-b2eb-4294-847b-eeaae1b2253c/cbbf2a2c-672d-4373-9d1c-2059d637b907/large.jpg?X-Amz-Algorithm=AWS4-HMAC-SHA256&amp;X-Amz-Date=...&amp;X-Amz-Expires=3600&amp;X-Amz-Signature=...&quot;,
+      &quot;width&quot;: 800,
+      &quot;height&quot;: 300
+    }
+  },
+  &quot;startsAt&quot;: &quot;2026-11-19T09:22:50Z&quot;,
+  &quot;endsAt&quot;: null,
+  &quot;priority&quot;: 95,
+  &quot;status&quot;: &quot;PUBLISHED&quot;,
+  &quot;state&quot;: &quot;LIVE&quot;,
+  &quot;visible&quot;: true,
+  &quot;createdBy&quot;: &quot;33ac61b5-7bfa-4080-8c07-9659ed1e0a30&quot;,
+  &quot;updatedBy&quot;: &quot;33ac61b5-7bfa-4080-8c07-9659ed1e0a30&quot;,
+  &quot;createdAt&quot;: &quot;2026-11-21T09:22:50.836111Z&quot;,
+  &quot;updatedAt&quot;: &quot;2026-11-21T09:22:52.245096802Z&quot;
+}</code></pre>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th><code>error</code></th><th>When</th></tr></thead><tbody><tr><td>400</td><td><code>validation_failed</code></td><td>As for create.</td></tr><tr><td>404</td><td><code>not_found</code></td><td>No banner with this id.</td></tr><tr><td>403</td><td><code>insufficient_role</code></td><td>The caller is a VIEWER (real answer below).</td></tr><tr><td>401 / 403</td><td><code>unauthorized</code>, <code>mfa_required</code>, <code>not_staff</code></td><td>As for every staff endpoint (see the top of this page).</td></tr></tbody></table></div>
+</div></details>
+
+<details class="endpoint" id="ep-staff-banner-image"><summary><span class="method m-post">POST</span><span class="path">/admin/api/v1/banners/{bannerId}/image</span><span class="sum">Upload or replace the image</span></summary><div class="body">
+<dl class="meta"><dt>Client path</dt><dd><code>/admin/api/v1/banners/{bannerId}/image</code> through the gateway (route <code>admin-api</code>, same path on registry-service)</dd><dt>Auth</dt><dd><code>Authorization: Bearer $TOKEN</code> of an aal2 staff session. Minimum role: <strong>ADMIN</strong>.</dd><dt>Rate limit</dt><dd>300 per 60 s per client IP</dd><dt>Implemented in</dt><dd><code>services/registry-service/src/main/java/app/adera/registry/banner/BannerAdminController.java</code></dd></dl>
+<h4>Purpose</h4><p>Multipart field <code>file</code>. Checked like a logo (content decoded, PNG/JPEG/GIF/BMP only, dimension limits), stored as JPEG in three sizes whose longest side is at most 480, 960 and 1600 px (never enlarged). Replacing writes a new <code>imageId</code> and deletes the old files. Audited as <code>banner.image</code> with the image id and the large size.</p>
+<h4>Request parameters</h4><div class="table-wrap"><table><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th><th>Rules and why</th></tr></thead><tbody><tr><td>file</td><td>multipart</td><td>file</td><td>yes</td><td>At most <code>BANNER_MAX_BYTES</code> (4 MiB).</td></tr></tbody></table></div>
+<h4>Example request</h4><pre><code>curl -sS -X POST &quot;$BASE/admin/api/v1/banners/$BANNER/image&quot; -H &quot;Authorization: Bearer $TOKEN&quot; -F file=@banner.png</code></pre>
+<h4>Real answer (a 1800 x 700 PNG)</h4><pre class="out"><code>HTTP 200
+{
+  &quot;id&quot;: &quot;71cca691-9d7f-4ffa-a0b3-535584170fcc&quot;,
+  &quot;imageId&quot;: &quot;108abf74-16b9-4550-8a4a-cbe6ccb79a9c&quot;,
+  &quot;images&quot;: {
+    &quot;small&quot;: {
+      &quot;url&quot;: &quot;http://127.0.0.1:9000/adera-media/banners/71cca691-9d7f-4ffa-a0b3-535584170fcc/108abf74-16b9-4550-8a4a-cbe6ccb79a9c/small.jpg?X-Amz-Algorithm=AWS4-HMAC-SHA256&amp;X-Amz-Date=...&amp;X-Amz-Expires=3600&amp;X-Amz-Signature=...&quot;,
+      &quot;width&quot;: 480,
+      &quot;height&quot;: 187
+    },
+    &quot;medium&quot;: {
+      &quot;url&quot;: &quot;http://127.0.0.1:9000/adera-media/banners/71cca691-9d7f-4ffa-a0b3-535584170fcc/108abf74-16b9-4550-8a4a-cbe6ccb79a9c/medium.jpg?X-Amz-Algorithm=AWS4-HMAC-SHA256&amp;X-Amz-Date=...&amp;X-Amz-Expires=3600&amp;X-Amz-Signature=...&quot;,
+      &quot;width&quot;: 960,
+      &quot;height&quot;: 373
+    },
+    &quot;large&quot;: {
+      &quot;url&quot;: &quot;http://127.0.0.1:9000/adera-media/banners/71cca691-9d7f-4ffa-a0b3-535584170fcc/108abf74-16b9-4550-8a4a-cbe6ccb79a9c/large.jpg?X-Amz-Algorithm=AWS4-HMAC-SHA256&amp;X-Amz-Date=...&amp;X-Amz-Expires=3600&amp;X-Amz-Signature=...&quot;,
+      &quot;width&quot;: 1600,
+      &quot;height&quot;: 622
+    }
+  },
+  &quot;status&quot;: &quot;DRAFT&quot;,
+  &quot;state&quot;: &quot;DRAFT&quot;,
+  &quot;visible&quot;: false
+}
+(other fields as in GET)</code></pre>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th><code>error</code></th><th>When</th></tr></thead><tbody><tr><td>400</td><td><code>validation_failed</code></td><td><code>fields.file</code>: missing, "not a supported image (use PNG, JPEG, GIF or BMP)" (an SVG, for example), unreadable, or dimensions too large.</td></tr><tr><td>413</td><td><code>file_too_large</code></td><td>Larger than the limit.</td></tr><tr><td>404</td><td><code>not_found</code></td><td>No banner with this id.</td></tr><tr><td>403</td><td><code>insufficient_role</code></td><td>The caller is a VIEWER (real answer below).</td></tr><tr><td>401 / 403</td><td><code>unauthorized</code>, <code>mfa_required</code>, <code>not_staff</code></td><td>As for every staff endpoint (see the top of this page).</td></tr></tbody></table></div>
+</div></details>
+
+<details class="endpoint" id="ep-staff-banner-status"><summary><span class="method m-post">POST</span><span class="path">/admin/api/v1/banners/{bannerId}/status</span><span class="sum">Publish, pause, back to draft</span></summary><div class="body">
+<dl class="meta"><dt>Client path</dt><dd><code>/admin/api/v1/banners/{bannerId}/status</code> through the gateway (route <code>admin-api</code>, same path on registry-service)</dd><dt>Auth</dt><dd><code>Authorization: Bearer $TOKEN</code> of an aal2 staff session. Minimum role: <strong>ADMIN</strong>.</dd><dt>Rate limit</dt><dd>300 per 60 s per client IP</dd><dt>Implemented in</dt><dd><code>services/registry-service/src/main/java/app/adera/registry/banner/BannerAdminController.java</code></dd></dl>
+<h4>Purpose</h4><p>The only switch: <code>PUBLISHED</code>, <code>PAUSED</code> or <code>DRAFT</code>. Publishing needs an image. Setting the current value again changes nothing and is not audited. Audited as <code>banner.status</code> with <code>from</code> and <code>to</code>.</p>
+<h4>Request parameters</h4><div class="table-wrap"><table><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th><th>Rules and why</th></tr></thead><tbody><tr><td>status</td><td>body</td><td>enum</td><td>yes</td><td><code>DRAFT</code>, <code>PUBLISHED</code>, <code>PAUSED</code> (case-insensitive).</td></tr></tbody></table></div>
+<h4>Example request</h4><pre><code>curl -sS -X POST &quot;$BASE/admin/api/v1/banners/$BANNER/status&quot; -H &quot;Authorization: Bearer $TOKEN&quot; -H &#x27;Content-Type: application/json&#x27; -d &#x27;{&quot;status&quot;: &quot;PUBLISHED&quot;}&#x27;</code></pre>
+<h4>Real answers</h4><pre class="out"><code>Without an image:
+HTTP 409  {"error": "not_ready_to_publish", "fields": {"missing": "image"}}
+
+With an image:
+HTTP 200
+{
+  &quot;id&quot;: &quot;71cca691-9d7f-4ffa-a0b3-535584170fcc&quot;,
+  &quot;status&quot;: &quot;PUBLISHED&quot;,
+  &quot;state&quot;: &quot;LIVE&quot;,
+  &quot;visible&quot;: true,
+  &quot;startsAt&quot;: &quot;2026-11-21T08:22:49Z&quot;,
+  &quot;endsAt&quot;: null
+}
+(other fields as in GET)</code></pre>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th><code>error</code></th><th>When</th></tr></thead><tbody><tr><td>400</td><td><code>validation_failed</code></td><td><code>fields.status</code>: "must be DRAFT, PUBLISHED or PAUSED".</td></tr><tr><td>409</td><td><code>not_ready_to_publish</code></td><td>No image yet (<code>fields.missing</code> = <code>image</code>).</td></tr><tr><td>404</td><td><code>not_found</code></td><td>No banner with this id.</td></tr><tr><td>403</td><td><code>insufficient_role</code></td><td>The caller is a VIEWER (real answer below).</td></tr><tr><td>401 / 403</td><td><code>unauthorized</code>, <code>mfa_required</code>, <code>not_staff</code></td><td>As for every staff endpoint (see the top of this page).</td></tr></tbody></table></div>
+</div></details>
+
+<details class="endpoint" id="ep-staff-banner-reorder"><summary><span class="method m-post">POST</span><span class="path">/admin/api/v1/banners/reorder</span><span class="sum">Put banners in an order</span></summary><div class="body">
+<dl class="meta"><dt>Client path</dt><dd><code>/admin/api/v1/banners/reorder</code> through the gateway (route <code>admin-api</code>, same path on registry-service)</dd><dt>Auth</dt><dd><code>Authorization: Bearer $TOKEN</code> of an aal2 staff session. Minimum role: <strong>ADMIN</strong>.</dd><dt>Rate limit</dt><dd>300 per 60 s per client IP</dd><dt>Implemented in</dt><dd><code>services/registry-service/src/main/java/app/adera/registry/banner/BannerAdminController.java</code></dd></dl>
+<h4>Purpose</h4><p>The listed banners get priorities 10 apart, first = highest (n x 10 down to 10); others are untouched. Audited once as <code>banner.reorder</code> with the ids and each change.</p>
+<h4>Request parameters</h4><div class="table-wrap"><table><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th><th>Rules and why</th></tr></thead><tbody><tr><td>ids</td><td>body</td><td>array of uuid</td><td>yes</td><td>1 to 100 distinct, existing banner ids.</td></tr></tbody></table></div>
+<h4>Example request</h4><pre><code>curl -sS -X POST &quot;$BASE/admin/api/v1/banners/reorder&quot; -H &quot;Authorization: Bearer $TOKEN&quot; -H &#x27;Content-Type: application/json&#x27; -d &#x27;{&quot;ids&quot;: [&quot;71cca691-9d7f-4ffa-a0b3-535584170fcc&quot;, &quot;4bfacb54-b2eb-4294-847b-eeaae1b2253c&quot;]}&#x27;</code></pre>
+<h4>Real answer (shortened to id, priority and state)</h4><pre class="out"><code>HTTP 200
+[
+  {
+    &quot;id&quot;: &quot;71cca691-9d7f-4ffa-a0b3-535584170fcc&quot;,
+    &quot;priority&quot;: 20,
+    &quot;state&quot;: &quot;LIVE&quot;
+  },
+  {
+    &quot;id&quot;: &quot;4bfacb54-b2eb-4294-847b-eeaae1b2253c&quot;,
+    &quot;priority&quot;: 10,
+    &quot;state&quot;: &quot;LIVE&quot;
+  }
+]</code></pre>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th><code>error</code></th><th>When</th></tr></thead><tbody><tr><td>400</td><td><code>validation_failed</code></td><td><code>fields.ids</code>: empty, too long, a duplicate, not a uuid, or "no such banner: ...".</td></tr><tr><td>403</td><td><code>insufficient_role</code></td><td>The caller is a VIEWER (real answer below).</td></tr><tr><td>401 / 403</td><td><code>unauthorized</code>, <code>mfa_required</code>, <code>not_staff</code></td><td>As for every staff endpoint (see the top of this page).</td></tr></tbody></table></div>
+</div></details>
+
+<details class="endpoint" id="ep-staff-banner-delete"><summary><span class="method m-delete">DELETE</span><span class="path">/admin/api/v1/banners/{bannerId}</span><span class="sum">Delete a banner</span></summary><div class="body">
+<dl class="meta"><dt>Client path</dt><dd><code>/admin/api/v1/banners/{bannerId}</code> through the gateway (route <code>admin-api</code>, same path on registry-service)</dd><dt>Auth</dt><dd><code>Authorization: Bearer $TOKEN</code> of an aal2 staff session. Minimum role: <strong>ADMIN</strong>.</dd><dt>Rate limit</dt><dd>300 per 60 s per client IP</dd><dt>Implemented in</dt><dd><code>services/registry-service/src/main/java/app/adera/registry/banner/BannerAdminController.java</code></dd></dl>
+<h4>Purpose</h4><p>Deletes the banner and its image files. Cannot be undone; pausing is the reversible alternative. Audited as <code>banner.delete</code> with the title, placement and status.</p>
+
+<h4>Example request</h4><pre><code>curl -sS -X DELETE &quot;$BASE/admin/api/v1/banners/$BANNER&quot; -H &quot;Authorization: Bearer $TOKEN&quot;</code></pre>
+<h4>Real answer</h4><pre class="out"><code>HTTP 200
+{
+  &quot;status&quot;: &quot;deleted&quot;
+}</code></pre>
+<h4>Errors</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th><code>error</code></th><th>When</th></tr></thead><tbody><tr><td>404</td><td><code>not_found</code></td><td>No banner with this id.</td></tr><tr><td>403</td><td><code>insufficient_role</code></td><td>The caller is a VIEWER (real answer below).</td></tr><tr><td>401 / 403</td><td><code>unauthorized</code>, <code>mfa_required</code>, <code>not_staff</code></td><td>As for every staff endpoint (see the top of this page).</td></tr></tbody></table></div>
+</div></details>
+
 </section>
 <div class="pager"><a class="prev" href="08a-user-api.html"><small>Previous</small>8a. End-user API</a><a class="next" href="08c-partner-api.html"><small>Next</small>8c. Partner API</a></div>
 <p class="footer">Adera backend documentation &middot; last verified 2026-10-25 &middot; <a href="../index.html">contents</a></p>
