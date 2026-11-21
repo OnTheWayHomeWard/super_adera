@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Banners in the super app | Banners in the super app</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+<button id="menu-btn" type="button" aria-label="Toggle menu">Menu</button>
+<a class="brand" href="index.html">Banners in the super app</a>
+<span class="spacer"></span>
+<button id="theme-btn" type="button" aria-label="Toggle light or dark theme">Theme</button>
+</header>
+<div class="layout">
+<nav class="sidebar" aria-label="Pages in this guide">
+<h4>This guide</h4>
+<ul><li><a href="index.html" class="current">Overview and contents</a></li><li><a href="fetching.html">Fetching banners</a></li><li><a href="rendering.html">Rendering each placement</a></li><li><a href="actions.html">Handling a tap</a></li><li><a href="errors.html">Error codes</a></li><li><a href="known-issues.html">Known issues and not built yet</a></li></ul>
+</nav>
+<main>
+<h1>Banners in the super app</h1>
+<p class="lead">How the Adera app fetches the promotional banners for a screen, renders them, and what it does when the user taps one: for super-app (client) developers.</p>
+
+<div class="callout"><span class="label">Audience</span><p><strong>Super-app developers</strong>: the Adera mobile and web client team. Banners are created and scheduled by Adera staff in the backoffice; the app only reads them. Nothing here links outside this folder: it can be zipped and shared on its own.</p></div>
+<h2 id="overview">Overview</h2>
+<p>A banner is a picture with a title (and maybe a subtitle) shown in one of four places in the app. Tapping it opens a mini app at a given page, a screen of the super app, a web page on an approved domain, or nothing. The app asks one public endpoint for the banners of a placement; the server answers with only the banners that should be showing <em>right now</em>, highest priority first, with three image sizes and everything needed to act on a tap.</p>
+<div class="callout why"><span class="label">Why it is built this way</span><p>Staff schedule banners ahead of time and pause them in an emergency, and a banner for a mini app must vanish when that app is suspended. If the app decided any of that, old app versions would show stale or unsafe banners. So the server decides what is visible at every request and the app renders exactly what it gets.</p></div>
+<h2 id="conventions">Conventions</h2>
+<ul>
+<li><strong>Base URL.</strong> Everything goes through the gateway: <code>$GATEWAY</code> is <code>http://127.0.0.1:9080</code> on the dev stack (the staging server and the public API host later). Paths are exactly what the client calls.</li>
+<li><strong>Authentication.</strong> None: the banner list is public, so it works on the home screen before sign-in. Sending the user's <code>Authorization</code> header does no harm and changes nothing.</li>
+<li><strong>Errors</strong> have the shape <code>{"error": "&lt;code&gt;", "fields": {...}}</code>. See "Error codes".</li>
+<li><strong>Languages.</strong> <code>title</code> and <code>subtitle</code> are objects with up to three languages (<code>en</code>, <code>am</code>, <code>om</code>); English is always there. Show the user's language, else English.</li>
+<li><strong>Times</strong> are ISO-8601 UTC. <strong>Ids</strong> are UUIDs.</li>
+</ul>
+<h2 id="glossary">Glossary</h2>
+<div class="table-wrap"><table><thead><tr><th>Term</th><th>Meaning</th></tr></thead><tbody>
+<tr><td>Placement</td><td>Where a banner is shown: <code>HOME_HERO</code>, <code>FEATURED</code>, <code>PROMOTIONS</code>, <code>CATALOG_TOP</code>.</td></tr>
+<tr><td>Category</td><td>What it is about: <code>PROMOTION</code>, <code>FEATURED_APP</code>, <code>ANNOUNCEMENT</code>, <code>EVENT</code>. Useful for a small label or a filter.</td></tr>
+<tr><td>Action type</td><td>What a tap does: <code>MINI_APP</code>, <code>INTERNAL</code>, <code>EXTERNAL</code>, <code>NONE</code>.</td></tr>
+<tr><td>Target</td><td>Where the tap goes: a route inside the mini app, an <code>adera://</code> link, or an https URL.</td></tr>
+<tr><td>Linked app</td><td>The mini app a banner is about. Its banners disappear by themselves while the app is not live.</td></tr>
+<tr><td>Image sizes</td><td><code>small</code> (longest side 480 px), <code>medium</code> (960), <code>large</code> (1600), JPEG.</td></tr>
+</tbody></table></div>
+<h2 id="contents">Contents</h2>
+<div class="table-wrap"><table><thead><tr><th>Page</th><th>What it covers</th></tr></thead><tbody>
+<tr><td><a href="fetching.html">Fetching banners</a></td><td>The endpoint, its filters, the answer field by field, ordering, caching and refreshing.</td></tr>
+<tr><td><a href="rendering.html">Rendering each placement</a></td><td>What each placement looks like, choosing the image size, languages, empty and error states.</td></tr>
+<tr><td><a href="actions.html">Handling a tap</a></td><td>What to do for each action type, and the checks the app should still make.</td></tr>
+<tr><td><a href="errors.html">Error codes</a></td><td>Every answer that is not a list, and what to do.</td></tr>
+<tr><td><a href="known-issues.html">Known issues and not built yet</a></td><td>Limits of the first version.</td></tr>
+</tbody></table></div>
+
+<div class="pager"><span class="placeholder"></span><a class="next" href="fetching.html"><small>Next</small>Fetching banners</a></div>
+<p class="footer">Adera guides &middot; banners &middot; design written 2026-11-21, before the code; illustrative examples are marked</p>
+</main>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Handling a tap | Banners in the super app</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+<button id="menu-btn" type="button" aria-label="Toggle menu">Menu</button>
+<a class="brand" href="index.html">Banners in the super app</a>
+<span class="spacer"></span>
+<button id="theme-btn" type="button" aria-label="Toggle light or dark theme">Theme</button>
+</header>
+<div class="layout">
+<nav class="sidebar" aria-label="Pages in this guide">
+<h4>This guide</h4>
+<ul><li><a href="index.html">Overview and contents</a></li><li><a href="fetching.html">Fetching banners</a></li><li><a href="rendering.html">Rendering each placement</a></li><li><a href="actions.html" class="current">Handling a tap</a></li><li><a href="errors.html">Error codes</a></li><li><a href="known-issues.html">Known issues and not built yet</a></li></ul>
+</nav>
+<main>
+<h1>Handling a tap</h1>
+<p class="lead">What the app does for each action type.</p>
+<h2 id="overview">Overview</h2>
+<p>The server validated <code>actionType</code> and <code>target</code> when staff saved the banner, so the values have a known shape. The app still treats them as data: it never runs or evaluates them, and it only opens what the rules below allow.</p>
+<div class="table-wrap"><table><thead><tr><th><code>actionType</code></th><th><code>target</code></th><th>What the app does</th></tr></thead><tbody>
+<tr><td><code>MINI_APP</code></td><td>A route starting with <code>/</code>, or <code>null</code></td><td>Opens the linked mini app (<code>app</code>) through the normal launch, then navigates it to <code>target</code> (or its home when null).</td></tr>
+<tr><td><code>INTERNAL</code></td><td><code>adera://...</code></td><td>Opens the super-app screen for that link (your own deep-link router).</td></tr>
+<tr><td><code>EXTERNAL</code></td><td><code>https://...</code> on an approved domain</td><td>Opens the page in the system browser or an in-app browser tab.</td></tr>
+<tr><td><code>NONE</code></td><td><code>null</code></td><td>Nothing; do not show a pressed state.</td></tr>
+</tbody></table></div>
+<h2 id="mini-app">MINI_APP: open a mini app at a page</h2>
+<ol>
+<li>The user must be signed in (a launch needs the user's session). If the banner was tapped before sign-in, sign in first, then continue.</li>
+<li>Launch <code>app.slug</code> exactly as if the user had opened it from the catalog: <code>POST /api/v1/me/apps/{app}/launch</code>, with consent and the launch token working as usual. The banner gives the mini app no extra rights.</li>
+<li>The launch answer's <code>url</code> is the app's registered address with <code>?launch=&lt;token&gt;</code>. Put the route into the <em>path</em> of that address and keep its query: <code>https://www.zayride.com?launch=eyJ...</code> with target <code>/promo/first-ride</code> becomes <code>https://www.zayride.com/promo/first-ride?launch=eyJ...</code>. Join the paths so there is exactly one <code>/</code> between them. The host never changes: a target is always a path (the server refuses anything else, including <code>//host</code>).</li>
+<li>With a <code>null</code> target, load <code>url</code> as it is (the app's home).</li>
+<li>If the launch is refused (<code>403 app_not_live</code>: the app was suspended a moment ago), show the usual "app unavailable" message.</li>
+</ol>
+<h2 id="internal">INTERNAL: a super-app screen</h2>
+<p>Hand <code>target</code> to the app's deep-link router (the same one that handles <code>adera://</code> links from notifications). An unknown link (an older app version that does not have that screen yet) does nothing, or opens the home screen; never crash.</p>
+<p>Links in use are agreed between staff and the app team (for example <code>adera://wallet</code>). The server only checks the <code>adera://</code> prefix and the characters, not that the screen exists.</p>
+<h2 id="external">EXTERNAL: a web page</h2>
+<ul>
+<li>Open in the system browser or an in-app browser tab (Custom Tabs, SFSafariViewController), never inside a mini-app WebView and never with the user's session or the bridge.</li>
+<li>The server accepted the URL only if it is <code>https://</code> and its host is on the operators' allow-list. Check <code>https://</code> again before opening as defence in depth.</li>
+</ul>
+<h2 id="none">NONE</h2>
+<p>An image-only banner (an announcement). Not tappable.</p>
+<h2 id="analytics">Analytics (suggestion)</h2>
+<p>Record "shown" when at least half of a banner was on screen for a second and "tapped" on tap, with the banner <code>id</code>, <code>placement</code> and position. There is no server endpoint for these events yet.</p>
+
+<div class="pager"><a class="prev" href="rendering.html"><small>Previous</small>Rendering each placement</a><a class="next" href="errors.html"><small>Next</small>Error codes</a></div>
+<p class="footer">Adera guides &middot; banners &middot; design written 2026-11-21, before the code; illustrative examples are marked</p>
+</main>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

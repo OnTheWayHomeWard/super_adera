@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fetching banners | Banners in the super app</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+<button id="menu-btn" type="button" aria-label="Toggle menu">Menu</button>
+<a class="brand" href="index.html">Banners in the super app</a>
+<span class="spacer"></span>
+<button id="theme-btn" type="button" aria-label="Toggle light or dark theme">Theme</button>
+</header>
+<div class="layout">
+<nav class="sidebar" aria-label="Pages in this guide">
+<h4>This guide</h4>
+<ul><li><a href="index.html">Overview and contents</a></li><li><a href="fetching.html" class="current">Fetching banners</a></li><li><a href="rendering.html">Rendering each placement</a></li><li><a href="actions.html">Handling a tap</a></li><li><a href="errors.html">Error codes</a></li><li><a href="known-issues.html">Known issues and not built yet</a></li></ul>
+</nav>
+<main>
+<h1>Fetching banners</h1>
+<p class="lead">One call per screen: the banners that are showing now for one placement.</p>
+<h2 id="overview">Overview</h2>
+<p>The server filters everything that must not be shown (drafts, paused banners, banners that have not started or have ended, banners of a mini app that is not live) and sorts the rest. The app shows the list it gets, in that order.</p>
+<details class="endpoint" id="ep-list" open><summary><span class="method m-get">GET</span><span class="path">/api/v1/banners</span><span class="sum">Banners showing right now</span></summary><div class="body">
+<dl class="meta"><dt>Who may call</dt><dd>Anyone; no sign-in needed</dd><dt>Rate limit</dt><dd>300 per minute per client address (the gateway answers 429 above that)</dd><dt>Caching</dt><dd>The answer carries <code>Cache-Control: public, max-age=60</code></dd></dl>
+<div class="table-wrap"><table><thead><tr><th>Query</th><th>Type</th><th>Required</th><th>Meaning</th></tr></thead><tbody>
+<tr><td><code>placement</code></td><td><code>HOME_HERO</code> | <code>FEATURED</code> | <code>PROMOTIONS</code> | <code>CATALOG_TOP</code></td><td>no</td><td>Only banners for this place. A screen normally passes its own placement. Without it, banners of all placements come back.</td></tr>
+<tr><td><code>category</code></td><td><code>PROMOTION</code> | <code>FEATURED_APP</code> | <code>ANNOUNCEMENT</code> | <code>EVENT</code></td><td>no</td><td>Only this category (for example a "Featured apps" strip asks for <code>FEATURED_APP</code>).</td></tr>
+<tr><td><code>limit</code></td><td>whole number 1 to 50</td><td>no, default 10</td><td>At most this many, highest priority first.</td></tr>
+</tbody></table></div>
+<h4>Request</h4>
+<pre><code>curl -sS "$GATEWAY/api/v1/banners?placement=HOME_HERO&amp;limit=5"</code></pre>
+<h4>Answer (illustrative until captured)</h4>
+<pre class="out"><code>HTTP 200
+Cache-Control: public, max-age=60
+
+[
+  {
+    "id": "&lt;uuid&gt;",
+    "title": {"en": "Your first ride is on us", "am": "..."},
+    "subtitle": {"en": "Up to 150 birr off"},
+    "placement": "HOME_HERO",
+    "category": "FEATURED_APP",
+    "actionType": "MINI_APP",
+    "target": "/promo/first-ride",
+    "app": {"id": "&lt;uuid&gt;", "slug": "demo-ride", "name": {"en": "Ride Hailing"}, "logoUrl": "&lt;signed link&gt;"},
+    "images": {
+      "small":  {"url": "&lt;signed link&gt;", "width": 480, "height": 200},
+      "medium": {"url": "&lt;signed link&gt;", "width": 960, "height": 400},
+      "large":  {"url": "&lt;signed link&gt;", "width": 1200, "height": 500}
+    },
+    "priority": 100,
+    "startsAt": "2026-11-20T00:00:00Z",
+    "endsAt": null
+  }
+]</code></pre>
+</div></details>
+<h2 id="fields">The answer, field by field</h2>
+<div class="table-wrap"><table><thead><tr><th>Field</th><th>Type</th><th>Use</th></tr></thead><tbody>
+<tr><td><code>id</code></td><td>uuid</td><td>Key for lists and for analytics events ("banner shown", "banner tapped").</td></tr>
+<tr><td><code>title</code>, <code>subtitle</code></td><td>language objects</td><td>Text over or under the picture. <code>subtitle</code> may be <code>{}</code>.</td></tr>
+<tr><td><code>placement</code>, <code>category</code></td><td>enums</td><td>Already filtered by your query; the category can drive a small label ("Event", "New app").</td></tr>
+<tr><td><code>actionType</code>, <code>target</code></td><td>enum, string or null</td><td>What a tap does: see "Handling a tap".</td></tr>
+<tr><td><code>app</code></td><td>object or null</td><td>The linked mini app: <code>id</code>, <code>slug</code>, <code>name</code>, <code>logoUrl</code>. Always present for <code>MINI_APP</code> and <code>FEATURED_APP</code>; may be present for others.</td></tr>
+<tr><td><code>images</code></td><td>object</td><td><code>small</code>, <code>medium</code>, <code>large</code>, each with a signed <code>url</code> and the pixel <code>width</code> and <code>height</code>.</td></tr>
+<tr><td><code>priority</code></td><td>number</td><td>Already applied to the order; you do not need to sort.</td></tr>
+<tr><td><code>startsAt</code>, <code>endsAt</code></td><td>time, time or null</td><td>For information (for example a countdown on an event banner). Do not hide or show by these yourself.</td></tr>
+</tbody></table></div>
+<h2 id="refresh">Caching and refreshing</h2>
+<ul>
+<li>Fetch when the screen opens and when it comes back to the foreground after more than a minute. The 60-second cache header lets HTTP caches reuse the answer.</li>
+<li>Image links are signed and expire after 60 minutes. Do not store them: fetch the list again and use the new links. Cache the downloaded picture under the banner <code>id</code> plus the image file name (the part of the URL path before <code>?</code>), which changes whenever staff replace the image.</li>
+<li>Banners start and end on the server's clock. A banner that ends while the screen is open stays until the next fetch; that is fine.</li>
+</ul>
+
+<div class="pager"><a class="prev" href="index.html"><small>Previous</small>Overview and contents</a><a class="next" href="rendering.html"><small>Next</small>Rendering each placement</a></div>
+<p class="footer">Adera guides &middot; banners &middot; design written 2026-11-21, before the code; illustrative examples are marked</p>
+</main>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Known issues and not built yet | Banners in the super app</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+<button id="menu-btn" type="button" aria-label="Toggle menu">Menu</button>
+<a class="brand" href="index.html">Banners in the super app</a>
+<span class="spacer"></span>
+<button id="theme-btn" type="button" aria-label="Toggle light or dark theme">Theme</button>
+</header>
+<div class="layout">
+<nav class="sidebar" aria-label="Pages in this guide">
+<h4>This guide</h4>
+<ul><li><a href="index.html">Overview and contents</a></li><li><a href="fetching.html">Fetching banners</a></li><li><a href="rendering.html">Rendering each placement</a></li><li><a href="actions.html">Handling a tap</a></li><li><a href="errors.html">Error codes</a></li><li><a href="known-issues.html" class="current">Known issues and not built yet</a></li></ul>
+</nav>
+<main>
+<h1>Known issues and not built yet</h1>
+<p class="lead">Limits of the first version, and decisions taken where the design was silent.</p>
+<h2 id="not-built">Not built yet</h2>
+<ul>
+<li>No targeting by market, language, user group or app version: every user sees the same banners.</li>
+<li>No impression or tap counting on the server.</li>
+<li>No list of the <code>adera://</code> screens the server could check targets against.</li>
+</ul>
+<h2 id="decisions">Decisions</h2>
+<ul>
+<li>The list is public (no sign-in), so banners can be shown before login.</li>
+<li>Visibility is computed on every request; nothing is stored when a banner starts or ends.</li>
+<li>The external-domain allow-list is checked when a banner is saved, not on every read.</li>
+</ul>
+
+<div class="pager"><a class="prev" href="errors.html"><small>Previous</small>Error codes</a></div>
+<p class="footer">Adera guides &middot; banners &middot; design written 2026-11-21, before the code; illustrative examples are marked</p>
+</main>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

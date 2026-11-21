@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rendering each placement | Banners in the super app</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+<button id="menu-btn" type="button" aria-label="Toggle menu">Menu</button>
+<a class="brand" href="index.html">Banners in the super app</a>
+<span class="spacer"></span>
+<button id="theme-btn" type="button" aria-label="Toggle light or dark theme">Theme</button>
+</header>
+<div class="layout">
+<nav class="sidebar" aria-label="Pages in this guide">
+<h4>This guide</h4>
+<ul><li><a href="index.html">Overview and contents</a></li><li><a href="fetching.html">Fetching banners</a></li><li><a href="rendering.html" class="current">Rendering each placement</a></li><li><a href="actions.html">Handling a tap</a></li><li><a href="errors.html">Error codes</a></li><li><a href="known-issues.html">Known issues and not built yet</a></li></ul>
+</nav>
+<main>
+<h1>Rendering each placement</h1>
+<p class="lead">What each placement is for, which image size to load, and the empty and error states.</p>
+<h2 id="placements">Placements</h2>
+<div class="table-wrap"><table><thead><tr><th>Placement</th><th>Where</th><th>Suggested layout</th><th>Suggested <code>limit</code></th></tr></thead><tbody>
+<tr><td><code>HOME_HERO</code></td><td>Top of the home screen</td><td>Full-width carousel, one banner at a time, auto-advancing; title and subtitle over the bottom of the picture.</td><td>5</td></tr>
+<tr><td><code>FEATURED</code></td><td>"Featured" strip on the home screen</td><td>Horizontal row of cards about 70% of the screen wide, title under the picture, the linked app's logo and name if <code>app</code> is present.</td><td>10</td></tr>
+<tr><td><code>PROMOTIONS</code></td><td>Promotions / offers screen</td><td>Vertical list of full-width cards with title and subtitle.</td><td>20</td></tr>
+<tr><td><code>CATALOG_TOP</code></td><td>Top of the mini-app catalog</td><td>One slim full-width banner (show the first one only, or a small carousel).</td><td>3</td></tr>
+</tbody></table></div>
+<p>The backoffice preview uses these layouts, so what staff see while editing is close to what users see.</p>
+<h2 id="image-size">Choosing the image size</h2>
+<p>Pick the smallest size whose <code>width</code> covers the space the banner takes on screen, in physical pixels (logical width times the device pixel ratio). Example: a full-width hero on a 393-point-wide phone at 3x needs 1179 px, so <code>large</code>; a 70% card on the same phone needs 825 px, so <code>medium</code>; a list thumbnail takes <code>small</code>. Use <code>width</code> and <code>height</code> to keep the aspect ratio and to reserve the space before the picture arrives, so the screen does not jump.</p>
+<p>Images are never enlarged by the server, so for a small upload two or three sizes may be the same picture. Staff are told to upload at least 1600 px wide pictures.</p>
+<h2 id="text">Text and languages</h2>
+<ul>
+<li>Show <code>title[lang]</code>, falling back to <code>title.en</code>. Same for <code>subtitle</code>; if it has no text, show only the title.</li>
+<li>Titles are at most 80 characters and subtitles 160. Allow two lines for the title and two for the subtitle, then cut with an ellipsis.</li>
+<li>Text over a picture needs a dark gradient behind it to stay readable whatever the picture is.</li>
+</ul>
+<h2 id="states">Empty and error states</h2>
+<ul>
+<li><strong>Empty list:</strong> hide the placement completely (no empty carousel, no placeholder).</li>
+<li><strong>Error or no network:</strong> hide the placement, or keep showing the last list you had if it is less than an hour old (the image links expire after 60 minutes). Never block the screen on banners.</li>
+<li><strong>A picture that fails to load:</strong> skip that banner.</li>
+</ul>
+
+<div class="pager"><a class="prev" href="fetching.html"><small>Previous</small>Fetching banners</a><a class="next" href="actions.html"><small>Next</small>Handling a tap</a></div>
+<p class="footer">Adera guides &middot; banners &middot; design written 2026-11-21, before the code; illustrative examples are marked</p>
+</main>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

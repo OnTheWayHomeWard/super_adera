@@ -48,12 +48,14 @@
 </li>
 <li><a href="15-staging.html">15. Staging server</a>
 </li>
+<li><a href="16-banners.html">16. Banners</a>
+</li>
 </ul>
 <h4>Endpoints</h4><ul>
 <li><a href="08a-user-api.html">8a. End-user API</a>
 </li>
 <li><a href="08b-staff-api.html" class=current>8b. Staff / dashboard API</a>
-<ul><li><a href="#how-it-works">How staff calls work</a></li><li><a href="#me">Who am I</a></li><li><a href="#apps">Mini apps</a></li><li><a href="#config">Capabilities, payment settings, limits, addresses</a></li><li><a href="#keys">Partner keys</a></li><li><a href="#moderation">Reviews and reports</a></li><li><a href="#audit-staff">Audit log and staff accounts</a></li><li><a href="#dashboard-users">Dashboard counts and users</a></li><li><a href="#templates">Notification templates</a></li><li><a href="#delivery-log">Delivery log and usage</a></li></ul>
+<ul><li><a href="#how-it-works">How staff calls work</a></li><li><a href="#me">Who am I</a></li><li><a href="#apps">Mini apps</a></li><li><a href="#config">Capabilities, payment settings, limits, addresses</a></li><li><a href="#keys">Partner keys</a></li><li><a href="#moderation">Reviews and reports</a></li><li><a href="#audit-staff">Audit log and staff accounts</a></li><li><a href="#dashboard-users">Dashboard counts and users</a></li><li><a href="#templates">Notification templates</a></li><li><a href="#delivery-log">Delivery log and usage</a></li><li><a href="#banners">Banners</a></li></ul>
 </li>
 <li><a href="08c-partner-api.html">8c. Partner API</a>
 </li>
@@ -2077,6 +2079,20 @@ Content-Type: application/json
 (Captured from the development database while it held no notifications; with data, byStatus is like {"SENT": 7, "FAILED": 1}.)</code></pre>
 <h4>How to use it</h4><ul><li>Message values are never part of any of these answers.</li></ul>
 </div></details>
+</section>
+<section><h2 id="banners">Banners</h2>
+<p><span class="badge notyet">design, not built yet</span> Promotional banners shown in the super app (design and rules: <a href="16-banners.html">16. Banners</a>). Served by registry-service through the route <code>admin-api</code>. Reads need VIEWER, writes ADMIN; every write is audited (<code>banner.*</code>). Real requests and answers are added here once the endpoints are built.</p>
+<div class="table-wrap"><table><thead><tr><th>Method and path</th><th>Role</th><th>Body / query</th><th>Answer</th></tr></thead><tbody>
+<tr><td><code>GET /admin/api/v1/banners</code></td><td>VIEWER</td><td>query <code>placement</code>, <code>category</code>, <code>state</code> (<code>DRAFT</code>, <code>PAUSED</code>, <code>SCHEDULED</code>, <code>LIVE</code>, <code>ENDED</code>), <code>appId</code>, <code>page</code> (0), <code>size</code> (50, at most 100)</td><td>array of banners, <code>X-Total-Count</code></td></tr>
+<tr><td><code>GET /admin/api/v1/banners/settings</code></td><td>VIEWER</td><td>-</td><td>allowed external domains, enum values, image sizes, upload limit</td></tr>
+<tr><td><code>GET /admin/api/v1/banners/{id}</code></td><td>VIEWER</td><td>-</td><td>one banner; 404 <code>not_found</code></td></tr>
+<tr><td><code>POST /admin/api/v1/banners</code></td><td>ADMIN</td><td><code>title</code>*, <code>subtitle</code>, <code>placement</code>*, <code>category</code>*, <code>appId</code>, <code>actionType</code>*, <code>target</code>, <code>startsAt</code>*, <code>endsAt</code>, <code>priority</code></td><td>the new banner (<code>status: DRAFT</code>)</td></tr>
+<tr><td><code>PATCH /admin/api/v1/banners/{id}</code></td><td>ADMIN</td><td>any of the fields above</td><td>the banner</td></tr>
+<tr><td><code>POST /admin/api/v1/banners/{id}/image</code></td><td>ADMIN</td><td>multipart <code>file</code></td><td>the banner with <code>images</code>; 400 bad image, 413 <code>file_too_large</code></td></tr>
+<tr><td><code>POST /admin/api/v1/banners/{id}/status</code></td><td>ADMIN</td><td><code>{"status": "PUBLISHED" | "PAUSED" | "DRAFT"}</code></td><td>the banner; 409 <code>not_ready_to_publish</code> without an image</td></tr>
+<tr><td><code>POST /admin/api/v1/banners/reorder</code></td><td>ADMIN</td><td><code>{"ids": [...]}</code> (1 to 100)</td><td>the banners in the new order</td></tr>
+<tr><td><code>DELETE /admin/api/v1/banners/{id}</code></td><td>ADMIN</td><td>-</td><td><code>{"status": "deleted"}</code></td></tr>
+</tbody></table></div>
 </section>
 <div class="pager"><a class="prev" href="08a-user-api.html"><small>Previous</small>8a. End-user API</a><a class="next" href="08c-partner-api.html"><small>Next</small>8c. Partner API</a></div>
 <p class="footer">Adera backend documentation &middot; last verified 2026-10-25 &middot; <a href="../index.html">contents</a></p>

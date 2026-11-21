@@ -1,0 +1,253 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>16. Banners | Adera docs</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+<button id="menu-btn" type="button" aria-label="Toggle menu">Menu</button>
+<a class="brand" href="../index.html">Adera docs</a>
+<span class="spacer"></span>
+<a href="../index.html">Contents</a>
+<button id="theme-btn" type="button" aria-label="Toggle light or dark theme">Theme</button>
+</header>
+<div class="layout">
+<nav class="sidebar" aria-label="Sections">
+<ul><li><a href="../index.html" class="">Home / contents</a></li></ul>
+<h4>Sections</h4><ul>
+<li><a href="01-overview.html">1. Overview</a>
+</li>
+<li><a href="02-setup.html">2. Setup and running</a>
+</li>
+<li><a href="03-tools.html">3. Tools</a>
+</li>
+<li><a href="04-services.html">4. Services</a>
+</li>
+<li><a href="05-communication.html">5. How it communicates</a>
+</li>
+<li><a href="06-security.html">6. Security model</a>
+</li>
+<li><a href="07-data.html">7. Data</a>
+</li>
+<li><a href="08-endpoints.html">8. Endpoint reference</a>
+</li>
+<li><a href="09-guides.html">9. Guides</a>
+</li>
+<li><a href="10-reference.html">10. Reference</a>
+</li>
+<li><a href="11-backoffice.html">11. Backoffice (staff dashboard)</a>
+</li>
+<li><a href="12-backoffice-guide.html">12. Backoffice guide (staff manual)</a>
+</li>
+<li><a href="13-sample-data.html">13. Sample data (test scenarios)</a>
+</li>
+<li><a href="14-bridge-consent.html">14. Mini app bridge and consent</a>
+</li>
+<li><a href="15-staging.html">15. Staging server</a>
+</li>
+<li><a href="16-banners.html" class=current>16. Banners</a>
+<ul><li><a href="#summary">1. Summary</a></li><li><a href="#model">2. Data</a></li><li><a href="#visibility">3. Status and visibility</a></li><li><a href="#actions">4. Action types</a></li><li><a href="#images">5. Images</a></li><li><a href="#public-api">6. Public API</a></li><li><a href="#staff-api">7. Staff API</a></li><li><a href="#backoffice">8. Backoffice</a></li><li><a href="#config">9. Configuration</a></li><li><a href="#audit">10. Audit</a></li><li><a href="#tests">11. Tests</a></li><li><a href="#decisions">12. Decisions</a></li></ul>
+</li>
+</ul>
+<h4>Endpoints</h4><ul>
+<li><a href="08a-user-api.html">8a. End-user API</a>
+</li>
+<li><a href="08b-staff-api.html">8b. Staff / dashboard API</a>
+</li>
+<li><a href="08c-partner-api.html">8c. Partner API</a>
+</li>
+<li><a href="08d-internal-api.html">8d. Internal API</a>
+</li>
+<li><a href="08e-kratos-flows.html">8e. Kratos flows</a>
+</li>
+<li><a href="08f-operational.html">8f. Operational endpoints</a>
+</li>
+</ul>
+</nav>
+<main>
+<h1>16. Banners</h1>
+<p class="lead">Promotional banners in the super app: a picture with a title, shown in one of four places, that opens a mini app, a super-app screen or a web page when tapped. Staff manage them in the backoffice; the super app reads the ones that are showing right now with one public call.</p>
+
+<div class="callout warn"><span class="label">Status</span><p><span class="badge notyet">design, not built yet</span> This page is the agreed design, written before the code. The examples marked "illustrative" show the planned shapes; they are replaced with answers captured from the running stack once the feature is built. The frontend guide is <code>docs/guides/app-banners/</code>.</p></div>
+
+<section><h2 id="summary">1. Summary</h2>
+<ul>
+<li><strong>Where they live:</strong> registry-service (it owns the catalog, the image storage, staff roles and the audit log). One new table, <code>banner</code> (migration <code>V9__banners.sql</code>).</li>
+<li><strong>Who manages them:</strong> staff in the backoffice, new menu item <strong>Banners</strong>. VIEWER reads; ADMIN and SUPER_ADMIN create, change, publish, pause and delete. Every change is written to the audit log.</li>
+<li><strong>Who reads them:</strong> the super app, through the gateway, <strong>without signing in</strong> (banners can be shown on the home screen before login): <code>GET /api/v1/banners</code>. Only banners that are showing right now are returned.</li>
+<li><strong>One switch, no clock job:</strong> staff set only <code>DRAFT</code>, <code>PUBLISHED</code> or <code>PAUSED</code>. Whether a published banner is showing is computed at read time from its start and end time and from its linked app. Nothing is ever written when a banner starts or ends.</li>
+</ul>
+</section>
+
+<section><h2 id="model">2. Data</h2>
+<div class="table-wrap"><table>
+<thead><tr><th>Field (API)</th><th>Column</th><th>Type</th><th>Required</th><th>Rules and why</th></tr></thead>
+<tbody>
+<tr><td><code>id</code></td><td><code>id</code></td><td>uuid</td><td>set by the server</td><td></td></tr>
+<tr><td><code>title</code></td><td><code>title</code> (jsonb)</td><td>object <code>{"en", "am", "om"}</code></td><td>yes, with <code>en</code></td><td>At most 80 characters per language. Same language object as an app's name, so the super app shows the user's language and falls back to English.</td></tr>
+<tr><td><code>subtitle</code></td><td><code>subtitle</code> (jsonb)</td><td>object</td><td>no (<code>{}</code>)</td><td>At most 160 characters per language. One supporting line under the title.</td></tr>
+<tr><td><code>placement</code></td><td><code>placement</code></td><td><code>HOME_HERO</code> | <code>FEATURED</code> | <code>PROMOTIONS</code> | <code>CATALOG_TOP</code></td><td>yes</td><td>Where in the super app it is shown (section 4 of the guide describes each).</td></tr>
+<tr><td><code>category</code></td><td><code>category</code></td><td><code>PROMOTION</code> | <code>FEATURED_APP</code> | <code>ANNOUNCEMENT</code> | <code>EVENT</code></td><td>yes</td><td>What it is about; the super app may filter or style by it. <code>FEATURED_APP</code> needs a linked app.</td></tr>
+<tr><td><code>appId</code></td><td><code>app_id</code> (references <code>mini_app</code>)</td><td>uuid</td><td>when <code>category = FEATURED_APP</code> or <code>actionType = MINI_APP</code></td><td>The linked mini app. While that app is not LIVE, the banner is not shown.</td></tr>
+<tr><td><code>actionType</code></td><td><code>action_type</code></td><td><code>MINI_APP</code> | <code>INTERNAL</code> | <code>EXTERNAL</code> | <code>NONE</code></td><td>yes</td><td>What a tap does (section 4).</td></tr>
+<tr><td><code>target</code></td><td><code>target</code></td><td>string, at most 500</td><td>depends on <code>actionType</code></td><td>A route inside the mini app, an <code>adera://</code> link or an https URL.</td></tr>
+<tr><td><code>images</code></td><td><code>image_id</code>, <code>image_variants</code> (jsonb)</td><td>three sizes</td><td>to publish</td><td>Uploaded separately (section 5).</td></tr>
+<tr><td><code>startsAt</code></td><td><code>starts_at</code></td><td>ISO-8601 time</td><td>yes</td><td>Not shown before this moment.</td></tr>
+<tr><td><code>endsAt</code></td><td><code>ends_at</code></td><td>ISO-8601 time or null</td><td>no</td><td>Null means open-ended. Must be later than <code>startsAt</code> (also a database check).</td></tr>
+<tr><td><code>priority</code></td><td><code>priority</code></td><td>whole number 0 to 100000</td><td>no (0)</td><td><strong>Higher is shown first</strong>, then the newest. (Apps use the opposite: lower first. Banners follow the usual "higher wins" rule because staff push a banner up by raising it.)</td></tr>
+<tr><td><code>status</code></td><td><code>status</code></td><td><code>DRAFT</code> | <code>PUBLISHED</code> | <code>PAUSED</code></td><td>set by the server (<code>DRAFT</code>)</td><td>The only switch staff set; changed with the status endpoint.</td></tr>
+<tr><td><code>state</code></td><td>(computed)</td><td><code>DRAFT</code> | <code>PAUSED</code> | <code>SCHEDULED</code> | <code>LIVE</code> | <code>ENDED</code></td><td>-</td><td>The label the backoffice shows (section 3). Never stored.</td></tr>
+<tr><td><code>createdBy</code>, <code>updatedBy</code>, <code>createdAt</code>, <code>updatedAt</code></td><td>same names</td><td>uuid, time</td><td>set by the server</td><td>Staff ids from the gateway-verified headers.</td></tr>
+</tbody></table></div>
+</section>
+
+<section><h2 id="visibility">3. Status and visibility</h2>
+<p>Staff set one switch. The rest is computed every time someone reads, from the clock:</p>
+<pre class="nocopy"><code>shown  =  status = PUBLISHED
+      AND starts_at &lt;= now
+      AND (ends_at IS NULL OR now &lt; ends_at)
+      AND (no linked app OR the linked app is LIVE)</code></pre>
+<div class="table-wrap"><table>
+<thead><tr><th>Stored <code>status</code></th><th>Times</th><th>Computed <code>state</code> (backoffice label)</th><th>Shown to users?</th></tr></thead>
+<tbody>
+<tr><td><code>DRAFT</code></td><td>any</td><td><code>DRAFT</code> (Draft)</td><td>no</td></tr>
+<tr><td><code>PAUSED</code></td><td>any</td><td><code>PAUSED</code> (Paused)</td><td>no</td></tr>
+<tr><td><code>PUBLISHED</code></td><td>now &lt; <code>startsAt</code></td><td><code>SCHEDULED</code> (Scheduled)</td><td>no, it appears by itself at <code>startsAt</code></td></tr>
+<tr><td><code>PUBLISHED</code></td><td>inside the window</td><td><code>LIVE</code> (Live)</td><td>yes, if the linked app (if any) is LIVE</td></tr>
+<tr><td><code>PUBLISHED</code></td><td><code>endsAt</code> &lt;= now</td><td><code>ENDED</code> (Ended)</td><td>no, it disappears by itself at <code>endsAt</code></td></tr>
+</tbody></table></div>
+<p>The admin answers carry both <code>state</code> and <code>visible</code>. They differ in one case only: <code>state = LIVE</code> but the linked app is not LIVE (paused, killed or still a draft), so <code>visible = false</code>; the backoffice says so next to the badge. When the app goes LIVE again, the banner is back without anyone touching it.</p>
+<p><strong>Publishing needs an image.</strong> <code>DRAFT</code> or <code>PAUSED</code> to <code>PUBLISHED</code> without an uploaded image answers <code>409 not_ready_to_publish</code> with <code>{"missing": "image"}</code>, the same way an app cannot go LIVE without a logo. Any other change between the three values is allowed. Editing a published banner is allowed and takes effect at once (the public answer may be cached for up to 60 seconds).</p>
+</section>
+
+<section><h2 id="actions">4. Action types</h2>
+<div class="table-wrap"><table>
+<thead><tr><th><code>actionType</code></th><th>What a tap does</th><th><code>target</code></th><th>Linked app</th></tr></thead>
+<tbody>
+<tr><td><code>MINI_APP</code></td><td>Opens the linked mini app through the normal launch (consent and launch token as for any launch), at the route <code>target</code>.</td><td>A path starting with <code>/</code>, such as <code>/promo/first-ride</code> (no <code>//</code> at the start, no spaces), or empty/null for the app's home.</td><td>required</td></tr>
+<tr><td><code>INTERNAL</code></td><td>Opens a super-app screen.</td><td>Required: an <code>adera://</code> link, such as <code>adera://wallet</code>.</td><td>optional</td></tr>
+<tr><td><code>EXTERNAL</code></td><td>Opens a web page (in the system browser or an in-app browser tab, not in a mini-app WebView).</td><td>Required: an <code>https://</code> URL whose host is on the allow-list <code>BANNER_EXTERNAL_DOMAINS</code> (the domain itself or any subdomain of it). No user name or password in the URL.</td><td>optional</td></tr>
+<tr><td><code>NONE</code></td><td>Nothing: an image only.</td><td>Must be empty (null).</td><td>optional</td></tr>
+</tbody></table></div>
+<p>Why the allow-list: a banner is shown to every user with Adera's name on it. A typo or a compromised staff account must not be able to send everyone to a phishing page, so external links can only go to domains the operators configured.</p>
+<p>The allow-list is checked when a banner is saved. Removing a domain from the list later does not hide banners already saved with it (see decisions).</p>
+</section>
+
+<section><h2 id="images">5. Images</h2>
+<p>Uploaded with <code>POST /admin/api/v1/banners/{id}/image</code> (multipart field <code>file</code>), with the same checks as an app logo: the content is decoded (the file name and declared type are not trusted), only PNG, JPEG, GIF and BMP are accepted, dimension limits guard against decompression bombs, and re-encoding drops metadata. Up to 4 MiB (<code>BANNER_MAX_BYTES</code>).</p>
+<p>The server stores three sizes in RustFS, each with its longest side at most:</p>
+<div class="table-wrap"><table>
+<thead><tr><th>Name</th><th>Longest side</th><th>Use it for</th></tr></thead>
+<tbody>
+<tr><td><code>small</code></td><td>480 px</td><td>Thumbnails, lists, small phones</td></tr>
+<tr><td><code>medium</code></td><td>960 px</td><td>Most phones at full width</td></tr>
+<tr><td><code>large</code></td><td>1600 px</td><td>Tablets and wide screens</td></tr>
+</tbody></table></div>
+<p>An image is never made larger: a 600 px wide upload gives a 480 px <code>small</code> and 600 px <code>medium</code> and <code>large</code>. Each size is JPEG (photos are much smaller as JPEG than as PNG; transparency is flattened onto white). Keys: <code>banners/{banner id}/{image id}/{size}.jpg</code>. Replacing the image writes a new image id and deletes the old files. Answers carry a signed link per size, valid for <code>STORAGE_PRESIGN_MINUTES</code> (60), plus its width and height so the client can reserve the space before the picture loads.</p>
+</section>
+
+<section><h2 id="public-api">6. Public API</h2>
+<details class="endpoint" id="ep-banners-public" open><summary><span class="method m-get">GET</span><span class="path">/api/v1/banners</span><span class="sum">Banners showing right now</span></summary><div class="body">
+<dl class="meta"><dt>Who may call</dt><dd>Anyone (no sign-in): the super app, also before login</dd><dt>Gateway route</dt><dd><code>banners-public</code>: GET only, no forward-auth, the gateway adds <code>X-Gateway-Secret</code> and removes any <code>X-User-Id</code> sent by the client</dd><dt>Rate limit</dt><dd>300 per 60 s per client IP</dd><dt>Caching</dt><dd><code>Cache-Control: public, max-age=60</code></dd><dt>Implemented in</dt><dd><code>services/registry-service/src/main/java/app/adera/registry/banner/BannerPublicController.java</code></dd></dl>
+<div class="table-wrap"><table><thead><tr><th>Query</th><th>Type</th><th>Required</th><th>Meaning</th></tr></thead><tbody>
+<tr><td><code>placement</code></td><td>enum</td><td>no</td><td>Only this placement. A screen normally asks for its own placement.</td></tr>
+<tr><td><code>category</code></td><td>enum</td><td>no</td><td>Only this category.</td></tr>
+<tr><td><code>limit</code></td><td>1 to 50</td><td>no (10)</td><td>At most this many, highest priority first.</td></tr>
+</tbody></table></div>
+<p>Order: <code>priority</code> descending, then newest first. Unknown enum values or a bad limit answer <code>400 validation_failed</code> with the field. Illustrative answer (planned shape):</p>
+<pre class="out nocopy"><code>HTTP 200
+Cache-Control: public, max-age=60
+
+[
+  {
+    "id": "&lt;uuid&gt;",
+    "title": {"en": "Your first ride is on us"},
+    "subtitle": {"en": "Up to 150 birr off"},
+    "placement": "HOME_HERO",
+    "category": "FEATURED_APP",
+    "actionType": "MINI_APP",
+    "target": "/promo/first-ride",
+    "app": {"id": "&lt;uuid&gt;", "slug": "demo-ride", "name": {"en": "Ride Hailing"}, "logoUrl": "&lt;signed link&gt;"},
+    "images": {
+      "small":  {"url": "&lt;signed link&gt;", "width": 480, "height": 200},
+      "medium": {"url": "&lt;signed link&gt;", "width": 960, "height": 400},
+      "large":  {"url": "&lt;signed link&gt;", "width": 1200, "height": 500}
+    },
+    "priority": 100,
+    "startsAt": "2026-11-20T00:00:00Z",
+    "endsAt": null
+  }
+]</code></pre>
+</div></details>
+</section>
+
+<section><h2 id="staff-api">7. Staff API</h2>
+<p>All under <code>/admin/api/v1</code> through the gateway (route <code>admin-api</code>, staff session at aal2). Reads: VIEWER and up. Writes: ADMIN and up (VIEWER gets <code>403 insufficient_role</code>). Errors use the usual shape <code>{"error": "...", "fields": {...}}</code>. Full entries with real requests and answers are in <a href="08b-staff-api.html#banners">8b. Staff API, Banners</a>.</p>
+<div class="table-wrap"><table>
+<thead><tr><th>Endpoint</th><th>Role</th><th>What it does</th><th>Audit action</th></tr></thead>
+<tbody>
+<tr><td><code>GET /banners?placement=&amp;category=&amp;state=&amp;appId=&amp;page=0&amp;size=50</code></td><td>VIEWER</td><td>List, priority first then newest; total in <code>X-Total-Count</code>. <code>state</code> is the computed one (<code>LIVE</code>, <code>SCHEDULED</code>, ...).</td><td>-</td></tr>
+<tr><td><code>GET /banners/settings</code></td><td>VIEWER</td><td>The allowed external domains, the enum values, image sizes and the upload limit, so the form can check before saving.</td><td>-</td></tr>
+<tr><td><code>GET /banners/{id}</code></td><td>VIEWER</td><td>One banner.</td><td>-</td></tr>
+<tr><td><code>POST /banners</code></td><td>ADMIN</td><td>Create (as <code>DRAFT</code>). Unknown fields are refused.</td><td><code>banner.create</code></td></tr>
+<tr><td><code>PATCH /banners/{id}</code></td><td>ADMIN</td><td>Change some fields; absent = unchanged, null = clear (optional fields). The whole result is checked again (for example changing <code>actionType</code> to <code>NONE</code> needs <code>target: null</code> in the same request).</td><td><code>banner.update</code> (changed field names)</td></tr>
+<tr><td><code>POST /banners/{id}/image</code></td><td>ADMIN</td><td>Upload or replace the image (multipart <code>file</code>).</td><td><code>banner.image</code></td></tr>
+<tr><td><code>POST /banners/{id}/status</code> <code>{"status": "PUBLISHED"}</code></td><td>ADMIN</td><td>Publish, pause (<code>PAUSED</code>) or back to draft (<code>DRAFT</code>).</td><td><code>banner.status</code> (from, to)</td></tr>
+<tr><td><code>POST /banners/reorder</code> <code>{"ids": [...]}</code></td><td>ADMIN</td><td>Sets priorities so the banners show in this order (first = highest): 10 times the position counted from the end.</td><td><code>banner.reorder</code></td></tr>
+<tr><td><code>DELETE /banners/{id}</code></td><td>ADMIN</td><td>Deletes the banner and its image files. Cannot be undone; pausing is the reversible alternative.</td><td><code>banner.delete</code></td></tr>
+</tbody></table></div>
+<p>Audit entries have target type <code>banner</code>; when a banner is linked to an app, the entry also carries that app, so it shows in the app's own audit tab.</p>
+</section>
+
+<section><h2 id="backoffice">8. Backoffice</h2>
+<ul>
+<li>Menu item <strong>Banners</strong> (all roles). Tabs <strong>Live / Scheduled / Draft / Paused / Ended / All</strong> (the computed state), filters for placement and category, columns: thumbnail, title, placement, category, linked app, start, end, priority, state badge (with a note when the linked app is not LIVE).</li>
+<li><strong>New banner</strong> and <strong>edit</strong>: title and subtitle in English, Amharic and Afaan Oromoo, placement, category, linked app (picker), action type with a target field that changes with it (route for a mini app, <code>adera://</code> link, https URL with the allowed domains listed, nothing for NONE), start and end date-time pickers, priority, image upload (resized on the server), and a preview of how the banner looks in the chosen placement.</li>
+<li><strong>Publish</strong>, <strong>Pause</strong>, <strong>Back to draft</strong> buttons, and <strong>Delete</strong> behind a confirmation.</li>
+<li>A VIEWER sees the same screens read-only: no create, save, upload, status or delete buttons.</li>
+</ul>
+</section>
+
+<section><h2 id="config">9. Configuration</h2>
+<div class="table-wrap"><table>
+<thead><tr><th>Variable</th><th>Meaning</th><th>Dev value</th></tr></thead>
+<tbody>
+<tr><td><code>BANNER_EXTERNAL_DOMAINS</code></td><td>Comma-separated domains an <code>EXTERNAL</code> banner may link to (each also allows its subdomains). Empty = no external banners at all.</td><td>in <code>.env</code> (tracked), also used by staging</td></tr>
+<tr><td><code>BANNER_MAX_BYTES</code></td><td>Largest accepted upload.</td><td>4194304 (4 MiB)</td></tr>
+</tbody></table></div>
+</section>
+
+<section><h2 id="audit">10. Audit</h2>
+<p>Every write is in the audit log in the same transaction as the change: <code>banner.create</code>, <code>banner.update</code>, <code>banner.image</code>, <code>banner.status</code>, <code>banner.reorder</code>, <code>banner.delete</code>. Reads are not audited.</p>
+</section>
+
+<section><h2 id="tests">11. Tests</h2>
+<ul>
+<li>registry-service: validation of every field and combination, the computed state at fixed times, visibility (scheduled, ended, paused, draft, app not LIVE), image sizes, roles, audit rows, the public endpoint without a user id and its cache header.</li>
+<li>backoffice: form payloads, target rules, state tabs, role gating.</li>
+<li><code>tests/e2e/banners.py</code>: the real stack through the gateway with a temporary ADMIN (create, image upload, publish, public fetch with filters, scheduled, ended, paused and suspended-app banners not shown, external domain refused, VIEWER cannot write), cleaning up after itself.</li>
+<li>Seed: one demo banner per placement, a <code>FEATURED_APP</code> banner for Demo Ride, one scheduled and one ended (section 13).</li>
+</ul>
+</section>
+
+<section><h2 id="decisions">12. Decisions</h2>
+<ul>
+<li><strong>No login for the public list.</strong> The home screen shows banners before sign-in. The route still goes only through the gateway (shared secret), with the normal rate limit. (The app catalog, by contrast, needs a signed-in user.)</li>
+<li><strong>No "ended" status and no scheduled job.</strong> Start and end are only compared with the clock when reading. Nothing can be late or forgotten, and an ended banner can be extended by editing <code>endsAt</code>.</li>
+<li><strong>Titles in three languages</strong> like app names, English required.</li>
+<li><strong>Priority: higher first.</strong> Reorder sets priorities 10 apart so one banner can later be slotted between two others by hand.</li>
+<li><strong>Allow-list checked on save only.</strong> Re-checking every banner on every read would hide banners silently; operators who remove a domain should pause the banners that use it.</li>
+<li><strong>The linked app must exist when saving, in any status</strong>, so a banner can be prepared for an app that is not LIVE yet; it shows once the app is LIVE.</li>
+</ul>
+</section>
+
+<div class="pager"><a class="prev" href="15-staging.html"><small>Previous</small>15. Staging server</a><a class="next" href="../index.html"><small>Back to</small>Home / contents</a></div>
+<p class="footer">Adera backend documentation &middot; banners design 2026-11-21 &middot; <a href="../index.html">contents</a></p>
+</main>
+</div>
+<script src="app.js"></script>
+</body>
+</html>
