@@ -661,7 +661,7 @@ GET /v1/users/{alias}/profile?fields=user.contact      (demo-ride was never gran
 </section>
 
 <section><h2 id="scenario">7. Scenario: Demo Ride, start to finish</h2>
-<p><strong>Run for real:</strong> <code>python3 -I tests/e2e/permissions.py</code> plays this scenario through the gateway with a seeded user, the seeded partner key of Demo Ride and a temporary staff account (55 checks), and puts everything back. The captured requests, answers and callbacks of the whole journey are in the shareable guide <code>docs/guides/app-permissions/</code>, page "Worked example: Demo Ride". (The seeded user with a phone is Demo Kidist; the text below says Hana.)</p>
+<p><strong>Run for real:</strong> <code>python3 -I tests/e2e/permissions.py</code> plays this scenario through the gateway with a seeded user, the seeded partner key of Demo Ride and a temporary staff account (55 checks), and puts everything back. The captured requests, answers and callbacks of the whole journey are in the shareable guide <code>docs/guides/app-permissions/</code>, page "Worked example: Demo Ride". To test a super app's bridge by hand against this design, open <a href="../guides/bridge-lab/index.html">Bridge Lab</a> (a test mini app with 104 step-by-step checks and live logs). (The seeded user with a phone is Demo Kidist; the text below says Hana.)</p>
 <ol>
 <li><strong>Admin</strong> grants Demo Ride <code>user.basic</code>, <code>user.full_name</code>, <code>location.fine</code> and <code>notify.sms</code>, approves a purpose sentence for each, and the app goes LIVE.</li>
 <li><strong>Hana</strong> taps Demo Ride. No dialog appears. The super app calls <code>POST /launch</code> and opens the mini app with the launch token.</li>
