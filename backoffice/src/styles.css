@@ -10,3 +10,8 @@
 .long-text { max-width: 520px; min-width: 240px; white-space: pre-wrap; word-break: break-word; overflow-wrap: anywhere; }
 .long-text p { margin: 0 !important; }
 .ant-tabs-nav { max-width: 100%; }
+
+/* The side menu stays in place while the page scrolls: it is as tall as the window, sticks to the top, and scrolls on
+   its own if the menu is longer than the window. (Refine's sider is otherwise as tall as the page and scrolls away.) */
+.ant-layout-has-sider > .ant-layout-sider { position: sticky !important; top: 0; height: 100vh; align-self: flex-start; }
+.ant-layout-has-sider > .ant-layout-sider > .ant-layout-sider-children { overflow-y: auto; overflow-x: hidden; }
