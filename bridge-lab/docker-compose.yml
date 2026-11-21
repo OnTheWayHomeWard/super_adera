@@ -16,6 +16,8 @@ services:
       BRIDGE_LAB_ALT_URL: ${BRIDGE_LAB_ALT_URL:-http://localhost:8096}
       BRIDGE_LAB_FOREIGN_URL: ${BRIDGE_LAB_FOREIGN_URL:-http://127.0.0.1:8095}
       GRAFANA_URL: ${GRAFANA_URL:-http://127.0.0.1:3001}
+      ADERA_STORAGE_PREFIX: ${ADERA_STORAGE_PREFIX:-http://127.0.0.1:9000/adera-media/}   # image links the /lab/img proxy may fetch
+      ADERA_STORAGE_INTERNAL: ${ADERA_STORAGE_INTERNAL:-http://rustfs:9000}              # where it fetches them (Host header kept)
       DOCS_DIR: /app/docs
     volumes:
       - ./.local:/app/.local:ro          # config.json + the partner private key (written by seed.py, gitignored)

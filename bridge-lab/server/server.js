@@ -37,6 +37,11 @@ const CFG = {
   grafanaUrl: (env.GRAFANA_URL || "").replace(/\/$/, ""),
   docsUrl: env.DOCS_URL || "/docs",
   docsDir: env.DOCS_DIR || path.join(ROOT, "docs"),
+  // banner and logo images: signed RustFS links (plain http) are served through /lab/img so an https page has no mixed content.
+  // Only URLs starting with one of these prefixes are proxied; the request goes to storageInternal with the original Host header
+  // (the link's signature covers the host).
+  storagePrefixes: (env.ADERA_STORAGE_PREFIX || "http://127.0.0.1:9000/adera-media/").split(",").map((x) => x.trim()).filter(Boolean),
+  storageInternal: (env.ADERA_STORAGE_INTERNAL === undefined ? "http://rustfs:9000" : env.ADERA_STORAGE_INTERNAL).replace(/\/$/, ""),
   publicDir: path.join(ROOT, "public"),
 };
 let privateKeyPem = null;
@@ -54,6 +59,8 @@ const seenIdempotency = new Set();
 const externalIdOwner = new Map(); // externalId -> bucket key (notification.status callbacks carry no alias)
 const lastCallbackRaw = { value: null }; // for the duplicate self-test
 const SYNTHETIC = /^u_p_test_[a-z]+$/;
+const PLACEMENTS = ["HOME_HERO", "FEATURED", "PROMOTIONS", "CATALOG_TOP"];
+const CATEGORIES = ["PROMOTION", "FEATURED_APP", "ANNOUNCEMENT", "EVENT"];
 
 // ------------------------------------------------------------------------------------------------ helpers
 function send(res, status, body, headers = {}) {
@@ -131,8 +138,67 @@ function publicConfig(req) {
     publicUrl: CFG.publicUrl, altUrl: CFG.altUrl, foreignUrl: CFG.foreignUrl, entryUrl: fileConfig.entryUrl || CFG.publicUrl + "/?entry=1",
     allowedOrigins: fileConfig.allowedOrigins || [CFG.publicUrl, CFG.altUrl], callbackUrl: fileConfig.callbackUrl || null,
     capabilities: fileConfig.capabilities || [], templates: fileConfig.templates || {}, grafanaUrl: CFG.grafanaUrl, docsUrl: CFG.docsUrl,
+    storagePrefixes: CFG.storagePrefixes, placements: PLACEMENTS, categories: CATEGORIES,
     servedFrom: (req.headers["x-forwarded-proto"] || "http") + "://" + req.headers.host,
   };
+}
+
+// ------------------------------------------------------------------------------------------------ banners and the image proxy
+function storageAllowed(u) {
+  if (typeof u !== "string" || u.length > 4000) return false;
+  let parsed;
+  try { parsed = new URL(u); } catch { return false; }
+  if (parsed.username || parsed.password || !/^https?:$/.test(parsed.protocol)) return false;
+  // both the raw string and the normalised URL (no "../" escape out of the prefix)
+  return CFG.storagePrefixes.some((pre) => u.startsWith(pre) && parsed.href.startsWith(pre));
+}
+
+function proxyImage(req, res, url) {
+  const u = url.searchParams.get("u");
+  if (!storageAllowed(u)) return send(res, 403, { error: "not_allowed", message: "only URLs under " + CFG.storagePrefixes.join(", ") + " are proxied" });
+  const original = new URL(u);
+  const target = CFG.storageInternal ? new URL(original.pathname + original.search, CFG.storageInternal) : original;
+  const mod = target.protocol === "https:" ? require("node:https") : http;
+  const up = mod.request(target, { method: "GET", headers: { host: original.host }, timeout: 10000 }, (r) => {
+    const type = r.headers["content-type"] || "";
+    if (r.statusCode !== 200 || !/^image\//.test(type)) {
+      r.resume();
+      return send(res, r.statusCode === 200 ? 415 : 502, { error: "storage_answered", status: r.statusCode, contentType: type });
+    }
+    res.writeHead(200, { "Content-Type": type, "Cache-Control": "private, max-age=300", ...(r.headers["content-length"] ? { "Content-Length": r.headers["content-length"] } : {}) });
+    let size = 0;
+    r.on("data", (c) => { size += c.length; if (size > 10 * 1024 * 1024) { r.destroy(); res.destroy(); } });
+    r.pipe(res);
+  });
+  up.on("timeout", () => up.destroy(new Error("timeout")));
+  up.on("error", (e) => { if (!res.headersSent) send(res, 502, { error: "storage_unreachable", message: e.message }); });
+  up.end();
+}
+
+async function bannerList(s, url) {
+  const q = new URLSearchParams();
+  for (const k of ["placement", "category", "limit"]) {
+    const v = url.searchParams.get(k);
+    if (v) q.set(k, v); // passed as is: invalid values are a test too (the gateway answers 400)
+  }
+  const path = "/api/v1/banners" + (q.toString() ? "?" + q : "");
+  const started = Date.now();
+  let res, text;
+  try {
+    res = await fetch(CFG.base + path);
+    text = await res.text();
+  } catch (e) {
+    log.add(s ? s.key : SHARED, "banners", `GET ${path} -> network error`, { error: e.message });
+    return { status: 0, error: e.message };
+  }
+  let body;
+  try { body = JSON.parse(text); } catch { body = { _raw: text.slice(0, 300) }; }
+  const out = { status: res.status, ms: Date.now() - started, path, requestId: res.headers.get("x-request-id"), cacheControl: res.headers.get("cache-control"), body };
+  log.add(s ? s.key : SHARED, "banners", `GET ${path} -> ${res.status}${Array.isArray(body) ? " (" + body.length + " banners)" : ""}`, {
+    request: { method: "GET", path, auth: "none (public)" }, status: res.status, ms: out.ms, requestId: out.requestId,
+    response: { headers: { "cache-control": out.cacheControl }, body: Array.isArray(body) ? body.map((b) => ({ id: b.id, placement: b.placement, category: b.category, actionType: b.actionType, target: b.target, app: b.app && b.app.slug, priority: b.priority, title: b.title && b.title.en })) : body },
+  });
+  return out;
 }
 
 // ------------------------------------------------------------------------------------------------ the callback receiver
@@ -179,6 +245,8 @@ async function api(req, res, url) {
   const s = session(req, url);
 
   if (p === "/api/config" && req.method === "GET") return send(res, 200, publicConfig(req));
+
+  if (p === "/api/banners" && req.method === "GET") return send(res, 200, await bannerList(s, url));
 
   if (p === "/api/session" && req.method === "POST") {
     if (!s) return send(res, 400, { error: "need X-Lab-Session (8 to 64 of A-Z a-z 0-9 _ -)" });
@@ -344,6 +412,7 @@ async function handle(req, res) {
   const url = new URL(req.url, "http://lab.local");
   try {
     if (url.pathname === CFG.callbackPath && req.method === "POST") return await receiveCallback(req, res, url);
+    if (url.pathname === "/lab/img" && req.method === "GET") return proxyImage(req, res, url);
     if (url.pathname === "/healthz") return send(res, 200, { ok: true, appId: CFG.appId, key: partner.hasKey });
     if (url.pathname.startsWith("/api/")) return await api(req, res, url);
     if (req.method !== "GET" && req.method !== "HEAD") return send(res, 405, { error: "method_not_allowed" });
