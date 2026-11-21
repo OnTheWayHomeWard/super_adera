@@ -43,7 +43,7 @@
 <li><a href="12-backoffice-guide.html">12. Backoffice guide (staff manual)</a>
 </li>
 <li><a href="13-sample-data.html" class=current>13. Sample data (test scenarios)</a>
-<ul><li><a href="#what">1. What is seeded</a></li><li><a href="#run">2. Run and remove</a></li><li><a href="#matrix">3. Scenario matrix</a></li><li><a href="#notmade">4. Not producible</a></li><li><a href="#issues">5. Issues found</a></li><li><a href="#tests">6. Test results</a></li></ul>
+<ul><li><a href="#what">1. What is seeded</a></li><li><a href="#run">2. Run and remove</a></li><li><a href="#banners">2b. Demo banners</a></li><li><a href="#matrix">3. Scenario matrix</a></li><li><a href="#notmade">4. Not producible</a></li><li><a href="#issues">5. Issues found</a></li><li><a href="#tests">6. Test results</a></li></ul>
 </li>
 <li><a href="14-bridge-consent.html">14. Mini app bridge and consent</a>
 </li>
@@ -82,6 +82,7 @@
 <tr><td>Reviews</td><td>food 11 (10 visible, avg 3.30; all ratings 1 to 5, with and without text, English and Amharic, one edited, one hidden spam), ride 3 (avg 3.00), paused 2 (1 hidden), market none; one review deleted by its author; one hidden and restored.</td></tr>
 <tr><td>Reports</td><td>11 reports with all five reasons: food has 5 OPEN (one of them reopened), 1 REVIEWED, 1 DISMISSED; ride 1 OPEN, 1 REVIEWED; market 1 OPEN, 1 DISMISSED.</td></tr>
 <tr><td>Partner</td><td>DEV public keys for food, ride, quota, killed, paused (private halves in <code>tests/e2e/.seed-keys/</code>, gitignored), a PROD key, one revoked key, one with an expiry; allowed DEV addresses; 13 templates (<code>seed-*</code>) including one inactive, two expired, one not yet valid; 46 notifications in states SENT, SUPPRESSED, UNREACHABLE, EXPIRED on SMS, EMAIL and IN_APP; 6 callbacks (3 delivered, 2 pending with retries, 1 failed); 15 inbox items (5 read).</td></tr>
+<tr><td>Banners (6)</td><td>Titles start with "Demo: ". One LIVE banner per placement (Demo Ride hero, Food featured card, wallet announcement, community-day event), one SCHEDULED (starts 30 days after seeding) and one ENDED (ended 7 days before seeding), each with a picture in three sizes. List in section 2b.</td></tr>
 <tr><td>Staff</td><td><code>demo-viewer-1/2</code>, <code>demo-admin-1</code> and <code>demo-admin-2</code> (deactivated) at <code>adera.local</code>: Kratos identities that never sign in. The audit log has actions from four temporary staff accounts (SUPER_ADMIN and three ADMIN).</td></tr>
 </tbody></table></div>
 </section>
@@ -124,6 +125,21 @@ python3 -I tests/e2e/seed_scenarios.py --no-outage  # skip the Mailpit stop (see
 <p>The users were wiped and re-created on 2026-10-26 when end-user sign-in changed from one-time codes to passwords; their ids are therefore new (the pseudonymous app ids, reviews, reports, inbox rows and counters were re-created for them). Verification codes for these addresses are readable at <code>GET :8085/dev/messages?to=&lt;address&gt;</code> in dev. Dashboard staff are unchanged (<code>demo-*@adera.local</code>, emailed code + authenticator).</p>
 </section>
 
+<section><h2 id="banners">2b. Demo banners</h2>
+<p>Made by the <code>banners</code> stage through the staff API (create, image upload, publish) with a temporary ADMIN; times are relative to the first run, later runs leave existing banners alone (matched by title). <code>--check</code> verifies that the public list (no sign-in) shows exactly the four live ones and that the backoffice states are 4 Live, 1 Scheduled, 1 Ended. <code>--only banners</code> runs this stage alone. Seen in the backoffice under <strong>Banners</strong>, and by the super app with <code>GET /api/v1/banners</code>.</p>
+<div class="table-wrap"><table>
+<thead><tr><th>Title (English)</th><th>Placement</th><th>Category</th><th>Linked app</th><th>On tap</th><th>Times</th><th>State</th></tr></thead>
+<tbody>
+<tr><td>Demo: Your first ride is on us</td><td><code>HOME_HERO</code></td><td><code>FEATURED_APP</code></td><td>demo-ride</td><td><code>MINI_APP</code> <code>/promo/first-ride</code></td><td>from 1 day before seeding, no end</td><td>Live (priority 100)</td></tr>
+<tr><td>Demo: Lunch in 30 minutes</td><td><code>FEATURED</code></td><td><code>PROMOTION</code></td><td>demo-food</td><td><code>MINI_APP</code>, the app's home</td><td>from 1 day before, no end</td><td>Live (80)</td></tr>
+<tr><td>Demo: Top up your wallet</td><td><code>PROMOTIONS</code></td><td><code>ANNOUNCEMENT</code></td><td>-</td><td><code>INTERNAL</code> <code>adera://wallet</code></td><td>from 1 day before, no end</td><td>Live (50)</td></tr>
+<tr><td>Demo: Adera community day</td><td><code>CATALOG_TOP</code></td><td><code>EVENT</code></td><td>-</td><td><code>EXTERNAL</code> <code>https://www.adera.et/events/community-day</code></td><td>from 1 day before, no end</td><td>Live (40)</td></tr>
+<tr><td>Demo: Holiday offers are coming</td><td><code>HOME_HERO</code></td><td><code>EVENT</code></td><td>-</td><td><code>NONE</code></td><td>30 to 32 days after seeding</td><td>Scheduled</td></tr>
+<tr><td>Demo: Marketplace weekend sale</td><td><code>PROMOTIONS</code></td><td><code>PROMOTION</code></td><td>demo-market</td><td><code>MINI_APP</code> <code>/sale/weekend</code></td><td>14 to 7 days before seeding</td><td>Ended</td></tr>
+</tbody></table></div>
+<p><code>--remove</code> deletes them through the API (so their image files go too) and their audit rows.</p>
+</section>
+
 <section><h2 id="matrix">3. Scenario matrix</h2>
 <p>"u01" and so on are the seeded users. API paths are under the gateway (<code>/api/v1</code> for users, <code>/admin/api/v1</code> for staff, <code>/v1</code> for partners).</p>
 <div class="table-wrap"><table>
@@ -137,6 +153,7 @@ python3 -I tests/e2e/seed_scenarios.py --no-outage  # skip the Mailpit stop (see
 <tr><td>Pseudonymous ids per app (some users none)</td><td>Users, detail: "Apps this user opened"</td><td><code>POST /internal/aliases</code> on user-service (no public call exists yet)</td></tr>
 <tr><td>Mute in-app / SMS / email per app (= notification consent DENIED)</td><td>Users, detail: Mute preferences per app</td><td><code>PUT /api/v1/me/apps/{appId}/preferences</code></td></tr>
 <tr><td>Notification consent for every channel the user did not mute (needed: without it a partner send is refused)</td><td>Users, detail; App &gt; Capabilities &gt; Users column</td><td>Same switches, <code>muteX: false</code></td></tr>
+<tr><td>Banners in every state: Live (one per placement), Scheduled, Ended; a FEATURED_APP banner for Demo Ride</td><td>Banners, tabs Live / Scheduled / Ended</td><td><code>POST /admin/api/v1/banners</code>, <code>POST .../image</code>, <code>POST .../status</code></td></tr>
 <tr><td>Permission answers: granted (u01, u15), refused once (u02, demo-ride location), BLOCKED (u07, demo-ride location)</td><td>App &gt; Capabilities &gt; Users column; <code>consent_event</code> rows</td><td><code>POST .../permissions/{capability}/request</code> then <code>PUT .../answer</code></td></tr>
 <tr><td>SUSPENDED (u11), DELETED (u12), unreachable to partners</td><td>Users (status filter), detail with "Audit for this user"</td><td><code>POST /admin/api/v1/users/{id}/status</code> with a reason; partner answer <code>422 user_unreachable</code></td></tr>
 <tr><td>Reviews 1 to 5, with/without text, en/am, edited (u05), deleted (u10)</td><td>Mini apps, Reviews tab; Moderation, Reviews; rating column of the list</td><td><code>PUT/DELETE /api/v1/apps/{slug}/my-review</code></td></tr>

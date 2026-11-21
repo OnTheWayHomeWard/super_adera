@@ -10,7 +10,7 @@ tempstaff.py, partner requests signed with openssl RSA keys), so every row is va
            --only a,b    run only some stages (users, apps, ...): for debugging
 
 What it makes (all marked): users with phones +251900000001..015 and display names starting with "Demo "; staff
-demo-*@adera.local; apps demo-quota, demo-killed, demo-paused (next to the five from seed_demo.py, which are kept and extended with
+demo-*@adera.local; six banners titled "Demo: ..." (one live per placement, a scheduled one and an ended one); apps demo-quota, demo-killed, demo-paused (next to the five from seed_demo.py, which are kept and extended with
 keys, templates and allowed addresses); templates with codes seed-*; notifications with external ids seed-*; keys labelled
 "seed-scenarios". Ids are kept in tests/e2e/.seed-scenarios-state.json and partner private keys in tests/e2e/.seed-keys/
 (both gitignored). DEV only: refuses to run unless notification-service's /dev/messages answers. Nothing real is sent
@@ -146,7 +146,7 @@ def load_state():
         s = json.load(open(STATE_PATH))
     except (OSError, ValueError):
         s = {}
-    for k, v in (("users", {}), ("apps", {}), ("staff", {}), ("actors", []), ("done", []), ("keys", {}), ("templates", {}), ("avatars", []), ("aliases", {})):
+    for k, v in (("users", {}), ("apps", {}), ("staff", {}), ("actors", []), ("done", []), ("keys", {}), ("templates", {}), ("avatars", []), ("aliases", {}), ("banners", {})):
         s.setdefault(k, v)
     return s
 
@@ -201,6 +201,30 @@ NEW_APPS = [
          caps={"user.basic": "GRANTED", "user.full_name": "GRANTED", "notify.inapp": "GRANTED"}, limits={}),
 ]
 REASON_NAME = {"en": "To address you by name on your tickets", "am": "በትኬቶችዎ ላይ በስምዎ ለመጥራት"}
+
+# Banners: one live banner per placement, a FEATURED_APP one for Demo Ride, one scheduled (starts 30 days after seeding) and one
+# ended (ended 7 days before seeding). Times are relative to the first run; later runs leave existing banners alone.
+DAY = 86400
+BANNERS = [
+    dict(key="hero-ride", color=(30, 120, 200), status="PUBLISHED", start=-DAY, end=None, priority=100,
+         body=dict(title={"en": "Demo: Your first ride is on us", "am": "ማሳያ፦ የመጀመሪያ ጉዞዎ በእኛ ነው"}, subtitle={"en": "Up to 150 birr off your first Ride Hailing trip"},
+                   placement="HOME_HERO", category="FEATURED_APP", app="demo-ride", actionType="MINI_APP", target="/promo/first-ride")),
+    dict(key="featured-food", color=(15, 157, 88), status="PUBLISHED", start=-DAY, end=None, priority=80,
+         body=dict(title={"en": "Demo: Lunch in 30 minutes", "am": "ማሳያ፦ ምሳ በ30 ደቂቃ"}, subtitle={"en": "Order from restaurants near you"},
+                   placement="FEATURED", category="PROMOTION", app="demo-food", actionType="MINI_APP", target=None)),
+    dict(key="promo-wallet", color=(235, 150, 20), status="PUBLISHED", start=-DAY, end=None, priority=50,
+         body=dict(title={"en": "Demo: Top up your wallet", "am": "ማሳያ፦ ዋሌትዎን ይሙሉ"}, subtitle={"en": "Pay in every mini app with one balance"},
+                   placement="PROMOTIONS", category="ANNOUNCEMENT", app=None, actionType="INTERNAL", target="adera://wallet")),
+    dict(key="catalog-event", color=(160, 30, 60), status="PUBLISHED", start=-DAY, end=None, priority=40,
+         body=dict(title={"en": "Demo: Adera community day", "am": "ማሳያ፦ የአዴራ ማህበረሰብ ቀን"}, subtitle={"en": "Meet the teams behind your favourite mini apps"},
+                   placement="CATALOG_TOP", category="EVENT", app=None, actionType="EXTERNAL", target="https://www.adera.et/events/community-day")),
+    dict(key="scheduled-genna", color=(90, 60, 160), status="PUBLISHED", start=30 * DAY, end=32 * DAY, priority=100,
+         body=dict(title={"en": "Demo: Holiday offers are coming", "am": "ማሳያ፦ የበዓል ቅናሾች ይመጣሉ"}, subtitle={},
+                   placement="HOME_HERO", category="EVENT", app=None, actionType="NONE", target=None)),
+    dict(key="ended-market", color=(110, 110, 110), status="PUBLISHED", start=-14 * DAY, end=-7 * DAY, priority=60,
+         body=dict(title={"en": "Demo: Marketplace weekend sale", "am": "ማሳያ፦ የሳምንቱ መጨረሻ ቅናሽ"}, subtitle={"en": "Ended: kept to show the Ended tab"},
+                   placement="PROMOTIONS", category="PROMOTION", app="demo-market", actionType="MINI_APP", target="/sale/weekend")),
+]
 
 # DEV allowed server addresses: what partner.py uses (the gateway reports the caller address as seen from the compose network)
 DEV_CIDRS = ["127.0.0.1", "172.16.0.0/12", "192.168.0.0/16", "10.0.0.0/8"]
@@ -668,6 +692,65 @@ def stage_apps():
             mark(f"app:{slug}:cidrs")
             touched()
     out("  apps ready: " + ", ".join(f"{s}" for s in S["apps"]))
+
+
+def iso_at(offset_seconds):
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() + offset_seconds))
+
+
+def stage_banners():
+    out("== banners (one live per placement, a scheduled and an ended one)")
+    st, rows = adm("ADMIN", "GET", "/banners?size=100")
+    by_title = {r["title"].get("en"): r for r in rows} if st == 200 else {}
+    apps = find_apps()
+    for spec in BANNERS:
+        b = dict(spec["body"])
+        existing = by_title.get(b["title"]["en"])
+        if existing:
+            S["banners"][spec["key"]] = existing["id"]
+            save_state()
+            continue
+        slug = b.pop("app")
+        if slug:
+            b["appId"] = apps[slug]["id"]
+        if b["target"] is None:
+            b.pop("target")
+        b["startsAt"] = iso_at(spec["start"])
+        if spec["end"] is not None:
+            b["endsAt"] = iso_at(spec["end"])
+        b["priority"] = spec["priority"]
+        r = adm_ok("ADMIN", "POST", "/banners", b, what=f"create banner {spec['key']}")
+        if not r:
+            continue
+        S["banners"][spec["key"]] = r["id"]
+        save_state()
+        st, _ = upload(f"{G}/admin/api/v1/banners/{r['id']}/image", {"Authorization": "Bearer " + staff_token("ADMIN")}, "file", "banner.png", png(1600, 640, spec["color"]))
+        ok(f"banner {spec['key']}: image uploaded", st == 200, st)
+        if spec["status"] != "DRAFT":
+            adm_ok("ADMIN", "POST", f"/banners/{r['id']}/status", {"status": spec["status"]}, what=f"publish banner {spec['key']}")
+        out(f"  created banner {spec['key']}")
+
+
+def verify_banners():
+    out(" -- banners: the public list (no sign-in) and the computed states")
+    ids = S["banners"]
+    if not ids:
+        note("no demo banners in the state file: run the banners stage first")
+        return
+    st, lst = call("GET", G + "/api/v1/banners?limit=50")
+    listed = {b["id"]: b for b in lst} if st == 200 else {}
+    for key in ("hero-ride", "featured-food", "promo-wallet", "catalog-event"):
+        ok(f"public list (no sign-in) shows banner {key}", ids.get(key) in listed, st)
+    for key in ("scheduled-genna", "ended-market"):
+        ok(f"public list does not show banner {key}", ids.get(key) not in listed)
+    hero = listed.get(ids.get("hero-ride"), {})
+    ok("the Demo Ride hero banner opens demo-ride at /promo/first-ride", hero.get("actionType") == "MINI_APP" and hero.get("target") == "/promo/first-ride" and (hero.get("app") or {}).get("slug") == "demo-ride", hero.get("app"))
+    placements = {listed[ids[k]]["placement"] for k in ("hero-ride", "featured-food", "promo-wallet", "catalog-event") if ids.get(k) in listed}
+    ok("one live demo banner per placement", placements == {"HOME_HERO", "FEATURED", "PROMOTIONS", "CATALOG_TOP"}, sorted(placements))
+    states = {k: adm("VIEWER", "GET", f"/banners/{v}")[1].get("state") for k, v in ids.items()}
+    ok("backoffice states: 4 LIVE, 1 SCHEDULED, 1 ENDED", sorted(states.values()) == ["ENDED", "LIVE", "LIVE", "LIVE", "LIVE", "SCHEDULED"], states)
+    st, r = adm("VIEWER", "POST", f"/banners/{ids['hero-ride']}/status", {"status": "PAUSED"})
+    ok("viewer cannot pause a banner (403 insufficient_role)", st == 403 and r.get("error") == "insufficient_role", f"{st} {r}")
 
 
 def stage_app_history():
@@ -1263,6 +1346,8 @@ def stage_verify():
     st, a = call("GET", G + "/api/v1/apps/demo-paused", None, tok)
     ok("a PAUSED app is not in the public catalog (404)", st == 404, st)
 
+    verify_banners()
+
     out(" -- as a VIEWER")
     v_user = None
     st, lst = adm("VIEWER", "GET", "/users?size=100")
@@ -1452,10 +1537,15 @@ def stage_remove():
     # one-time-code send log rows of the fake addresses (they would count against the per-recipient hourly limits next time)
     hashes = [hashlib.sha256(x.strip().lower().encode()).hexdigest() for x in [*(u["phone"] for u in USERS if u["phone"]), *(u["email"] for u in USERS if u["email"]), *emails]]
     psql("notification", f"DELETE FROM send_log WHERE recipient_hash IN ({in_list(hashes)})")
+    # the demo banners (through the API, so their image files go too; SQL for anything the API could not remove)
+    banner_ids = [r for r in psql("registry", "SELECT id FROM banner WHERE title->>'en' LIKE 'Demo: %'").splitlines()]
+    for bid in banner_ids:
+        adm("ADMIN", "DELETE", f"/banners/{bid}")
+    psql("registry", "DELETE FROM banner WHERE title->>'en' LIKE 'Demo: %'")
     # the new apps
     psql("registry", f"DELETE FROM mini_app WHERE id IN ({in_list(new_app_ids)})")
     # audit rows: about our things, or made by our temporary staff accounts
-    targets = [*ids, *new_app_ids, *staff_ids, *S["keys"].values(), *S["templates"].values()]
+    targets = [*ids, *new_app_ids, *staff_ids, *S["keys"].values(), *S["templates"].values(), *banner_ids]
     psql("registry", f"DELETE FROM audit_event WHERE target_id IN ({in_list(targets)}) OR actor_id IN ({in_list(S['actors'])})")
     for f in (STATE_PATH,):
         if os.path.exists(f):
@@ -1473,6 +1563,7 @@ def stage_remove():
         "seed templates": psql("notification", "SELECT count(*) FROM template WHERE code LIKE 'seed-%'"),
         "seed keys": psql("registry", f"SELECT count(*) FROM partner_key WHERE label LIKE '{LABEL}%'"),
         "extra apps": psql("registry", "SELECT count(*) FROM mini_app WHERE slug IN ('demo-quota','demo-killed','demo-paused')"),
+        "demo banners": psql("registry", "SELECT count(*) FROM banner WHERE title->>'en' LIKE 'Demo: %'"),
         "demo staff": psql("registry", "SELECT count(*) FROM staff WHERE email LIKE 'demo-%'"),
         "apps (kept)": psql("registry", "SELECT count(*) FROM mini_app"),
     }
@@ -1569,6 +1660,8 @@ def main(argv):
     try:
         if want("apps"):
             stage_apps()
+        if want("banners"):
+            stage_banners()
         if want("users"):
             stage_users()
             stage_user_negatives()
