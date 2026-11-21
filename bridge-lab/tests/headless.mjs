@@ -44,7 +44,7 @@ try {
     const page = await newPage(browser, null);
     check("header says no window.adera", (await page.textContent("#who")).includes("no window.adera"));
     check("header says no launch token", (await page.textContent("#who")).includes("no launch token"));
-    check("104 tests listed on the home screen", (await page.$$("ul.tests li")).length === 104, (await page.$$("ul.tests li")).length);
+    check("116 tests listed on the home screen", (await page.$$("ul.tests li")).length === 116, (await page.$$("ul.tests li")).length);
     await page.screenshot({ path: OUT + "/1-home-light.png", fullPage: false });
     const b01 = await runStep(page, "B01", 0);
     check("B01 without a bridge -> notdev", b01.verdict === "notdev", b01);
@@ -97,6 +97,29 @@ try {
     const rows = await page.$$eval("#log-list .row", (r) => r.length);
     check("bridge log shows messages in both directions", rows > 20 && (await page.$("#log-list .d-out")) && (await page.$("#log-list .d-in")), rows);
     await page.screenshot({ path: OUT + "/4-stub-dark-log.png", fullPage: false });
+    await page.close();
+  }
+  // ---------------------------------------------------------------------------------------- banners screen (real backend, real gateway)
+  {
+    const page = await newPage(browser, null);
+    await page.evaluate(() => { location.hash = "#/banners"; });
+    await page.waitForSelector(".banner, .banners + p, main p.soft", { timeout: 15000 });
+    await page.waitForSelector(".banner", { timeout: 15000 }).catch(() => {});
+    const n = await page.$$eval(".banner", (b) => b.length);
+    check("banners screen shows the HOME_HERO banners from the real gateway", n >= 1, n);
+    await page.waitForFunction(() => [...document.querySelectorAll(".banner img[data-size]")].every((i) => i.complete), null, { timeout: 15000 }).catch(() => {});
+    const imgs = await page.$$eval("img", (l) => l.map((i) => ({ src: i.getAttribute("src"), w: i.naturalWidth })));
+    check("every image on the banners screen goes through /lab/img and loads", imgs.length > 0 && imgs.every((i) => i.src.startsWith("/lab/img?u=") && i.w > 0), imgs.map((i) => i.src.slice(0, 40) + " " + i.w));
+    await page.click(".banner");
+    await page.waitForSelector(".advice");
+    check("tapping a banner shows what the super app should do", (await page.textContent(".advice")).includes("what the super app should do"));
+    await page.click('[data-pl="CATALOG_TOP"]');
+    await page.waitForFunction(() => document.querySelector(".banner .k-EXTERNAL") || document.querySelector("main p.soft:last-child"), null, { timeout: 15000 });
+    await page.screenshot({ path: OUT + "/5-banners.png", fullPage: true });
+    for (const [id, i] of [["BN01", 0], ["BN02", 0], ["BN03", 0], ["BN04", 0], ["BN06", 0], ["BN09", 0], ["BN12", 0], ["BN12", 1]]) {
+      const v = await runStep(page, id, i, 30000);
+      check(`real banners: ${id} step ${i + 1} -> pass`, v.verdict === "pass", v.verdict !== "pass" ? v : undefined);
+    }
     await page.close();
   }
   // ---------------------------------------------------------------------------------------- 3. broken fakes

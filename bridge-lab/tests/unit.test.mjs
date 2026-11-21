@@ -10,6 +10,7 @@ const require = createRequire(import.meta.url);
 const BM = require("../public/js/bridge.js");
 const Lab = require("../public/js/lab.js");
 const LabTests = require("../public/js/tests.js");
+const BNR = require("../public/js/banners.js");
 const { installStub } = require("./stub-bridge.js");
 const { verifyLaunchToken, tamperedVariants } = require("../server/launch.js");
 const { mask } = require("../server/partner.js");
@@ -153,7 +154,7 @@ test("suggestion and report: a notdev step puts the test in 'what the super app 
   lab.saveResult("B01", { status: "notdev", note: "nothing injected" });
   const r = lab.report();
   assert.equal(r.counts.notdev, 1);
-  assert.equal(r.counts.total, 104);
+  assert.equal(r.counts.total, 116);
   assert.ok(r.superAppTodo.find((x) => x.id === "B01" && x.mustDo[0].includes("Inject window.adera")));
   const md = lab.reportMarkdown();
   assert.match(md, /## What the super app still needs to build/);
@@ -163,10 +164,10 @@ test("suggestion and report: a notdev step puts the test in 'what the super app 
 });
 
 // ------------------------------------------------------------------------------------------ the test list itself
-test("104 tests, unique ids, every auto step runnable, every test has a spec link", () => {
+test("116 tests, unique ids, every auto step runnable, every test has a spec link", () => {
   const ids = LabTests.tests.map((t) => t.id);
-  assert.equal(ids.length, 104);
-  assert.equal(new Set(ids).size, 104);
+  assert.equal(ids.length, 116);
+  assert.equal(new Set(ids).size, 116);
   for (const t of LabTests.tests) {
     assert.ok(t.spec, t.id + " spec");
     assert.ok(t.steps.length, t.id + " steps");
@@ -175,7 +176,7 @@ test("104 tests, unique ids, every auto step runnable, every test has a spec lin
 });
 test("the README lists exactly the same tests", () => {
   const readme = fs.readFileSync(new URL("../README.md", import.meta.url), "utf8");
-  const listed = [...readme.matchAll(/^\| ((?:L|B|P|S|LO|PR|N|C|D|SA|E|O)\d\d) \|/gm)].map((m) => m[1]);
+  const listed = [...readme.matchAll(/^\| ((?:L|B|P|S|LO|PR|N|C|D|SA|E|O|BN)\d\d) \|/gm)].map((m) => m[1]);
   assert.deepEqual(listed.sort(), LabTests.tests.map((t) => t.id).sort());
 });
 test("every spec link points at an existing page and anchor in docs/guides", () => {
@@ -252,4 +253,36 @@ test("log book: per key, capped, merge from anonymous to alias", () => {
   } finally {
     console.log = orig;
   }
+});
+
+// ------------------------------------------------------------------------------------------ banners
+test("banner route joins the launch url as documented (one slash, queries kept, same host)", () => {
+  assert.equal(BNR.joinRoute("https://www.zayride.com?launch=eyJ", "/promo/first-ride"), "https://www.zayride.com/promo/first-ride?launch=eyJ");
+  assert.equal(BNR.joinRoute("http://localhost:8095/?entry=1&launch=T", "/deeplink/banner?promo=1"), "http://localhost:8095/deeplink/banner?promo=1&entry=1&launch=T");
+  assert.equal(BNR.joinRoute("https://a.example/app/?launch=T", "/x"), "https://a.example/app/x?launch=T");
+  assert.equal(BNR.joinRoute("https://a.example/?launch=T", null), "https://a.example/?launch=T");
+});
+test("banner language fallback, size choice, image proxy URL", () => {
+  assert.deepEqual(BNR.pickText({ en: "Hi", am: "ሰላም" }, "am"), { text: "ሰላም", lang: "am", fallback: false });
+  assert.deepEqual(BNR.pickText({ en: "Hi" }, "om"), { text: "Hi", lang: "en", fallback: true });
+  const imgs = { small: { width: 480 }, medium: { width: 960 }, large: { width: 1600 } };
+  assert.equal(BNR.pickSize(imgs, 360, 1), "small");
+  assert.equal(BNR.pickSize(imgs, 390, 2), "medium");
+  assert.equal(BNR.pickSize(imgs, 800, 3), "large");
+  assert.equal(BNR.imgUrl("http://127.0.0.1:9000/adera-media/a.jpg?X=1&Y=2"), "/lab/img?u=http%3A%2F%2F127.0.0.1%3A9000%2Fadera-media%2Fa.jpg%3FX%3D1%26Y%3D2");
+});
+test("banner field checks and tap advice per action type", () => {
+  const images = { small: { url: "u", width: 480, height: 192 }, medium: { url: "u", width: 960, height: 384 }, large: { url: "u", width: 1600, height: 640 } };
+  const base = { id: "1", title: { en: "T" }, placement: "HOME_HERO", category: "PROMOTION", images, startsAt: "2026-01-01T00:00:00Z", endsAt: null };
+  assert.deepEqual(BNR.validate({ ...base, actionType: "MINI_APP", target: "/x", app: { slug: "bridge-lab" } }), []);
+  assert.match(BNR.validate({ ...base, actionType: "EXTERNAL", target: "http://x" }).join(), /https/);
+  assert.match(BNR.validate({ ...base, actionType: "INTERNAL", target: "https://x" }).join(), /adera:/);
+  assert.match(BNR.validate({ ...base, actionType: "NONE", target: "/x" }).join(), /NONE/);
+  assert.match(BNR.validate({ ...base, actionType: "MINI_APP", target: "//evil", app: { slug: "a" } }).join(), /route/);
+  assert.match(BNR.validate({ ...base, actionType: "NONE", target: null, endsAt: "2020-01-01T00:00:00Z" }).join(), /ended/);
+  const a = BNR.advice({ ...base, actionType: "MINI_APP", target: "/deeplink/banner", app: { slug: "bridge-lab" } }, { slug: "bridge-lab", entryUrl: "https://bridge-lab.example/?entry=1" });
+  assert.ok(a.steps.some((x) => x.includes("POST /api/v1/me/apps/bridge-lab/launch")));
+  assert.ok(a.steps.some((x) => x.includes("https://bridge-lab.example/deeplink/banner?entry=1&launch=<token>")), a.steps.join(" | "));
+  assert.match(BNR.advice({ ...base, actionType: "EXTERNAL", target: "https://x" }).steps.join(), /browser/);
+  assert.match(BNR.advice({ ...base, actionType: "NONE", target: null }).steps.join(), /not tappable/);
 });

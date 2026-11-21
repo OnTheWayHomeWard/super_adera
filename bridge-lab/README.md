@@ -228,7 +228,7 @@ Callbacks carry no shared secret: they are verified with Adera's public key from
 
 ## The full test list
 
-104 tests in 12 groups. "Human" = a person must act in the super app or the backoffice; "auto" = Bridge Lab
+116 tests in 13 groups. "Human" = a person must act in the super app or the backoffice; "auto" = Bridge Lab
 checks it; "not specified" = the docs imply super-app behaviour that has no contract yet: the test records what
 happens and says what the super app should do.
 
@@ -383,3 +383,24 @@ happens and says what the super app should do.
 | O03 | No bridge after navigating to a foreign origin | human + auto (probe page) |
 | O04 | A foreign iframe gets no bridge and no answer | auto |
 | O05 | External links open outside the mini app | not specified |
+
+### Banners (12)
+The **Banners** screen (top menu) fetches `GET /api/v1/banners` per placement and category through the Bridge Lab backend
+(logged in the Backend log), renders each banner (title and subtitle in the chosen language with English fallback, the
+image size that fits the screen, the linked app, the action type and target, field problems in red) and, on tap, shows what
+the super app should do for that action type. Images go through the backend's `/lab/img` proxy (see Configuration).
+
+| Id | Test | Kind |
+|---|---|---|
+| BN01 | The banner list loads for every placement (200, Cache-Control max-age=60) | auto + human |
+| BN02 | Every banner has the documented fields (title.en, action type and target, three image sizes) | auto |
+| BN03 | Only live banners appear, highest priority first; a paused banner disappears | auto + human (staff) |
+| BN04 | Image sizes: small 480, medium 960, large 1600 JPEGs; the app picks a fitting one | auto + human |
+| BN05 | Title in the user's language, English as fallback | auto + human |
+| BN06 | Category filter, limit and bad values (400 validation_failed) | auto |
+| BN07 | Tap a MINI_APP banner: Bridge Lab opens at its route (deep link) | human (staff) + auto |
+| BN08 | Tap an INTERNAL banner: a super-app screen opens | human |
+| BN09 | Tap an EXTERNAL banner: the page opens in a browser | auto + human |
+| BN10 | A NONE banner is not tappable | human |
+| BN11 | Banners of a paused mini app disappear | human (staff) + auto |
+| BN12 | Images load without mixed content (proxy serves real images, refuses others; links under the storage prefix) | auto |

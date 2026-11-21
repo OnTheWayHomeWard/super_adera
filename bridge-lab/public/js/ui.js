@@ -102,6 +102,7 @@
     const h = location.hash || "#/";
     if (h.indexOf("#/t/") === 0) renderTest(h.slice(4));
     else if (h === "#/report") renderReport();
+    else if (h.indexOf("#/banners") === 0) renderBanners();
     else renderHome();
     window.scrollTo(0, 0);
   }
@@ -227,6 +228,76 @@
       el.textContent = "⏳ waiting for an answer: " + Math.floor(left / 60) + ":" + String(left % 60).padStart(2, "0") + " left";
     });
   }, 1000);
+
+  // ---------------------------------------------------------------------------------------------- banners
+  const BN = window.LabBanners;
+  const bnState = { placement: "HOME_HERO", category: "", limit: "", lang: ((navigator.language || "en").slice(0, 2).match(/^(en|am|om)$/) || ["en"])[0], data: null, tapped: null };
+  async function loadBanners() {
+    const q = new URLSearchParams();
+    if (bnState.placement) q.set("placement", bnState.placement);
+    if (bnState.category) q.set("category", bnState.category);
+    if (bnState.limit) q.set("limit", bnState.limit);
+    const r = await lab.api("GET", "/api/banners?" + q);
+    bnState.data = r.data || { status: r.status, body: null };
+    bnState.tapped = null;
+    renderBanners();
+  }
+  function renderBanners() {
+    const sel = (name, opts, cur) => `<select data-bn="${name}">` + opts.map((o) => `<option value="${esc(o[0])}" ${o[0] === cur ? "selected" : ""}>${esc(o[1])}</option>`).join("") + "</select>";
+    let h = `<div class="crumbs"><a href="#/">&larr; All tests</a><span>Banners</span></div><h1>Banners</h1>
+      <p class="soft">Public list <code>GET /api/v1/banners</code>, fetched by the Bridge Lab backend (see the Backend log); images through <code>/lab/img</code>. Tap a banner to see what the super app should do. Tests: group <a href="#/t/BN01">Banners</a>.</p>
+      <div class="chips">${[["", "All"]].concat(BN.PLACEMENTS.map((p) => [p, p])).map(([v, l]) => `<button class="chip ${bnState.placement === v ? "on" : ""}" data-pl="${v}">${l}</button>`).join("")}</div>
+      <div class="btns">${sel("category", [["", "every category"]].concat(BN.CATEGORIES.map((c) => [c, c])), bnState.category)}${sel("limit", [["", "limit (10)"], ["1", "1"], ["5", "5"], ["50", "50"]], bnState.limit)}${sel("lang", [["en", "English"], ["am", "Amharic"], ["om", "Afaan Oromo"]], bnState.lang)}<button id="bn-load" class="run">Load</button></div>`;
+    const d = bnState.data;
+    if (d) {
+      h += `<p class="soft">HTTP ${esc(d.status)} &middot; ${esc(d.ms)} ms &middot; Cache-Control: ${esc(d.cacheControl || "-")} &middot; X-Request-Id ${esc(d.requestId || "-")}</p>`;
+      if (!Array.isArray(d.body)) h += `<pre>${esc(json(d.body))}</pre>`;
+      else if (!d.body.length) h += '<p class="soft">No banners showing for this filter right now.</p>';
+      else h += '<div class="banners">' + d.body.map((b, i) => {
+        const t = BN.pickText(b.title, bnState.lang);
+        const st = BN.pickText(b.subtitle, bnState.lang);
+        const size = BN.pickSize(b.images, Math.min(window.innerWidth, 800) - 24, window.devicePixelRatio);
+        const im = b.images && b.images[size];
+        const probs = BN.validate(b);
+        const appName = b.app ? BN.pickText(b.app.name, bnState.lang).text : "";
+        return `<article class="banner ${b.actionType === "NONE" ? "notap" : ""}" data-bi="${i}">
+          ${im ? `<img src="${esc(BN.imgUrl(im.url))}" alt="" width="${im.width}" height="${im.height}" data-size="${size}" loading="lazy">` : '<div class="noimg">no image</div>'}
+          <div class="bt"><b>${esc(t.text)}</b>${t.fallback ? ' <span class="pill">en fallback</span>' : ""}${st.text ? `<div>${esc(st.text)}${st.fallback ? ' <span class="pill">en fallback</span>' : ""}</div>` : ""}</div>
+          <div class="bm"><span class="pill">${esc(b.placement)}</span><span class="pill">${esc(b.category)}</span><span class="pill k-${esc(b.actionType)}">${esc(b.actionType)}</span>${b.target ? `<code>${esc(b.target)}</code>` : ""}
+          ${b.app ? `<span class="app">${b.app.logoUrl ? `<img src="${esc(BN.imgUrl(b.app.logoUrl))}" alt="" width="20" height="20">` : ""}${esc(appName)} (${esc(b.app.slug)})</span>` : ""}
+          <span class="soft">priority ${esc(b.priority)} &middot; image ${size} ${im ? im.width + "x" + im.height : ""} <span class="nat"></span></span></div>
+          ${probs.length ? `<div class="viol">${probs.map(esc).join("<br>")}</div>` : ""}
+          ${bnState.tapped === i ? adviceBlock(b) : ""}</article>`;
+      }).join("") + "</div>";
+    }
+    $("#main").innerHTML = h;
+    $("#main").querySelectorAll("[data-pl]").forEach((b) => (b.onclick = () => { bnState.placement = b.dataset.pl; loadBanners(); }));
+    $("#main").querySelectorAll("select[data-bn]").forEach((s) => (s.onchange = () => { bnState[s.dataset.bn] = s.value; if (s.dataset.bn === "lang") renderBanners(); }));
+    $("#bn-load").onclick = loadBanners;
+    $("#main").querySelectorAll("img[data-size]").forEach((img) => {
+      const show = () => { const n = img.closest(".banner").querySelector(".nat"); if (n) n.textContent = "(loaded " + img.naturalWidth + "x" + img.naturalHeight + ")"; };
+      if (img.complete && img.naturalWidth) show(); else img.addEventListener("load", show);
+      img.addEventListener("error", () => { const n = img.closest(".banner").querySelector(".nat"); if (n) n.textContent = "(image failed to load)"; });
+    });
+    $("#main").querySelectorAll(".banner").forEach((el) => (el.onclick = (ev) => {
+      if (ev.target.closest("button,a")) return;
+      const i = Number(el.dataset.bi);
+      const b = bnState.data.body[i];
+      bnState.tapped = i;
+      lab.note("banner tapped: " + b.actionType + " " + (b.target || "") + (b.app ? " app " + b.app.slug : ""));
+      renderBanners();
+    }));
+    const sim = $("#bn-sim");
+    if (sim) sim.onclick = () => { location.href = BN.joinRoute(location.origin + "/?entry=1", sim.dataset.route); };
+    if (!bnState.data) loadBanners();
+  }
+  function adviceBlock(b) {
+    const a = BN.advice(b, lab.config);
+    let h = `<div class="advice"><b>Tapped ${esc(b.actionType)}: what the super app should do</b><ol>${a.steps.map((s) => `<li>${esc(s)}</li>`).join("")}</ol>`;
+    if (a.problems.length) h += `<div class="viol">${a.problems.map(esc).join("<br>")}</div>`;
+    if (b.actionType === "MINI_APP" && b.app && b.app.slug === lab.config.slug && b.target) h += `<button id="bn-sim" data-route="${esc(b.target)}">Simulate here: open this route of Bridge Lab (no token)</button>`;
+    return h + `<p class="soft"><a href="${esc(lab.specUrl("app-banners/actions.html"))}" target="_blank" rel="noopener">app-banners/actions.html</a></p></div>`;
+  }
 
   // ---------------------------------------------------------------------------------------------- report
   function download(name, text, type) {

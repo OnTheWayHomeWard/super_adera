@@ -39,7 +39,9 @@
     signing: "partner-api/signing.html#canonical", responses: "partner-api/signing.html#responses", authErrors: "partner-api/errors.html#auth-errors",
     synthetic: "partner-api/sandbox-and-testing.html#synthetic", idempotency: "partner-api/sending-notifications.html#idempotency",
     quota: "partner-api/limits-and-quotas.html#quota-exceeded", channels: "partner-api/sending-notifications.html#channels",
-    banner: "app-banners/actions.html#mini-app", bell: "app-notifications/building-the-bell-screen.html#deeplinks",
+    banner: "app-banners/actions.html#mini-app", bannerFetch: "app-banners/fetching.html", bannerRender: "app-banners/rendering.html",
+    bannerActions: "app-banners/actions.html", bannerInternal: "app-banners/actions.html#internal", bannerExternal: "app-banners/actions.html#external",
+    bannerNone: "app-banners/actions.html#none", bell: "app-notifications/building-the-bell-screen.html#deeplinks",
     known: "app-permissions/known-issues.html", scenario: "app-permissions/scenario.html",
   };
 
@@ -133,7 +135,7 @@
   // ---------------------------------------------------------------------------------------------- the tests
   const G = {
     L: "Launch", B: "Bridge basics", P: "Permissions", S: "Settings sheet", LO: "Location", PR: "Profile (backend)",
-    N: "Notifications", C: "Callbacks", D: "Deep links", SA: "Session and app state", E: "Bridge error codes", O: "Origin rule",
+    N: "Notifications", C: "Callbacks", D: "Deep links", SA: "Session and app state", E: "Bridge error codes", O: "Origin rule", BN: "Banners",
   };
   const T = [];
   const t = (id, group, title, o) => T.push(Object.assign({ id, group, title }, o));
@@ -1195,7 +1197,7 @@
     })],
   });
   t("O02", G.O, "The bridge is present on another allowedOrigins origin", {
-    goal: "allowedOrigins lists more origins the mini app may use (here http://localhost:8096); the bridge is injected there too.", spec: SPEC.origin,
+    goal: "allowedOrigins lists more origins the mini app may use (Bridge Lab's second origin: port 8096 locally, the bridge-lab-alt host on the server); the bridge is injected there too.", spec: SPEC.origin,
     mustDo: "Inject window.adera for every origin in allowedOrigins, not only the entryUrl's.",
     steps: [H("With adb reverse, also run `adb reverse tcp:8096 tcp:8096`."), goTo("Open the probe page on the second allowed origin", (lab) => probeUrl(lab, lab.config.altUrl, "present")),
       probeResult("present", true)],
@@ -1232,6 +1234,173 @@
     mustDo: "Not specified yet: open links to other sites (target=_blank, window.open) in the system browser or an in-app browser tab, never in the mini app's WebView with the bridge.",
     steps: [A("window.open(\"https://example.com/\", \"_blank\")", "opens outside", async (lab) => { const w = lab.win.open("https://example.com/", "_blank"); return lab.V.info({ windowReturned: !!w }, "Look at what happened."); }),
       Q("Did example.com open outside Bridge Lab (system browser or a browser tab), not inside the mini app?", { yes: "pass", no: "notdev", notdevText: "External links open inside the mini app's WebView." })],
+  });
+
+  // ============================================================================================== Banners
+  const BNM = () => (typeof self !== "undefined" && self.LabBanners) || (typeof require === "function" ? require("./banners.js") : null);
+  const banners = async (lab, query) => {
+    const r = await lab.api("GET", "/api/banners" + (query ? "?" + query : ""));
+    return r.data || {};
+  };
+  const listOk = (d) => d.status === 200 && Array.isArray(d.body);
+  const allBanners = async (lab) => { const d = await banners(lab, "limit=50"); return listOk(d) ? d.body : null; };
+  t("BN01", G.BN, "The banner list loads for every placement", {
+    goal: "GET /api/v1/banners?placement=... answers a list (no sign-in) with Cache-Control public, max-age=60, for each of the four placements.", spec: SPEC.bannerFetch,
+    mustDo: "Fetch each screen's banners with GET /api/v1/banners?placement=<its placement> and show them.",
+    steps: [A("Backend: GET /api/v1/banners for HOME_HERO, FEATURED, PROMOTIONS, CATALOG_TOP", "200 lists, cache 60 s", async (lab) => {
+      const act = {};
+      let good = true;
+      for (const p of BNM().PLACEMENTS) {
+        const d = await banners(lab, "placement=" + p);
+        act[p] = d.status + " " + (Array.isArray(d.body) ? d.body.length + " banners" : JSON.stringify(d.body)) + " " + (d.cacheControl || "");
+        if (!listOk(d) || !/max-age=60/.test(d.cacheControl || "") || d.body.some((b) => b.placement !== p)) good = false;
+      }
+      return good ? lab.V.pass(act, "4 lists") : lab.V.fail(act, "200 lists of that placement, Cache-Control max-age=60");
+    }), H("Open the super app's home and catalog screens."),
+      Q("Do the super app's screens show the banners of each placement (the same ones as Bridge Lab's Banners screen)?", { yes: "pass", no: "notdev", notdevText: "The super app does not show banners." })],
+  });
+  t("BN02", G.BN, "Every banner has the documented fields", {
+    goal: "title with English, placement, category, actionType, a target that fits the action type, three image sizes.", spec: SPEC.bannerFetch,
+    steps: [A("Check every banner showing now", "no problems", async (lab) => {
+      const list = await allBanners(lab);
+      if (!list) return lab.V.fail("the list did not load", "a list");
+      if (!list.length) return lab.V.info([], "No banners are showing: ask staff to publish one.");
+      const bad = list.map((b) => ({ id: b.id, problems: BNM().validate(b) })).filter((x) => x.problems.length);
+      return bad.length ? lab.V.fail(bad, "no problems") : lab.V.pass(list.length + " banners fine", "no problems");
+    })],
+  });
+  t("BN03", G.BN, "Only live banners appear, highest priority first", {
+    goal: "The server leaves out drafts, paused, not-yet-started and ended banners and banners of apps that are not live, and sorts by priority.", spec: SPEC.bannerFetch,
+    steps: [A("Check start and end times and the order", "all within their window, priority descending", async (lab) => {
+      const list = await allBanners(lab);
+      if (!list) return lab.V.fail("the list did not load", "a list");
+      const now = Date.now();
+      const out = list.filter((b) => (b.startsAt && Date.parse(b.startsAt) > now + 60000) || (b.endsAt && Date.parse(b.endsAt) < now - 60000));
+      const byPl = {};
+      list.forEach((b) => (byPl[b.placement] = byPl[b.placement] || []).push(b.priority));
+      const unsorted = Object.entries(byPl).filter(([, ps]) => ps.some((x, i) => i > 0 && x > ps[i - 1])).map(([p]) => p);
+      const act = { banners: list.map((b) => b.placement + " p" + b.priority + " " + b.startsAt + " .. " + (b.endsAt || "open")), outsideWindow: out.map((b) => b.id), unsortedPlacements: unsorted };
+      return out.length || unsorted.length ? lab.V.fail(act, "live only, sorted") : lab.V.pass(act, "live only, sorted");
+    }), H("Staff: in the backoffice, pause one of the showing banners. Wait 60 seconds (the answer may be cached that long)."),
+      A("The paused banner is gone", "one banner fewer", async (lab, ctx) => {
+        const list = await allBanners(lab);
+        return lab.V.info(list ? list.map((b) => b.placement + " " + (b.title || {}).en) : "no list", "Compare with the list above; the paused one must be missing. Staff: publish it again afterwards.");
+      }), Q("Is the paused banner gone from the list (and from the super app after a refresh)?")],
+  });
+  t("BN04", G.BN, "Image sizes", {
+    goal: "Each banner has small (480), medium (960) and large (1600, longest side) JPEGs; the app picks the smallest that covers the slot.", spec: SPEC.bannerRender,
+    steps: [A("Load each size of the first banner through /lab/img", "JPEGs of 480, 960 and 1600 px", async (lab) => {
+      const list = await allBanners(lab);
+      if (!list || !list.length) return lab.V.info("no banners", "Publish a banner first.");
+      const b = list[0];
+      const act = {};
+      let good = true;
+      for (const [k, w] of Object.entries(BNM().SIZES)) {
+        const im = b.images && b.images[k];
+        if (!im) { act[k] = "missing"; good = false; continue; }
+        const r = await fetch(BNM().imgUrl(im.url));
+        const type = r.headers.get("content-type");
+        let dims = "";
+        if (typeof createImageBitmap === "function" && r.ok) { try { const bm = await createImageBitmap(await r.blob()); dims = bm.width + "x" + bm.height; if (Math.max(bm.width, bm.height) !== w) good = false; } catch { dims = "?"; } }
+        act[k] = r.status + " " + type + " " + dims + " (declared " + im.width + "x" + im.height + ")";
+        if (r.status !== 200 || !/jpeg/.test(type || "")) good = false;
+      }
+      return good ? lab.V.pass(act, "three JPEG sizes") : lab.V.fail(act, "three JPEG sizes of the documented width");
+    }), Q("On a phone screen, does the super app load a size that is sharp but not the largest needed (look at its network log if you can)?", { yes: "pass", no: "info", expect: "yes" })],
+  });
+  t("BN05", G.BN, "Title in the user's language, English as fallback", {
+    goal: "title and subtitle are objects with en (always) and maybe am, om; show the user's language, else English.", spec: SPEC.bannerRender,
+    steps: [A("Show which banners have Amharic / Afaan Oromo text", "recorded", async (lab) => {
+      const list = await allBanners(lab);
+      if (!list) return lab.V.fail("the list did not load", "a list");
+      return lab.V.info(list.map((b) => ({ en: (b.title || {}).en, languages: Object.keys(b.title || {}) })), "Switch the super app's language and compare.");
+    }), H("Switch the super app to Amharic (then to Afaan Oromo) and look at the banners."),
+      Q("Did each banner show its Amharic title where there is one, and English where there is none?")],
+  });
+  t("BN06", G.BN, "Category filter, limit and bad values", {
+    goal: "category= narrows the list, limit= caps it (1 to 50, default 10), a bad placement or limit is 400 validation_failed.", spec: SPEC.bannerFetch, mustDo: null,
+    steps: [A("Backend: category=FEATURED_APP, limit=1, placement=NOPE, limit=0", "only that category; at most 1; 400; 400", async (lab) => {
+      const a = await banners(lab, "category=FEATURED_APP");
+      const b = await banners(lab, "limit=1");
+      const c = await banners(lab, "placement=NOPE");
+      const d = await banners(lab, "limit=0");
+      const act = { category: listOk(a) ? a.body.map((x) => x.category) : a.status, limit1: listOk(b) ? b.body.length : b.status, badPlacement: c.status + " " + JSON.stringify(c.body), badLimit: d.status + " " + JSON.stringify(d.body) };
+      const good = listOk(a) && a.body.every((x) => x.category === "FEATURED_APP") && listOk(b) && b.body.length <= 1 && c.status === 400 && (c.body || {}).error === "validation_failed" && d.status === 400;
+      return good ? lab.V.pass(act, "as documented") : lab.V.fail(act, "as documented");
+    })],
+  });
+  t("BN07", G.BN, "Tap a MINI_APP banner: Bridge Lab opens at its route", {
+    goal: "A MINI_APP banner for Bridge Lab with route /deeplink/banner: the super app launches Bridge Lab and loads it at that route (same as D02, started from the banner list).", spec: SPEC.banner,
+    mustDo: "For a MINI_APP banner: launch the app, put the target into the path of the returned url (one slash, its query kept, same host) and load it.",
+    steps: [H("Staff: backoffice -> **Banners** -> new banner, action **Open a mini app**, app **Bridge Lab**, route `/deeplink/banner`, placement HOME_HERO, live now."),
+      A("The banner is in the public list", "a MINI_APP banner for Bridge Lab with route /deeplink/banner", async (lab) => {
+        const list = await allBanners(lab);
+        const b = (list || []).find((x) => x.actionType === "MINI_APP" && x.app && x.app.slug === lab.config.slug);
+        return b ? lab.V.pass({ id: b.id, placement: b.placement, target: b.target }, "found") : lab.V.info((list || []).map((x) => x.actionType + " " + ((x.app || {}).slug || "")), "Not found yet (cache: up to 60 s).", "found");
+      }),
+      H("In the super app, tap that banner. Bridge Lab opens; come back to this test (BN07)."), routeCheck("/deeplink/banner")],
+  });
+  t("BN08", G.BN, "Tap an INTERNAL banner: a super-app screen opens", {
+    goal: "INTERNAL target adera://... goes to the super app's own deep-link router (e.g. adera://wallet); an unknown link does nothing or opens home.", spec: SPEC.bannerInternal,
+    mustDo: "Route adera:// banner targets through the super app's deep-link router; ignore unknown links without crashing.",
+    steps: [H("In the super app, tap the INTERNAL banner (the seeded \"Demo\" one in PROMOTIONS links adera://wallet)."), Q("Did the matching super-app screen open (or, for an unknown link, nothing / home, no crash)?", { yes: "pass", no: "notdev", notdevText: "INTERNAL banners do not open a super-app screen." })],
+  });
+  t("BN09", G.BN, "Tap an EXTERNAL banner: the page opens in a browser", {
+    goal: "EXTERNAL https:// target on an approved domain opens in the system browser or an in-app browser tab, never in a mini-app WebView with the bridge.", spec: SPEC.bannerExternal,
+    mustDo: "Open EXTERNAL banner targets in the system browser or a browser tab; check https:// first; never in a mini-app WebView.",
+    steps: [A("Every EXTERNAL banner's target is https://", "all https", async (lab) => {
+      const list = (await allBanners(lab)) || [];
+      const ext = list.filter((b) => b.actionType === "EXTERNAL");
+      if (!ext.length) return lab.V.info("none", "No EXTERNAL banner is showing.");
+      const bad = ext.filter((b) => !/^https:\/\//.test(b.target || ""));
+      return bad.length ? lab.V.fail(bad.map((b) => b.target), "https only") : lab.V.pass(ext.map((b) => b.target), "https only");
+    }), H("In the super app, tap the EXTERNAL banner (the seeded one in CATALOG_TOP)."), Q("Did it open in a browser (outside the super app, or an in-app browser tab), not inside a mini app?", { yes: "pass", no: "notdev", notdevText: "EXTERNAL banners do not open in a browser." })],
+  });
+  t("BN10", G.BN, "A NONE banner is not tappable", {
+    goal: "actionType NONE: an image-only announcement; no pressed state, nothing happens.", spec: SPEC.bannerNone,
+    mustDo: "Render NONE banners without a pressed state and do nothing on tap.",
+    steps: [H("Staff: create a banner with action **None** (or use an existing one) and publish it. Tap it in the super app."), Q("Did nothing happen, with no pressed effect?")],
+  });
+  t("BN11", G.BN, "Banners of a paused mini app disappear", {
+    goal: "A banner whose linked app is not live is left out by the server; the app does not need to check.", spec: SPEC.bannerFetch,
+    steps: [A("List the linked apps of the banners showing now", "recorded", async (lab, ctx) => {
+      const list = (await allBanners(lab)) || [];
+      ctx.apps = [...new Set(list.filter((b) => b.app).map((b) => b.app.slug))];
+      return lab.V.info(ctx.apps, "Pick one of these apps for the next step.");
+    }), H("Staff: pause one of those apps (backoffice -> Apps -> status PAUSED). Wait 60 seconds."),
+      A("Its banners are gone", "no banner of a paused app", async (lab, ctx) => {
+        const list = (await allBanners(lab)) || [];
+        const now = [...new Set(list.filter((b) => b.app).map((b) => b.app.slug))];
+        const gone = (ctx.apps || []).filter((x) => !now.includes(x));
+        return gone.length ? lab.V.pass({ before: ctx.apps, now, gone }, "the paused app's banners gone") : lab.V.fail({ before: ctx.apps, now }, "one app's banners gone", "Still listed (or the app was not paused / the cache has not expired).");
+      }), H("Staff: set the app LIVE again.")],
+  });
+  t("BN12", G.BN, "Images load without mixed content", {
+    goal: "Banner images are signed plain-http storage links; on an https page Bridge Lab loads them through its own /lab/img proxy, which serves only the storage prefix.", spec: SPEC.bannerRender,
+    mustDo: "(For the super app: load banner images exactly as received; the native app is not a web page, so mixed content does not apply.)",
+    steps: [A("Proxy: one real image loads; a foreign URL is refused", "200 image/jpeg; 403", async (lab) => {
+      const list = (await allBanners(lab)) || [];
+      const b = list.find((x) => x.images && x.images.small);
+      const act = { pageProtocol: lab.win.location.protocol, storagePrefixes: lab.config.storagePrefixes };
+      let good = true;
+      if (b) {
+        const r = await fetch(BNM().imgUrl(b.images.small.url));
+        act.real = r.status + " " + r.headers.get("content-type");
+        if (r.status !== 200) good = false;
+      } else act.real = "no banner to test";
+      const f = await fetch(BNM().imgUrl("http://example.com/x.jpg"));
+      act.foreign = f.status;
+      if (f.status !== 403) good = false;
+      return good ? lab.V.pass(act, "200 and 403") : lab.V.fail(act, "200 image/jpeg and 403");
+    }), A("Every banner and logo link is under the configured storage prefix (so the proxy will serve it)", "all under ADERA_STORAGE_PREFIX", async (lab) => {
+      const list = (await allBanners(lab)) || [];
+      const urls = [];
+      list.forEach((b) => { Object.values(b.images || {}).forEach((im) => urls.push(im.url)); if (b.app && b.app.logoUrl) urls.push(b.app.logoUrl); });
+      if (!urls.length) return lab.V.info("no images", "No banners are showing.");
+      const pre = lab.config.storagePrefixes || [];
+      const outside = urls.filter((u) => !pre.some((p) => u.indexOf(p) === 0)).map((u) => u.split("?")[0]);
+      return outside.length ? lab.V.fail({ outside: outside.slice(0, 5), storagePrefixes: pre }, "all under the prefix", "Set ADERA_STORAGE_PREFIX on the container to the storage address in these links.") : lab.V.pass(urls.length + " links, all proxied", "all under the prefix");
+    })],
   });
 
   return { tests: T, groups: Object.values(G), SPEC };

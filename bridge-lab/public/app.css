@@ -102,3 +102,17 @@ table.rt td { border-top: 1px solid var(--line); padding: 5px 4px; vertical-alig
 .links a { margin-right: 6px; }
 #toast { position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%); background: var(--fg); color: var(--bg); padding: 8px 14px; border-radius: 16px; z-index: 20; }
 @media (min-width: 900px) { :root { --drawer: 38vh; } }
+
+/* banners screen */
+.banners { display: grid; gap: 12px; }
+.banner { border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: var(--card); cursor: pointer; }
+.banner.notap { cursor: default; }
+.banner > img { display: block; width: 100%; height: auto; background: var(--code); }
+.banner .noimg { padding: 24px; text-align: center; color: var(--soft); }
+.banner .bt { padding: 8px 10px 0; }
+.banner .bm { padding: 6px 10px 10px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 12px; }
+.banner .app img { vertical-align: middle; border-radius: 4px; margin-right: 4px; }
+.banner .viol, .banner .advice { margin: 0 10px 10px; }
+.advice { padding: 8px; border-radius: 8px; border: 1px dashed var(--accent); background: var(--bg); }
+.advice ol { padding-left: 20px; margin: 6px 0; }
+select { font: inherit; padding: 8px; border-radius: 8px; border: 1px solid var(--line); background: var(--card); color: var(--fg); min-height: 40px; }
