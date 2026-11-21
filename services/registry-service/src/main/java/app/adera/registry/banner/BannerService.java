@@ -1,5 +1,6 @@
 package app.adera.registry.banner;
 
+import java.io.IOException;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -22,6 +23,7 @@ import app.adera.registry.audit.Actor;
 import app.adera.registry.audit.AuditService;
 import app.adera.registry.common.Errors;
 import app.adera.registry.config.RegistryProperties;
+import app.adera.registry.storage.BannerImageProcessor;
 import app.adera.registry.storage.ObjectStorage;
 import jakarta.persistence.criteria.Predicate;
 import jakarta.persistence.criteria.Subquery;
@@ -31,6 +33,7 @@ import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.multipart.MultipartFile;
 
 /** Banners: staff management (every change audited) and the computed state and visibility. */
 @Service
@@ -231,6 +234,43 @@ public class BannerService {
 		}
 		audit.record(actor, "banner.reorder", "banner", null, new LinkedHashMap<>(Map.of("ids", ids.stream().map(UUID::toString).toList(), "changes", changes)));
 		return ordered;
+	}
+
+	/** Stores the picture in every size under a new image id, then deletes the previous one's files. */
+	@Transactional
+	public Banner uploadImage(UUID id, MultipartFile file, Actor actor) {
+		Banner b = get(id);
+		if (file == null || file.isEmpty()) {
+			throw new Errors.ValidationFailed("file", "a file is required (multipart field 'file')");
+		}
+		if (file.getSize() > props.banner().maxBytes()) {
+			throw new Errors.TooLarge("image larger than " + props.banner().maxBytes() + " bytes");
+		}
+		byte[] bytes;
+		try {
+			bytes = file.getBytes();
+		}
+		catch (IOException e) {
+			throw new Errors.ValidationFailed("file", "could not read the upload");
+		}
+		Map<String, BannerImageProcessor.Variant> variants = BannerImageProcessor.process(bytes, BannerImages.SIZES);
+		UUID previous = b.getImageId();
+		UUID imageId = UUID.randomUUID();
+		Map<String, Map<String, Integer>> dims = new LinkedHashMap<>();
+		variants.forEach((size, v) -> {
+			storage.put(ObjectStorage.bannerKey(id, imageId, size), v.bytes(), v.contentType());
+			dims.put(size, Map.of("width", v.width(), "height", v.height()));
+		});
+		b.setImage(imageId, dims);
+		b.touch(actorId(actor), clock.instant());
+		deleteImageFiles(id, previous);
+		Map<String, Object> meta = meta(b);
+		meta.put("imageId", imageId.toString());
+		BannerImageProcessor.Variant large = variants.get("large");
+		meta.put("width", large.width());
+		meta.put("height", large.height());
+		audit.record(actor, "banner.image", "banner", id.toString(), meta);
+		return b;
 	}
 
 	@Transactional

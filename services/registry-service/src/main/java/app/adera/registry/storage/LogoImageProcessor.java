@@ -45,7 +45,8 @@ public final class LogoImageProcessor {
 		return new Processed(out.toByteArray(), "image/png", fitted.getWidth(), fitted.getHeight());
 	}
 
-	private static BufferedImage decode(byte[] input) {
+	/** Decodes an upload by its content (PNG, JPEG, GIF or BMP), refusing oversized dimensions before reading the pixels. */
+	static BufferedImage decode(byte[] input) {
 		try (ImageInputStream stream = ImageIO.createImageInputStream(new ByteArrayInputStream(input))) {
 			Iterator<ImageReader> readers = ImageIO.getImageReaders(stream);
 			if (!readers.hasNext()) {
@@ -80,7 +81,8 @@ public final class LogoImageProcessor {
 		return new Errors.ValidationFailed("file", "not a supported image (use PNG, JPEG, GIF or BMP)");
 	}
 
-	private static BufferedImage fit(BufferedImage image, int maxPx) {
+	/** Scales down (never up) so the longest side is at most maxPx, keeping the aspect ratio and transparency. */
+	static BufferedImage fit(BufferedImage image, int maxPx) {
 		int w = image.getWidth();
 		int h = image.getHeight();
 		double scale = Math.min(1.0, (double) maxPx / Math.max(w, h));

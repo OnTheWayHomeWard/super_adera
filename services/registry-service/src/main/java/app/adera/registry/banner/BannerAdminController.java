@@ -20,7 +20,9 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RequestPart;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.multipart.MultipartFile;
 
 /** Staff management of banners. VIEWER reads; ADMIN and SUPER_ADMIN change. Every change is written to the audit log. */
 @RestController
@@ -90,6 +92,14 @@ public class BannerAdminController {
 			@PathVariable UUID bannerId, @RequestBody Map<String, Object> body, HttpServletRequest request) {
 		role.require(Role.ADMIN);
 		return service.view(service.setStatus(bannerId, body.get("status"), actor(id, role, request)));
+	}
+
+	/** Multipart field "file": PNG, JPEG, GIF or BMP, stored as JPEG in three sizes. Replaces any previous image. */
+	@PostMapping("/{bannerId}/image")
+	public BannerViews.AdminBanner uploadImage(@RequestHeader("X-Staff-Id") UUID id, @RequestHeader("X-Staff-Role") Role role,
+			@PathVariable UUID bannerId, @RequestPart(name = "file", required = false) MultipartFile file, HttpServletRequest request) {
+		role.require(Role.ADMIN);
+		return service.view(service.uploadImage(bannerId, file, actor(id, role, request)));
 	}
 
 	/** {"ids": [...]}: these banners show in this order (first = highest priority). */
