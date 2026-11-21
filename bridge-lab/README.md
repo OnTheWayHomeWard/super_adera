@@ -102,7 +102,8 @@ removed at exit; it never touches `admin@adera.local`) and the real admin API th
 8. write `.local/config.json` (app id, key id, template ids, capability labels and purposes, URLs).
 
 Every step checks first and only changes what differs, so running it again is safe.
-Options: `--entry-url URL`, `--alt-origin ORIGIN`, `--callback-url URL` (for other setups, see Staging), `--revive`
+Options (or the environment variables in brackets): `--gateway` (`ADERA_GATEWAY`), `--entry-url` (`BRIDGE_LAB_ENTRY_URL`),
+`--alt-origin` (`BRIDGE_LAB_ALT_ORIGIN`), `--callback-url` (`BRIDGE_LAB_CALLBACK_URL`), `--gateway-internal`; see Staging; `--revive`
 (a KILLED app needs a SUPER_ADMIN to come back: uses a temporary SUPER_ADMIN for that one call).
 
 ## Open it from the super app
@@ -152,7 +153,7 @@ bash bridge-lab/tests/run_unit.sh             # node:test in a node:22-alpine co
 bash bridge-lab/tests/run_headless.sh         # Playwright: the real page with no bridge, then with a stub bridge
 ```
 
-Results on 2026-11-21: **backend 30/30, unit 22/22, headless 47/47.**
+Results on 2026-11-21: **backend 30/30, unit 25/25, headless 58/58.**
 
 `e2e_backend.py` signs in as Demo Abebe (password), gets a real launch token from
 `POST /api/v1/me/apps/bridge-lab/launch`, has the Bridge Lab backend verify it (and tampered versions), makes signed
@@ -175,17 +176,42 @@ Things to know while testing by hand:
 
 ## Staging (157.245.133.250)
 
-Not deployed by this change. To run it there later:
+The server side (TLS proxy, image build, the staging compose entry) is done outside this folder. What Bridge Lab needs:
 
-* The registry refuses a plain `http://157.245.133.250:8095` as `entryUrl` (only `https://` or `http://localhost`).
-  Put Bridge Lab behind HTTPS, for example Caddy with an automatic certificate for `157-245-133-250.sslip.io`
-  (or a tunnel), and use that address: `BRIDGE_LAB_PUBLIC_URL=https://lab.157-245-133-250.sslip.io`.
-* On the server (it has the same repo and the same dev-mode `.env`): `python3 -I bridge-lab/seed.py
-  --entry-url https://lab.../?entry=1 --alt-origin https://lab2...` (the seed needs the local Kratos admin port and
-  `docker compose exec postgres`, which exist on the server), then `docker compose -f bridge-lab/docker-compose.yml up -d --build`.
-* The callback URL stays `http://bridge-lab:8095/adera/events` (same compose network; staging runs with
-  `PARTNER_ALLOW_PRIVATE_CALLBACKS=true` like the laptop).
-* `GRAFANA_URL` is only reachable through an SSH tunnel on staging; leave it empty or set it to the tunnel address.
+* **Public addresses** (https, through the proxy): `https://bridge-lab.157-245-133-250.sslip.io` -> port 8095 (entry
+  origin), `https://bridge-lab-alt.157-245-133-250.sslip.io` -> port 8096 (second allowed origin),
+  `https://bridge-lab-foreign.157-245-133-250.sslip.io` -> port 8095 (foreign origin, NOT registered).
+* **Register it ON the server** (the temporary ADMIN needs the stack's local ports and `docker compose exec postgres` in the
+  repository root; gateway default `http://127.0.0.1:9080`):
+  ```bash
+  cd /opt/adera && python3 -I bridge-lab/seed.py \
+    --entry-url "https://bridge-lab.157-245-133-250.sslip.io/?entry=1" \
+    --alt-origin https://bridge-lab-alt.157-245-133-250.sslip.io
+  ```
+  It writes `bridge-lab/.local/config.json` and `partner-dev.pem` there: mount `bridge-lab/.local` read-only at
+  `/app/.local` (and optionally `docs/guides` at `/app/docs`) and restart the container after a seed run.
+* **Container environment on the server:**
+  ```
+  ADERA_BASE=http://apisix:9080
+  ADERA_ENV=dev
+  BRIDGE_LAB_CONFIG=/app/.local/config.json
+  BRIDGE_LAB_PUBLIC_URL=https://bridge-lab.157-245-133-250.sslip.io
+  BRIDGE_LAB_ALT_URL=https://bridge-lab-alt.157-245-133-250.sslip.io
+  BRIDGE_LAB_FOREIGN_URL=https://bridge-lab-foreign.157-245-133-250.sslip.io
+  ADERA_STORAGE_PREFIX=http://157.245.133.250:9000/adera-media/
+  ADERA_STORAGE_INTERNAL=http://rustfs:9000
+  GRAFANA_URL=            (empty: Grafana is only reachable through an SSH tunnel there; or the tunnel address)
+  DOCS_DIR=/app/docs
+  ```
+  The container must be on the stack's network under the name `bridge-lab` (callback URL) and reach `apisix` and `rustfs`.
+* **Callback URL** `http://bridge-lab:8095/adera/events` is accepted: the registry allows `http://` callback URLs on a DEV
+  deployment (staging runs in dev mode), and notification-service delivers to a private address, plain http and port 8095
+  only with `PARTNER_ALLOW_PRIVATE_CALLBACKS=true` (set in the tracked `.env`). Without that flag a callback must be
+  `https://`, port 443 or 8443, a host resolving only to public addresses: then use
+  `https://bridge-lab.157-245-133-250.sslip.io/adera/events` (`--callback-url`).
+* **Images**: banner and logo links are signed plain-http RustFS links (`http://157.245.133.250:9000/...`); the https page
+  loads them through `/lab/img?u=...`, which only serves URLs under `ADERA_STORAGE_PREFIX` and fetches them from
+  `ADERA_STORAGE_INTERNAL` with the original Host header (the signature covers it). Nothing else in the front end loads plain http.
 
 ## Configuration
 
@@ -203,6 +229,8 @@ Environment of the container (all optional except what the seed writes to `.loca
 | `CALLBACK_PATH` | `/adera/events` | where callbacks are received |
 | `CALLBACK_MAX_SKEW_SECONDS` | `300` | callback timestamp tolerance |
 | `GRAFANA_URL` | empty (compose sets `http://127.0.0.1:3001`) | links per trace id |
+| `ADERA_STORAGE_PREFIX` | `http://127.0.0.1:9000/adera-media/` | comma-separated URL prefixes the `/lab/img` proxy may fetch |
+| `ADERA_STORAGE_INTERNAL` | `http://rustfs:9000` | where the proxy connects (keeps the link's Host header); empty: fetch the link itself |
 | `DOCS_URL` | `/docs` | where the spec links point (compose mounts `docs/guides` read-only there) |
 
 Callbacks carry no shared secret: they are verified with Adera's public key from the JWKS over
