@@ -1,0 +1,4 @@
+# written by seed.py: the app's config and its partner PRIVATE key
+.local/
+# test output
+tests/out/

@@ -1,0 +1,30 @@
+# Bridge Lab, the test mini app. Its OWN compose file: it joins the network of the running Adera stack
+# (adera_default) so the Adera services can call its callback URL http://bridge-lab:8095/adera/events and it can call
+# the gateway at http://apisix:9080. It never starts, stops or changes the Adera services.
+#   cd bridge-lab && python3 -I seed.py && docker compose up -d --build
+name: adera-bridge-lab
+services:
+  bridge-lab:
+    build: .
+    image: adera-bridge-lab:dev
+    restart: unless-stopped
+    environment:
+      ADERA_BASE: ${ADERA_BASE:-http://apisix:9080}
+      ADERA_ENV: ${ADERA_ENV:-dev}
+      BRIDGE_LAB_CONFIG: /app/.local/config.json
+      BRIDGE_LAB_PUBLIC_URL: ${BRIDGE_LAB_PUBLIC_URL:-http://localhost:8095}
+      BRIDGE_LAB_ALT_URL: ${BRIDGE_LAB_ALT_URL:-http://localhost:8096}
+      BRIDGE_LAB_FOREIGN_URL: ${BRIDGE_LAB_FOREIGN_URL:-http://127.0.0.1:8095}
+      GRAFANA_URL: ${GRAFANA_URL:-http://127.0.0.1:3001}
+      DOCS_DIR: /app/docs
+    volumes:
+      - ./.local:/app/.local:ro          # config.json + the partner private key (written by seed.py, gitignored)
+      - ../docs/guides:/app/docs:ro      # the spec pages, so the "what the super app must do" links work on the phone
+    ports:
+      - "${BRIDGE_LAB_BIND:-127.0.0.1}:8095:8095"
+      - "${BRIDGE_LAB_BIND:-127.0.0.1}:8096:8096"
+    networks: [adera]
+networks:
+  adera:
+    external: true
+    name: ${ADERA_NETWORK:-adera_default}
