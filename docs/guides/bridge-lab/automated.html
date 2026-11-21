@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Automated checks | Bridge Lab</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+<button id="menu-btn" type="button" aria-label="Toggle menu">Menu</button>
+<a class="brand" href="index.html">Bridge Lab</a>
+<span class="spacer"></span>
+<button id="theme-btn" type="button" aria-label="Toggle light or dark theme">Theme</button>
+</header>
+<div class="layout">
+<nav class="sidebar" aria-label="Pages in this guide">
+<h4>This guide</h4>
+<ul><li><a href="index.html">Overview and contents</a></li><li><a href="running.html">Running and registering it</a></li><li><a href="opening.html">Opening it from the super app</a></li><li><a href="using.html">Running a test, verdicts and logs</a></li><li><a href="tests.html">The full test list</a></li><li><a href="automated.html" class="current">Automated checks</a></li><li><a href="known-issues.html">Known issues and decisions</a></li></ul>
+</nav>
+<main>
+<h1>Automated checks</h1>
+<p class="lead">What can be checked without the super app, how to run it, and the results of the run on 2026-11-21.</p>
+<h2 id="overview">Overview</h2>
+<p>Three suites, all in <code>bridge-lab/tests/</code>. None needs the super app; the first needs the dev stack and the Bridge Lab container.</p>
+<div class="table-wrap"><table><thead><tr><th>Suite</th><th>Command</th><th>What it proves</th><th>Result 2026-11-21</th></tr></thead><tbody><tr><td>Backend against the real stack</td><td><code>python3 -I bridge-lab/tests/e2e_backend.py</code></td><td>A real launch token (Demo Abebe signs in with his password, then <code>POST .../launch</code>) verifies against the JWKS; the url is the entryUrl plus <code>&amp;launch=</code>; a replay is flagged; seven tampered copies are refused; signed profile calls work and Adera's response signature verifies; a consent changed through the user API brings a signed <code>user.consent_changed</code> to Bridge Lab; the profile follows the consent; an in-app message ends SENT with a signed <code>notification.status</code>; forged callbacks are refused and a duplicate is recognised; synthetic users and bad signatures answer as documented; the log stream carries everything.</td><td>30 / 30</td></tr><tr><td>Front-end logic, no browser</td><td><code>bash bridge-lab/tests/run_unit.sh</code></td><td>Message validation, the verdict rules (no bridge, missing method, no answer, wrong id, throw), raw messages, results and report, storage that throws, launch-token checks with a local key (expired, other app, other env, every tampered copy), masking, the log book; the README lists exactly the app's tests; every specification link exists.</td><td>22 / 22</td></tr><tr><td>The real page in a headless browser</td><td><code>bash bridge-lab/tests/run_headless.sh</code></td><td>Without a bridge the page says Not developed with what to build and the report lists it; with a fake bridge that follows the specification the automatic checks pass; with a fake that answers with the wrong id, lacks a method or never answers, the page says Fail or Not developed as it should. Screenshots in <code>bridge-lab/tests/out/</code>.</td><td>47 / 47</td></tr></tbody></table></div>
+<div class="callout warn"><span class="label">The fake bridge</span><p>The fake <code>window.adera</code> used by the last two suites lives only in <code>bridge-lab/tests/stub-bridge.js</code>. It is never served to the phone, so on the phone a missing bridge always shows as missing.</p></div>
+<p>The backend suite changes Demo Abebe's consents for Bridge Lab only (name and in-app notifications) and leaves two Bridge Lab messages in his inbox. It touches nothing of the demo apps.</p>
+<div class="pager"><a class="prev" href="tests.html"><small>Previous</small>The full test list</a><a class="next" href="known-issues.html"><small>Next</small>Known issues and decisions</a></div>
+<p class="footer">Adera guides &middot; Bridge Lab (test mini app) &middot; written 2026-11-21; the backend checks were run against the dev stack that day</p>
+</main>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

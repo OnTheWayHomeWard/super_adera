@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Running a test, verdicts and logs | Bridge Lab</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+<button id="menu-btn" type="button" aria-label="Toggle menu">Menu</button>
+<a class="brand" href="index.html">Bridge Lab</a>
+<span class="spacer"></span>
+<button id="theme-btn" type="button" aria-label="Toggle light or dark theme">Theme</button>
+</header>
+<div class="layout">
+<nav class="sidebar" aria-label="Pages in this guide">
+<h4>This guide</h4>
+<ul><li><a href="index.html">Overview and contents</a></li><li><a href="running.html">Running and registering it</a></li><li><a href="opening.html">Opening it from the super app</a></li><li><a href="using.html" class="current">Running a test, verdicts and logs</a></li><li><a href="tests.html">The full test list</a></li><li><a href="automated.html">Automated checks</a></li><li><a href="known-issues.html">Known issues and decisions</a></li></ul>
+</nav>
+<main>
+<h1>Running a test, verdicts and logs</h1>
+<p class="lead">The three screens (list, test, report), how a verdict is reached, and how to read the two logs.</p>
+<h2 id="list">The test list</h2>
+<p>Tests grouped by area, each with its status icon (&#9675; not run, &#9989; pass, &#10060; fail, &#128679; not developed yet, &#9197;&#65039; skipped) and whether it needs a person. A progress bar and the counts are at the top; chips filter by status.</p>
+<h2 id="test">One test</h2>
+<ul>
+<li><strong>Goal</strong> and <strong>Before you start</strong>; a link to the specification section.</li>
+<li><strong>Automatic steps</strong> (&#9881;&#65039;) have a <strong>Run step</strong> button. While a step waits for a person (a dialog to answer, a sheet to close) a yellow box says what to do and a countdown shows the time left: two minutes for a dialog, five for the settings sheet, seven for the expired-prompt test. Everything else must be answered within 10 seconds.</li>
+<li><strong>Instructions</strong> (&#128100;) are for a person: "Tap <strong>Deny</strong>", "Staff: set Bridge Lab to PAUSED".</li>
+<li><strong>Questions</strong> (&#10067;) take a Yes or No ("Did a dialog appear?").</li>
+<li>At the end: Bridge Lab's suggestion, the four status buttons and a note.</li>
+</ul>
+<h2 id="verdicts">How a step's verdict is reached</h2>
+<div class="table-wrap"><table><thead><tr><th>What happened</th><th>Verdict</th><th>Shown as</th></tr></thead><tbody><tr><td>No <code>window.adera</code> on the page</td><td>not developed</td><td>The bridge is not injected, with the injection and transport rules to build.</td></tr><tr><td><code>window.adera</code> exists but the method does not</td><td>not developed</td><td>That method is not built, with its rules from the specification.</td></tr><tr><td>No answer within the limit</td><td>not developed</td><td>The super app did not answer, with the answer format to build.</td></tr><tr><td>An answer arrived but with an id no request had</td><td>fail</td><td>Id mismatch; the stray answer is shown.</td></tr><tr><td>An answer without <code>"adera": 1</code>, an unknown state or error code, a bad location shape</td><td>fail</td><td>The broken rules are listed.</td></tr><tr><td>The method threw or returned no Promise</td><td>fail</td><td></td></tr><tr><td>The expected value</td><td>pass</td><td>Expected and actual side by side.</td></tr><tr><td>A precondition is not met, or the behaviour is not specified</td><td>info</td><td>What to do to get there, or what was recorded.</td></tr></tbody></table></div>
+<p>The test's suggestion is Fail if any step failed, else Not developed if any step was not developed, else Pass when every judged step passed. The person always decides.</p>
+<h2 id="logs">The two logs</h2>
+<p>A drawer at the bottom of every screen; it opens with <strong>Logs</strong>.</p>
+<div class="table-wrap"><table><thead><tr><th>Tab</th><th>What it shows</th></tr></thead><tbody><tr><td>Bridge</td><td>Every message: page to super app (&#8593;) as posted to <code>AderaBridge</code>, super app to page (&#8595;) as passed to <code>window.adera._receive</code>, and each method call and its result at API level. Times, round trip in ms, pretty JSON, broken rules in red, <em>unsolicited</em> for answers that match no request. Filter by method, copy, download JSON.</td></tr><tr><td>Backend</td><td>A live stream from Bridge Lab's server: every launch-token check (claims, each check, why it was refused), every signed partner call (method, path, signed headers without the signature, status, body with personal data masked, <code>X-Request-Id</code>, trace id, whether Adera's response signature verified, links to the trace and the logs in Grafana) and every callback received (headers, signature result, body). The last 500 entries per user are kept, so reopening shows the history.</td></tr></tbody></table></div>
+<h2 id="report">The report</h2>
+<p>Counts per status, <strong>What the super app still needs to build</strong> (every test or step marked not developed, with the rule to build and the specification link), then every group with each test's status and note. Download as Markdown or JSON, copy the Markdown, or <strong>Upload to the Bridge Lab server</strong>: phone WebViews often cannot save files, so the upload gives two addresses to open on the laptop.</p>
+<div class="pager"><a class="prev" href="opening.html"><small>Previous</small>Opening it from the super app</a><a class="next" href="tests.html"><small>Next</small>The full test list</a></div>
+<p class="footer">Adera guides &middot; Bridge Lab (test mini app) &middot; written 2026-11-21; the backend checks were run against the dev stack that day</p>
+</main>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

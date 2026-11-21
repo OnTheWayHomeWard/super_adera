@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Opening it from the super app | Bridge Lab</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+<button id="menu-btn" type="button" aria-label="Toggle menu">Menu</button>
+<a class="brand" href="index.html">Bridge Lab</a>
+<span class="spacer"></span>
+<button id="theme-btn" type="button" aria-label="Toggle light or dark theme">Theme</button>
+</header>
+<div class="layout">
+<nav class="sidebar" aria-label="Pages in this guide">
+<h4>This guide</h4>
+<ul><li><a href="index.html">Overview and contents</a></li><li><a href="running.html">Running and registering it</a></li><li><a href="opening.html" class="current">Opening it from the super app</a></li><li><a href="using.html">Running a test, verdicts and logs</a></li><li><a href="tests.html">The full test list</a></li><li><a href="automated.html">Automated checks</a></li><li><a href="known-issues.html">Known issues and decisions</a></li></ul>
+</nav>
+<main>
+<h1>Opening it from the super app</h1>
+<p class="lead">How a phone reaches Bridge Lab on the laptop, and what the super app must do when the user opens it.</p>
+<h2 id="overview">Overview</h2>
+<p>Bridge Lab is listed in the catalog like any LIVE mini app. Opening it must go through the launch endpoint: that is the first thing the tests check.</p>
+<h2 id="steps">Steps</h2>
+<ol>
+<li>Seed and start Bridge Lab (previous page).</li>
+<li>Phone on USB or an emulator: <code>adb reverse tcp:8095 tcp:8095</code> and <code>adb reverse tcp:8096 tcp:8096</code>, plus whatever you already reverse for the gateway (usually <code>tcp:9080</code>).</li>
+<li>Sign in to the super app with a test user. On the dev stack: <code>+251900000001</code> with the password <code>kebede</code> ("Demo Abebe"). A fresh user is better for the tests that need a permission that was never asked.</li>
+<li>Open <strong>Bridge Lab</strong> from the catalog.</li>
+</ol>
+<h2 id="launch">What the super app must do on opening</h2>
+<pre><code>POST $GATEWAY/api/v1/me/apps/bridge-lab/launch
+Authorization: Bearer $TOKEN
+
+HTTP 200
+{
+  "launchToken": "eyJhbGciOiJSUzI1NiIs...",
+  "expiresInSeconds": 300,
+  "url": "http://localhost:8095/?entry=1&amp;launch=eyJhbGciOiJSUzI1NiIs...",
+  "consents": [ ... ]
+}</code></pre>
+<p>Load <code>url</code> exactly as returned in the WebView, show no dialog, inject <code>window.adera</code> for this origin. The <code>entry=1</code> part is the registered address's own query: test L02 checks that it was kept and that the token was appended with <code>&amp;</code>.</p>
+<h2 id="first-screen">What you see</h2>
+<p>The header shows the user's pseudonymous id (verified by Bridge Lab's backend against the Adera public key), whether <code>window.adera</code> was found, and the progress count. If the page was opened at a deep-link route a notice points at the deep-link tests.</p>
+<div class="callout"><span class="label">Without the bridge</span><p>The page also opens in a normal browser at <code>http://localhost:8095/?entry=1</code>. Then almost every test ends in <strong>Not developed yet</strong> with the exact thing the super app must build, which is useful in itself as a checklist.</p></div>
+<div class="pager"><a class="prev" href="running.html"><small>Previous</small>Running and registering it</a><a class="next" href="using.html"><small>Next</small>Running a test, verdicts and logs</a></div>
+<p class="footer">Adera guides &middot; Bridge Lab (test mini app) &middot; written 2026-11-21; the backend checks were run against the dev stack that day</p>
+</main>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

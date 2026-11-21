@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Known issues and decisions | Bridge Lab</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+<button id="menu-btn" type="button" aria-label="Toggle menu">Menu</button>
+<a class="brand" href="index.html">Bridge Lab</a>
+<span class="spacer"></span>
+<button id="theme-btn" type="button" aria-label="Toggle light or dark theme">Theme</button>
+</header>
+<div class="layout">
+<nav class="sidebar" aria-label="Pages in this guide">
+<h4>This guide</h4>
+<ul><li><a href="index.html">Overview and contents</a></li><li><a href="running.html">Running and registering it</a></li><li><a href="opening.html">Opening it from the super app</a></li><li><a href="using.html">Running a test, verdicts and logs</a></li><li><a href="tests.html">The full test list</a></li><li><a href="automated.html">Automated checks</a></li><li><a href="known-issues.html" class="current">Known issues and decisions</a></li></ul>
+</nav>
+<main>
+<h1>Known issues and decisions</h1>
+<p class="lead">Limits of the tool, and the choices made where the brief or the specification left room.</p>
+<h2 id="limits">Limits</h2>
+<ul>
+<li><strong>Wrapping host objects.</strong> Bridge Lab wraps <code>AderaBridge.postMessage</code> and <code>window.adera._receive</code> to log the raw messages. If the super app's objects cannot be changed (a frozen object, a native host object) the Bridge log falls back to method calls and results, and says so.</li>
+<li><strong>Raw message tests</strong> (E01, E02, the last step of E03) need the <code>AderaBridge</code> channel to be reachable from the page; without it they are Not developed.</li>
+<li><strong>Origins.</strong> The foreign origin is the same server under <code>127.0.0.1</code>; the second allowed origin is port 8096. With <code>adb reverse</code> both ports must be reversed.</li>
+<li><strong>No network test (SA05).</strong> Over USB with <code>adb reverse</code> the phone still reaches the laptop in airplane mode; use Wi-Fi to the laptop for that one.</li>
+<li><strong>Push (D06)</strong> cannot be tested on the dev stack (fake push provider).</li>
+<li><strong>Quota (N08)</strong> uses up the test user's three SMS for the day.</li>
+<li><strong>Too many requests (E07)</strong> also uses the gateway's 30 dialog requests per minute for your address: other dialog tests fail with too_many_requests for a minute afterwards.</li>
+<li>Sessions live in the Bridge Lab server's memory: restarting the container forgets the backend log and the uploaded reports (results on the phone stay).</li>
+<li>The list of sessions (<code>/api/sessions</code>) and the logs are not protected: Bridge Lab is a development tool. Personal data in the backend log is masked.</li>
+</ul>
+<h2 id="decisions">Decisions</h2>
+<ul>
+<li><strong>Not an auto-runner.</strong> Each step runs only when a person taps Run step; a test is marked by a person.</li>
+<li><strong>Time limits.</strong> 10 seconds without an answer means "the super app did not answer". Steps where a person must act wait longer (two minutes for a dialog, five for the settings sheet, seven minutes for the expired-prompt test).</li>
+<li><strong>A replayed launch token is a warning, not a refusal</strong>, so reloading the page keeps working; test L09 checks that it is noticed.</li>
+<li><strong>Partner calls always use the alias of the verified launch token.</strong> Only the DEV synthetic users and one unknown-alias probe can be chosen freely.</li>
+<li><strong>Every partner call carries a W3C <code>traceparent</code></strong>, so its trace id is known before the answer; it was checked that the trace shows up in Tempo with the gateway and notification-service spans.</li>
+<li><strong>Rejections</strong>: the specification does not say what object a rejected Promise carries. Bridge Lab accepts an Error with <code>code</code>, an object <code>{code, message}</code> or a string, and records the shape.</li>
+<li><strong>Not specified, but tested</strong>: getLocation with location services off (LO07) or unknown options (LO08), a notification's deep link (D05), what a reload does after the token expired (SA07), the Back button (SA08), language and theme (SA09), external links (O05), the web-hosted super app (B11), what happens after Disconnect (S07). Each records what happens and proposes what the super app should do.</li>
+</ul>
+<div class="pager"><a class="prev" href="automated.html"><small>Previous</small>Automated checks</a><span class="placeholder"></span></div>
+<p class="footer">Adera guides &middot; Bridge Lab (test mini app) &middot; written 2026-11-21; the backend checks were run against the dev stack that day</p>
+</main>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

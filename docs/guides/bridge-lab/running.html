@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Running and registering it | Bridge Lab</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+<button id="menu-btn" type="button" aria-label="Toggle menu">Menu</button>
+<a class="brand" href="index.html">Bridge Lab</a>
+<span class="spacer"></span>
+<button id="theme-btn" type="button" aria-label="Toggle light or dark theme">Theme</button>
+</header>
+<div class="layout">
+<nav class="sidebar" aria-label="Pages in this guide">
+<h4>This guide</h4>
+<ul><li><a href="index.html">Overview and contents</a></li><li><a href="running.html" class="current">Running and registering it</a></li><li><a href="opening.html">Opening it from the super app</a></li><li><a href="using.html">Running a test, verdicts and logs</a></li><li><a href="tests.html">The full test list</a></li><li><a href="automated.html">Automated checks</a></li><li><a href="known-issues.html">Known issues and decisions</a></li></ul>
+</nav>
+<main>
+<h1>Running and registering it</h1>
+<p class="lead">Start the Bridge Lab container next to the Adera dev stack and register the Bridge Lab mini app through the admin API.</p>
+<h2 id="overview">Overview</h2>
+<p>Everything lives in the repository folder <code>bridge-lab/</code>: a plain HTML/CSS/JavaScript front end, a small Node.js backend with no dependencies, one container, its own compose file, and a registration script. It joins the network of the running Adera stack and never starts, stops or changes the Adera services.</p>
+<h2 id="ports">Ports and addresses</h2>
+<div class="table-wrap"><table><thead><tr><th>What</th><th>Address</th><th>Why</th></tr></thead><tbody><tr><td>Bridge Lab (entry origin)</td><td><code>http://localhost:8095</code></td><td>The registered <code>entryUrl</code> is <code>http://localhost:8095/?entry=1</code>.</td></tr><tr><td>Second allowed origin</td><td><code>http://localhost:8096</code></td><td>The same server; listed in <code>allowedOrigins</code> (test O02).</td></tr><tr><td>A foreign origin</td><td><code>http://127.0.0.1:8095</code></td><td>The same server under an origin that is not registered (tests O03, O04).</td></tr><tr><td>Callback receiver</td><td><code>http://bridge-lab:8095/adera/events</code></td><td>Bridge Lab's DEV callback address, reached inside the compose network.</td></tr><tr><td>Gateway as the backend calls it</td><td><code>http://apisix:9080</code></td><td>Partner API and <code>/.well-known/jwks.json</code>.</td></tr><tr><td>Grafana</td><td><code>http://127.0.0.1:3001</code></td><td>Links per trace id in the backend log.</td></tr></tbody></table></div>
+<div class="callout warn"><span class="label">Why localhost</span><p>The registry accepts an <code>entryUrl</code> only when it is <code>https://</code> or <code>http://localhost</code> / <code>http://127.0.0.1</code>. A plain LAN address such as <code>http://192.168.1.20:8095</code> is refused, so on the laptop the phone reaches Bridge Lab through <code>adb reverse</code>.</p></div>
+<h2 id="start">Start it</h2>
+<pre><code>cd bridge-lab
+python3 -I seed.py                 # once; safe to repeat
+docker compose up -d --build       # the bridge-lab container, on the adera_default network
+docker compose logs -f bridge-lab  # its own log
+docker compose down                # stop it (only Bridge Lab)</code></pre>
+<p>After a new seed run, restart the container (<code>docker compose restart</code>) so it reads the new configuration.</p>
+<h2 id="seed">What the seed script registers</h2>
+<p><code>seed.py</code> signs in as a <strong>temporary ADMIN</strong> made for the run (a random <code>tempstaff-...@adera.local</code> account with its own authenticator, removed when the script ends; the bootstrap admin account is never used) and calls the real admin API through the gateway. Each step reads first and changes only what differs.</p>
+<div class="table-wrap"><table><thead><tr><th>Step</th><th>Admin API call</th><th>Result</th></tr></thead><tbody><tr><td>The app</td><td><code>POST /admin/api/v1/apps</code> (if missing), <code>PATCH</code> when fields differ, logo upload</td><td>Mini app <code>bridge-lab</code>, "Bridge Lab", support e-mail and logo (both needed for LIVE).</td></tr><tr><td>Where it lives</td><td><code>PATCH /admin/api/v1/apps/{id}</code></td><td><code>entryUrl</code> <code>http://localhost:8095/?entry=1</code>; <code>allowedOrigins</code> <code>http://localhost:8095</code>, <code>http://localhost:8096</code>.</td></tr><tr><td>Capabilities</td><td><code>PUT .../capabilities/{capability}</code> for every key of <code>GET /admin/api/v1/capabilities</code></td><td>All ten granted, each with a one-sentence purpose.</td></tr><tr><td>DEV environment</td><td><code>PUT .../environments/DEV</code></td><td>Allowed caller addresses (the docker ranges) and the callback URL.</td></tr><tr><td>Partner key</td><td><code>POST .../keys</code></td><td>An RSA key pair is generated in <code>bridge-lab/.local/</code>; only the public half is registered.</td></tr><tr><td>Templates</td><td><code>POST /admin/api/v1/notification/templates</code></td><td><code>bridge-lab-inapp</code> (IN_APP) and <code>bridge-lab-direct</code> (DIRECT: SMS or e-mail).</td></tr><tr><td>Status</td><td><code>POST .../status</code></td><td>LIVE. A KILLED app needs <code>--revive</code> (a temporary SUPER_ADMIN for that one call).</td></tr><tr><td>Configuration</td><td>(file)</td><td><code>bridge-lab/.local/config.json</code>: app id, key id, template ids, labels and purposes. Gitignored, with the private key.</td></tr></tbody></table></div>
+<p>Options: <code>--entry-url</code>, <code>--alt-origin</code>, <code>--callback-url</code>, <code>--gateway-internal</code>, <code>--revive</code>.</p>
+<h2 id="config">Container settings</h2>
+<div class="table-wrap"><table><thead><tr><th>Variable</th><th>Default</th><th>Meaning</th></tr></thead><tbody><tr><td><code>ADERA_BASE</code></td><td><code>http://apisix:9080</code></td><td>The gateway the backend calls.</td></tr><tr><td><code>ADERA_ENV</code></td><td><code>dev</code></td><td>The <code>env</code> claim a launch token must carry.</td></tr><tr><td><code>BRIDGE_LAB_PUBLIC_URL</code>, <code>BRIDGE_LAB_ALT_URL</code>, <code>BRIDGE_LAB_FOREIGN_URL</code></td><td>localhost:8095, localhost:8096, 127.0.0.1:8095</td><td>The three origins as the phone sees them.</td></tr><tr><td><code>GRAFANA_URL</code></td><td><code>http://127.0.0.1:3001</code></td><td>Adds trace and log links to the backend log; empty hides them.</td></tr><tr><td><code>BRIDGE_LAB_BIND</code></td><td><code>127.0.0.1</code></td><td>Host address the two ports are published on.</td></tr><tr><td><code>CALLBACK_PATH</code>, <code>CALLBACK_MAX_SKEW_SECONDS</code></td><td><code>/adera/events</code>, 300</td><td>Where callbacks arrive; how old their timestamp may be.</td></tr></tbody></table></div>
+<h2 id="staging">Staging server</h2>
+<p>Not deployed. To run it on the staging server later: put Bridge Lab behind HTTPS (the registry refuses a plain <code>http://</code> address that is not localhost), for example with a reverse proxy and an automatic certificate for a name such as <code>lab.157-245-133-250.sslip.io</code>; set <code>BRIDGE_LAB_PUBLIC_URL</code> (and the alt and foreign addresses) to the HTTPS names; run the seed script on the server with <code>--entry-url https://.../?entry=1 --alt-origin https://...</code>; start the container with the same compose file. The callback URL can stay <code>http://bridge-lab:8095/adera/events</code> because staging runs in dev mode with private callbacks allowed, like the laptop.</p>
+<div class="pager"><a class="prev" href="index.html"><small>Previous</small>Overview and contents</a><a class="next" href="opening.html"><small>Next</small>Opening it from the super app</a></div>
+<p class="footer">Adera guides &middot; Bridge Lab (test mini app) &middot; written 2026-11-21; the backend checks were run against the dev stack that day</p>
+</main>
+</div>
+<script src="app.js"></script>
+</body>
+</html>
