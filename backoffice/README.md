@@ -36,7 +36,7 @@ so the browser sees one origin and the Kratos native flows and the admin API wor
 | Command | What it does |
 |---|---|
 | `npm run build` | Type-checks (`tsc --noEmit`) and builds `dist/` (must pass with no TypeScript errors) |
-| `npm test` | 94 unit tests (Vitest, jsdom): session handling, API client error mapping, role gating, Kratos flow handling, form payloads |
+| `npm test` | 112 unit tests (Vitest, jsdom): session handling, API client error mapping, role gating, Kratos flow handling, form payloads, banner rules and status buttons |
 | `npm run smoke` | Live smoke test against the running dev stack: signs in as a real staff member and walks every section through the dashboard's own API client (see below) |
 | `bash tests/ui/run.sh` | Browser walk-through with Playwright in a throw-away container; saves screenshots to `tests/ui/out/` |
 

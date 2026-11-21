@@ -4,6 +4,7 @@ import {
   DashboardOutlined,
   AppstoreOutlined,
   FlagOutlined,
+  PictureOutlined,
   SettingOutlined,
   TeamOutlined,
   UserOutlined,
@@ -27,6 +28,8 @@ import { AppCreatePage } from "./pages/apps/AppCreate";
 import { AppListPage } from "./pages/apps/AppList";
 import { AppShowPage } from "./pages/apps/AppShow";
 import { AuditPage } from "./pages/Audit";
+import { BannerCreatePage, BannerEditPage } from "./pages/banners/BannerEdit";
+import { BannerListPage } from "./pages/banners/BannerList";
 import { DashboardPage } from "./pages/Dashboard";
 import { LoginPage } from "./pages/Login";
 import { ModerationPage } from "./pages/Moderation";
@@ -80,6 +83,7 @@ export function App() {
             resources={[
               { name: "dashboard", list: "/", meta: { label: "Dashboard", icon: icon(<DashboardOutlined />) } },
               { name: "apps", list: "/apps", create: "/apps/create", show: "/apps/:id", meta: { label: "Mini apps", icon: icon(<AppstoreOutlined />) } },
+              { name: "banners", list: "/banners", create: "/banners/create", edit: "/banners/:id", meta: { label: "Banners", icon: icon(<PictureOutlined />) } },
               { name: "moderation", list: "/moderation", meta: { label: "Moderation", icon: icon(<FlagOutlined />) } },
               { name: "users", list: "/users", show: "/users/:id", meta: { label: "Users", icon: icon(<UserOutlined />) } },
               { name: "notifications", list: "/notifications", show: "/notifications/:id", meta: { label: "Notifications", icon: icon(<BellOutlined />) } },
@@ -107,6 +111,11 @@ export function App() {
                   <Route index element={<AppListPage />} />
                   <Route path="create" element={<AppCreatePage />} />
                   <Route path=":id" element={<AppShowPage />} />
+                </Route>
+                <Route path="/banners">
+                  <Route index element={<BannerListPage />} />
+                  <Route path="create" element={<BannerCreatePage />} />
+                  <Route path=":id" element={<BannerEditPage />} />
                 </Route>
                 <Route path="/moderation" element={<ModerationPage />} />
                 <Route path="/users">

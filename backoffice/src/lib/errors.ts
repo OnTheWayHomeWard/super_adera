@@ -38,6 +38,7 @@ export const ERROR_TEXT: Record<string, string> = {
   not_found: "Not found. It may have been removed, or the id is wrong.",
   slug_taken: "An app with this slug already exists.",
   not_ready_for_live: "The app is not ready to go LIVE yet.",
+  not_ready_to_publish: "The banner cannot be published yet: upload an image first.",
   too_many_active_keys: "This environment (DEV or PROD) already has the maximum of 5 active keys. Revoke one first.",
   cannot_demote_self: "You cannot lower or disable your own account. Ask another super admin.",
   last_super_admin: "This is the last active super admin. Add or promote another one first.",

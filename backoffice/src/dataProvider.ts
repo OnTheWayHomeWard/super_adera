@@ -25,6 +25,7 @@ interface ListSpec {
 
 const LISTS: Record<string, ListSpec> = {
   apps: { path: "apps", paging: "none" },
+  banners: { path: "banners", paging: "page" },
   users: { path: "users", paging: "page", wrapped: true },
   staff: { path: "staff", paging: "none" },
   audit: { path: "audit", paging: "offset" },
@@ -36,6 +37,7 @@ const LISTS: Record<string, ListSpec> = {
 
 const ONE: Record<string, string> = {
   apps: "apps",
+  banners: "banners",
   users: "users",
   templates: "notification/templates",
   notifications: "notification/notifications",
