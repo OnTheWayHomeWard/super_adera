@@ -11,8 +11,17 @@ Idempotent: every step reads first and only changes what differs.
   7. status LIVE (a KILLED app comes back only with --revive, which uses a temporary SUPER_ADMIN)
   8. bridge-lab/.local/config.json for the container
 
-Run from anywhere:  python3 -I bridge-lab/seed.py [--entry-url URL] [--alt-origin ORIGIN] [--callback-url URL] [--revive]
-Needs the dev stack (gateway 127.0.0.1:9080, Kratos admin 127.0.0.1:4434, docker compose exec postgres) and openssl."""
+Run from anywhere:  python3 -I bridge-lab/seed.py [--gateway URL] [--entry-url URL] [--alt-origin ORIGIN] [--callback-url URL] [--revive]
+Every option can also come from the environment (ADERA_GATEWAY, BRIDGE_LAB_ENTRY_URL, BRIDGE_LAB_ALT_ORIGIN, BRIDGE_LAB_CALLBACK_URL,
+BRIDGE_LAB_GATEWAY_INTERNAL); the defaults are the laptop setup (http://localhost:8095).
+
+The temporary ADMIN is made on the machine that runs the script: it needs the stack's LOCAL ports (Kratos admin 127.0.0.1:4434,
+the dev message endpoint 127.0.0.1:8085, `docker compose exec postgres` in the repository root). So for the staging server, run
+it ON the server (gateway http://127.0.0.1:9080, the default), with the public https addresses, for example:
+  python3 -I bridge-lab/seed.py \
+    --entry-url https://bridge-lab.157-245-133-250.sslip.io/?entry=1 \
+    --alt-origin https://bridge-lab-alt.157-245-133-250.sslip.io
+The foreign origin (bridge-lab-foreign...) is deliberately NOT registered. Needs openssl."""
 import argparse, base64, hashlib, json, os, struct, subprocess, sys, uuid, zlib
 import urllib.error, urllib.request
 
@@ -22,7 +31,7 @@ sys.path.insert(0, os.path.join(ROOT, "tests", "e2e"))
 import staff  # noqa: E402
 import tempstaff  # noqa: E402
 
-G = staff.G
+G = staff.G  # may be replaced by --gateway in main()
 LOCAL = os.path.join(HERE, ".local")
 SLUG = "bridge-lab"
 KEY_LABEL = "bridge-lab seed (private half in bridge-lab/.local)"
@@ -113,12 +122,21 @@ def keypair():
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--entry-url", default="http://localhost:8095/?entry=1")
-    ap.add_argument("--alt-origin", default="http://localhost:8096")
-    ap.add_argument("--callback-url", default="http://bridge-lab:8095/adera/events")
-    ap.add_argument("--gateway-internal", default="http://apisix:9080", help="the gateway as the container reaches it")
+    e = os.environ.get
+    ap.add_argument("--gateway", default=e("ADERA_GATEWAY", staff.G), help="the gateway this script calls (default " + staff.G + ")")
+    ap.add_argument("--entry-url", default=e("BRIDGE_LAB_ENTRY_URL", "http://localhost:8095/?entry=1"), help="the app's registered entryUrl (https://, or http://localhost)")
+    ap.add_argument("--alt-origin", default=e("BRIDGE_LAB_ALT_ORIGIN", "http://localhost:8096"), help="the second allowed origin (empty: none)")
+    ap.add_argument("--callback-url", default=e("BRIDGE_LAB_CALLBACK_URL", "http://bridge-lab:8095/adera/events"), help="DEV callback URL (http is accepted on a DEV deployment)")
+    ap.add_argument("--gateway-internal", default=e("BRIDGE_LAB_GATEWAY_INTERNAL", "http://apisix:9080"), help="the gateway as the container reaches it")
     ap.add_argument("--revive", action="store_true", help="bring a KILLED Bridge Lab back to LIVE (temporary SUPER_ADMIN)")
     a = ap.parse_args()
+    global G
+    G = a.gateway.rstrip("/")
+    if G != staff.G:  # the sign-in flows of the temporary account go to the same gateway
+        staff.G, staff.K = G, G + "/kratos"
+    for url in (a.entry_url,):
+        if url and not (url.startswith("https://") or url.startswith("http://localhost") or url.startswith("http://127.0.0.1")):
+            raise SystemExit(f"{url}: the registry accepts only https:// or http://localhost / http://127.0.0.1 for the entry URL (use https)")
     entry_origin = "/".join(a.entry_url.split("/")[:3])
     origins = [entry_origin] + ([a.alt_origin] if a.alt_origin and a.alt_origin != entry_origin else [])
 
