@@ -14,7 +14,7 @@ git fetch --quiet origin
 git reset --quiet --hard "$REF"        # ignored files (htpasswd, CREDENTIALS.md) are kept
 echo "at $(git log --oneline -1)"
 
-"${COMPOSE[@]}" pull --quiet notification-service user-service registry-service backoffice edge
+"${COMPOSE[@]}" pull --quiet notification-service user-service registry-service backoffice edge bridge-lab caddy
 "${COMPOSE[@]}" up -d --remove-orphans
 # APISIX caches the containers' addresses; recreated services get new ones.
 "${COMPOSE[@]}" restart apisix
