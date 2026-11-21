@@ -49,9 +49,10 @@ bridge-lab/
   seed.py                registers "Bridge Lab" through the real admin API (temporary ADMIN), idempotent
   tests/
     e2e_backend.py       backend side against the real stack (launch token, tamper, profile, notify, callbacks)
-    unit.test.mjs        node:test tests of the front-end logic with a fake window.adera (stub lives ONLY here)
-    headless.mjs         real headless browser run (Playwright container): no bridge, then a stub bridge
-    run_headless.sh      runs headless.mjs in the Playwright image
+    unit.test.mjs        node:test tests of the front-end logic and the backend checks (run_unit.sh: node:22-alpine)
+    stub-bridge.js       a FAKE window.adera + AderaBridge for the tests ONLY (never served to the phone)
+    headless.mjs         real headless browser run (Playwright container): no bridge, a stub bridge, broken stubs
+    run_unit.sh, run_headless.sh
   .local/                gitignored: config.json and the partner private key written by seed.py
 ```
 
@@ -151,10 +152,26 @@ bash bridge-lab/tests/run_unit.sh             # node:test in a node:22-alpine co
 bash bridge-lab/tests/run_headless.sh         # Playwright: the real page with no bridge, then with a stub bridge
 ```
 
+Results on 2026-11-21: **backend 30/30, unit 22/22, headless 47/47.**
+
 `e2e_backend.py` signs in as Demo Abebe (password), gets a real launch token from
 `POST /api/v1/me/apps/bridge-lab/launch`, has the Bridge Lab backend verify it (and tampered versions), makes signed
 profile and notification calls through the backend, changes a consent through the user API and waits for the signed
-`user.consent_changed` callback to arrive at the Bridge Lab receiver.
+`user.consent_changed` callback to arrive at the Bridge Lab receiver. It also checks the signed `notification.status`
+callback, forged and duplicate callbacks, the DEV synthetic users, badly signed partner calls and the SSE log stream.
+It changes only Demo Abebe's consents for Bridge Lab (name, in-app notifications) and leaves two Bridge Lab messages in his
+inbox. The unit tests also check that this README lists exactly the app's tests and that every spec link exists.
+Screenshots of the headless run go to `tests/out/` (gitignored).
+
+Things to know while testing by hand:
+* E07 (31 requests) also uses up the gateway's 30 dialog requests per minute for your address; wait a minute after it.
+* N08 uses up the test user's 3 SMS for the day.
+* SA05 (no network) needs the phone on Wi-Fi to the laptop: over USB with `adb reverse` it still reaches the laptop.
+* SA02 (KILLED) last: `python3 -I bridge-lab/seed.py --revive` brings the app back.
+* Restarting the container forgets the backend log and uploaded reports (results on the phone stay).
+* `/api/sessions`, the logs and the report endpoints are not protected (a dev tool); personal data in the backend log is masked.
+* Uploaded report: the Report screen's "Upload" shows two laptop URLs (`/api/report?s=...&format=md|json`), because phone
+  WebViews often cannot save downloads.
 
 ## Staging (157.245.133.250)
 
