@@ -299,6 +299,36 @@ async function api(req, res, url) {
     return;
   }
 
+  // the origin probe page (served on the second allowed origin and on a foreign origin) reports what it found
+  if (p === "/api/probe" && req.method === "POST") {
+    const b = await readJson(req);
+    const rec = { which: b.which === "present" ? "present" : "absent", origin: String(b.origin || "").slice(0, 100), hasAdera: !!b.hasAdera, hasChannel: !!b.hasChannel,
+      posted: !!b.posted, answered: !!b.answered, answer: b.answer || null, frame: !!b.frame, at: new Date().toISOString() };
+    if (s) (s.probes = s.probes || []).push(rec);
+    log.add(s ? s.key : SHARED, "probe", `origin probe on ${rec.origin}${rec.frame ? " (iframe)" : ""}: window.adera ${rec.hasAdera ? "PRESENT" : "absent"}, AderaBridge ${rec.hasChannel ? "present" : "absent"}${rec.posted ? ", answer: " + (rec.answered ? "YES" : "none") : ""}`, { probe: rec });
+    return send(res, 200, { ok: true });
+  }
+  if (p === "/api/probe" && req.method === "GET") return send(res, 200, { probes: (s && s.probes) || [] });
+
+  // the page uploads its report (results + bridge log) so it can be downloaded on a laptop (WebView downloads often fail)
+  if (p === "/api/report" && req.method === "POST") {
+    if (!s) return send(res, 400, { error: "no session" });
+    const raw = await readBody(req, 2 * 1024 * 1024);
+    try { s.report = JSON.parse(raw.toString("utf8")); } catch { return send(res, 400, { error: "not JSON" }); }
+    s.report.uploadedAt = new Date().toISOString();
+    log.add(s.key, "note", "report uploaded: " + CFG.publicUrl + "/api/report?s=" + s.id + "&format=md (and format=json)", {});
+    return send(res, 200, { ok: true, md: "/api/report?s=" + s.id + "&format=md", json: "/api/report?s=" + s.id + "&format=json" });
+  }
+  if (p === "/api/report" && req.method === "GET") {
+    if (!s || !s.report) return send(res, 404, { error: "no report uploaded for this session" });
+    if (url.searchParams.get("format") === "md") return send(res, 200, s.report.markdown || "", { "Content-Type": "text/markdown; charset=utf-8", "Content-Disposition": "attachment; filename=bridge-lab-report.md" });
+    return send(res, 200, s.report, { "Content-Disposition": "attachment; filename=bridge-lab-report.json" });
+  }
+  if (p === "/api/sessions" && req.method === "GET") {
+    // a laptop can find the phone's session to download its report
+    return send(res, 200, [...sessions.values()].filter((x) => x.report || x.alias).map((x) => ({ s: x.id, key: x.key, report: !!x.report, uploadedAt: x.report && x.report.uploadedAt })));
+  }
+
   if (p === "/api/client-note" && req.method === "POST") {
     // the page may add a line to its backend log (e.g. "test P03 marked Pass") so the backend log reads as a story
     const b = await readJson(req);

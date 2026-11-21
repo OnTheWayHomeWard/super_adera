@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>Bridge Lab</title>
+<!-- the bridge monitor loads first so it sees window.adera as early as possible -->
+<script src="/js/bridge.js"></script>
+<link rel="stylesheet" href="/app.css">
+</head>
+<body>
+<header class="top">
+  <div class="row1"><a class="brand" href="#/">Bridge Lab</a><nav><a href="#/">Tests</a><a href="#/report">Report</a></nav></div>
+  <div id="who"></div>
+  <div id="progress"></div>
+</header>
+<div id="notice" hidden></div>
+<main id="main"><p class="soft">Starting&hellip;</p></main>
+<div id="toast" hidden></div>
+<section id="drawer" class="drawer collapsed" aria-label="Logs">
+  <div class="drawer-bar">
+    <button data-tab="bridge" class="on">Bridge <span id="bcount">0</span></button>
+    <button data-tab="backend">Backend <span id="kcount">0</span></button>
+    <button id="drawer-toggle" class="toggle">&#9650; Logs</button>
+  </div>
+  <div class="drawer-tools">
+    <select id="mfilter"></select>
+    <button id="log-copy">Copy</button><button id="log-dl">Download JSON</button><button id="log-clear" class="ghost">Clear</button>
+  </div>
+  <div id="log-list"></div>
+</section>
+<script src="/js/lab.js"></script>
+<script src="/js/tests.js"></script>
+<script src="/js/ui.js"></script>
+</body>
+</html>

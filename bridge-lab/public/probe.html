@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bridge Lab: origin probe</title>
+<style>
+  :root { color-scheme: light dark; --ok: #1a7f37; --bad: #cf222e; }
+  body { font: 16px/1.45 system-ui, sans-serif; margin: 0; padding: 16px; background: Canvas; color: CanvasText; }
+  h1 { font-size: 1.15rem; margin: 0 0 8px; }
+  .big { font-size: 1.4rem; font-weight: 700; margin: 12px 0; }
+  .ok { color: var(--ok); } .bad { color: var(--bad); }
+  pre { white-space: pre-wrap; word-break: break-word; font-size: .8rem; padding: 8px; border-radius: 6px; background: color-mix(in srgb, CanvasText 8%, Canvas); }
+  a.btn { display: inline-block; margin-top: 12px; padding: 12px 16px; border-radius: 8px; background: #285ac8; color: #fff; text-decoration: none; font-weight: 600; }
+  body.frame { padding: 6px; font-size: 13px; } body.frame .big { font-size: 1rem; margin: 2px 0; } body.frame h1, body.frame pre { display: none; }
+</style>
+</head>
+<body>
+<h1>Bridge Lab origin probe</h1>
+<div id="where"></div>
+<div class="big" id="verdict">Looking for window.adera...</div>
+<pre id="out"></pre>
+<a class="btn" id="back" hidden>Back to Bridge Lab</a>
+<script>
+(async function () {
+  const q = new URLSearchParams(location.search);
+  const expect = q.get("expect") === "present" ? "present" : "absent";
+  const frame = q.get("frame") === "1";
+  if (frame) document.body.classList.add("frame");
+  document.getElementById("where").textContent = "This page: " + location.origin + (frame ? " (inside an iframe)" : "") + ". Expected: window.adera " + (expect === "present" ? "PRESENT (an allowed origin)" : "ABSENT (not a registered origin)") + ".";
+  await new Promise((r) => setTimeout(r, 1500)); // a late injection gets a chance
+  const hasAdera = !!window.adera;
+  const ch = window.AderaBridge;
+  const hasChannel = !!(ch && typeof ch.postMessage === "function");
+  let posted = false, answered = false, answer = null;
+  if (expect === "absent" && hasChannel) {
+    // try to talk to the super app from a foreign origin: it must ignore the message (no answer)
+    const catcher = (json) => { answered = true; answer = typeof json === "string" ? json.slice(0, 300) : json; };
+    if (window.adera) { const orig = window.adera._receive; try { window.adera._receive = function (j) { catcher(j); return orig && orig.apply(this, arguments); }; } catch (e) { /* frozen */ } }
+    else window.adera = { _receive: catcher };
+    try { ch.postMessage(JSON.stringify({ adera: 1, id: "lab_probe_" + Math.random().toString(36).slice(2, 10), method: "getPermission", params: { capability: "user.basic" } })); posted = true; } catch (e) { /* refused */ }
+    await new Promise((r) => setTimeout(r, 5000));
+  }
+  const result = { which: expect, origin: location.origin, hasAdera, hasChannel, posted, answered, answer, frame };
+  const good = expect === "present" ? hasAdera : !hasAdera && !answered;
+  const v = document.getElementById("verdict");
+  v.textContent = "window.adera: " + (hasAdera ? "PRESENT" : "absent") + (posted ? (answered ? " / the super app ANSWERED a foreign message" : " / no answer to a foreign message") : "") + (good ? "  (as expected)" : "  (NOT as expected)");
+  v.className = "big " + (good ? "ok" : "bad");
+  document.getElementById("out").textContent = JSON.stringify(result, null, 2);
+  const s = q.get("s");
+  if (s) fetch("/api/probe", { method: "POST", headers: { "Content-Type": "application/json", "X-Lab-Session": s }, body: JSON.stringify(result) }).catch(() => {});
+  if (frame && parent !== window) parent.postMessage({ labProbe: result }, "*");
+  const back = q.get("back");
+  if (back && /^https?:\/\//.test(back)) { const a = document.getElementById("back"); a.href = back; a.hidden = false; }
+})();
+</script>
+</body>
+</html>
