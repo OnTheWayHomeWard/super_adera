@@ -210,7 +210,8 @@ public class AppService {
 				a.getEntryUrl(), a.getRatingAvg(), a.getRatingCount(), permissions);
 	}
 
-	private String logoUrl(MiniApp a) {
+	/** A signed link to the app's logo, or null when it has none. */
+	public String logoUrl(MiniApp a) {
 		return a.getLogoImageId() == null ? null
 				: storage.presignedGetUrl(ObjectStorage.logoKey(a.getId(), a.getLogoImageId()), Duration.ofMinutes(props.storage().presignMinutes()));
 	}

@@ -11,6 +11,11 @@ public interface ObjectStorage {
 		return "apps/" + appId + "/logo/" + imageId + ".png";
 	}
 
+	/** banners/{banner id}/{image id}/{size}.jpg (size: small, medium, large) */
+	static String bannerKey(UUID bannerId, UUID imageId, String size) {
+		return "banners/" + bannerId + "/" + imageId + "/" + size + ".jpg";
+	}
+
 	void put(String key, byte[] bytes, String contentType);
 
 	/** Best effort: a missing object is not an error. */
